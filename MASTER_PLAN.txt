@@ -22,6 +22,8 @@
 
 ## 🏗️ Architecture Principles
 
+
+
 ### Backend 
 - **Hybrid Storage**: KV for speed, D1 for complex queries
 - **RESTful API**: Clean, consistent endpoints
