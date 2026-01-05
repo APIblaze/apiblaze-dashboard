@@ -284,3 +284,7 @@ export function ProviderDetail({ poolId, clientId, providerId, onBack }: Provide
 
 
 
+
+
+
+
