@@ -208,7 +208,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Easily enforce policies allowing fine-grained authorization. For example: POST book/id/123 with &lbrace;"user":"John"&rbrace; allows John to book, but GET book/id/123 with &lbrace;"user":"Bob"&rbrace; returns "Sorry, only John or an admin can access book id 123".
+                  Easily enforce policies allowing fine-grained authorization. For example: POST book/id/123 with &lbrace;&quot;user&quot;:&quot;John&quot;&rbrace; allows John to book, but GET book/id/123 with &lbrace;&quot;user&quot;:&quot;Bob&quot;&rbrace; returns &quot;Sorry, only John or an admin can access book id 123&quot;.
                 </CardDescription>
               </CardContent>
             </Card>
