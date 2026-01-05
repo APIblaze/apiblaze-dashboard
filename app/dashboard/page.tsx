@@ -103,6 +103,7 @@ export default function DashboardPage() {
   // Show zero state if no projects
   if (hasProjects === false) {
     return (
+      <>
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
         {/* Header */}
         <header className="border-b bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm sticky top-0 z-50">
@@ -207,7 +208,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Easily enforce policies allowing fine-grained authorization. For example: POST book/id/123 with {"user":"John"} allows John to book, but GET book/id/123 with {"user":"Bob"} returns "Sorry, only John or an admin can access book id 123".
+                  Easily enforce policies allowing fine-grained authorization. For example: POST book/id/123 with &lbrace;"user":"John"&rbrace; allows John to book, but GET book/id/123 with &lbrace;"user":"Bob"&rbrace; returns "Sorry, only John or an admin can access book id 123".
                 </CardDescription>
               </CardContent>
             </Card>
@@ -221,6 +222,7 @@ export default function DashboardPage() {
           openToGitHub={typeof window !== 'undefined' && localStorage.getItem('github_app_just_installed') === 'true'}
         />
       </div>
+      </>
     );
   }
 
@@ -267,7 +269,7 @@ export default function DashboardPage() {
           ref={projectListRef}
           teamId={user?.githubHandle ? `team_${user.githubHandle}` : undefined}
           onRefresh={loadProjects}
-          onUpdateConfig={(project) => {
+          onUpdateConfig={(project: Project) => {
             setSelectedProject(project);
             setCreateDialogOpen(true);
           }}
