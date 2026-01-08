@@ -1732,7 +1732,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     projectAuthConfigId: projectConfig?.auth_config_id,
     projectUserPoolId: projectConfig?.user_pool_id, // Check for old field name
     configAuthConfigId: config.authConfigId,
-    configUserPoolId: (config as Record<string, unknown>).userPoolId as string | undefined, // Check for old field name
+    configUserPoolId: (config as unknown as Record<string, unknown>).userPoolId as string | undefined, // Check for old field name
     configEnableSocialAuth: config.enableSocialAuth,
     hasPreloadedAuthConfigs: !!preloadedAuthConfigs,
     preloadedAuthConfigsCount: preloadedAuthConfigs?.length || 0,
