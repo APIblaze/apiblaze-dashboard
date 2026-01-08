@@ -512,14 +512,38 @@ function EditModeManagementUI({
   // Also reload authConfigs when userGroupName changes to ensure we have the latest list
   // This is important for the automatic default case (e.g., "my-api-users")
   const lastUserGroupNameRef = useRef<string | undefined>(config.userGroupName);
+  // Debounce userGroupName changes to avoid calling loadAuthConfigs on every keystroke
+  const lastUserGroupNameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     const currentName = config.userGroupName?.trim();
     // Only reload if the name actually changed
     if (currentName && currentName !== lastUserGroupNameRef.current) {
       lastUserGroupNameRef.current = currentName;
-      // Refresh auth configs in background to catch newly created configs
-      loadAuthConfigs();
+      
+      // Clear any existing timeout
+      if (lastUserGroupNameTimeoutRef.current) {
+        clearTimeout(lastUserGroupNameTimeoutRef.current);
+      }
+      
+      // Debounce: Only refresh auth configs after user stops typing for 1 second
+      lastUserGroupNameTimeoutRef.current = setTimeout(() => {
+        // Only refresh if we have existing configs but might need to check for new ones
+        // Don't call if we just loaded or if we already have configs
+        if (authConfigs.length > 0) {
+          // Silent refresh in background (loadAuthConfigs will set loading state, but that's OK)
+          loadAuthConfigs();
+        }
+        lastUserGroupNameTimeoutRef.current = null;
+      }, 1000);
+      
+      return () => {
+        if (lastUserGroupNameTimeoutRef.current) {
+          clearTimeout(lastUserGroupNameTimeoutRef.current);
+          lastUserGroupNameTimeoutRef.current = null;
+        }
+      };
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.userGroupName]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
 
@@ -1761,13 +1785,21 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   const [loadingProvider, setLoadingProvider] = useState(false);
   const [authConfigSelectModalOpen, setAuthConfigSelectModalOpen] = useState(false);
 
-  // Load existing AuthConfigs when social auth is enabled
+  // Track if we've already loaded auth configs to prevent repeated API calls
+  const hasLoadedAuthConfigsRef = useRef(false);
+
+  // Load existing AuthConfigs when social auth is enabled (only once or when enabled changes)
   useEffect(() => {
-    if (config.enableSocialAuth) {
-      // Only show loading if pools haven't been loaded yet
-      loadAuthConfigs(existingAuthConfigs.length === 0);
+    if (config.enableSocialAuth && !hasLoadedAuthConfigsRef.current && existingAuthConfigs.length === 0) {
+      // Only load if we haven't loaded yet and we don't have any configs
+      loadAuthConfigs(true);
+      hasLoadedAuthConfigsRef.current = true;
+    } else if (!config.enableSocialAuth) {
+      // Reset the ref when social auth is disabled
+      hasLoadedAuthConfigsRef.current = false;
     }
-  }, [config.enableSocialAuth, existingAuthConfigs.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.enableSocialAuth]); // Removed existingAuthConfigs.length to prevent infinite loop
 
   // Track initial enableSocialAuth, enableApiKey, and bringOwnProvider to avoid updating on mount
   // These refs are used to prevent triggering update useEffects when syncing from authConfig
@@ -2425,12 +2457,13 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           ) : null}
           <DropdownMenu
             onOpenChange={(open) => {
-              // Refresh auth configs in background when dropdown opens
+              // Refresh auth configs in background when dropdown opens (only if we haven't loaded recently)
               // Show cached data immediately, refresh silently
-              if (open) {
-                // Load in background without blocking UI
-                // Only show loading if we have no cached data
-                loadAuthConfigs(existingAuthConfigs.length === 0);
+              if (open && !hasLoadedAuthConfigsRef.current && existingAuthConfigs.length === 0) {
+                // Only load if we haven't loaded yet and have no cached data
+                // Use the same ref to prevent repeated calls
+                loadAuthConfigs(false);
+                hasLoadedAuthConfigsRef.current = true;
               }
             }}
           >
