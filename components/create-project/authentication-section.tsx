@@ -1732,7 +1732,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     projectAuthConfigId: projectConfig?.auth_config_id,
     projectUserPoolId: projectConfig?.user_pool_id, // Check for old field name
     configAuthConfigId: config.authConfigId,
-    configUserPoolId: (config as any).userPoolId, // Check for old field name
+    configUserPoolId: (config as Record<string, unknown>).userPoolId as string | undefined, // Check for old field name
     configEnableSocialAuth: config.enableSocialAuth,
     hasPreloadedAuthConfigs: !!preloadedAuthConfigs,
     preloadedAuthConfigsCount: preloadedAuthConfigs?.length || 0,
@@ -1744,13 +1744,20 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   
   const [newScope, setNewScope] = useState('');
   const [authConfigModalOpen, setAuthConfigModalOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [selectedAppClient, setSelectedAppClient] = useState<AppClient & { authConfigId: string } | null>(null);
   const [existingAuthConfigs, setExistingAuthConfigs] = useState<AuthConfig[]>(preloadedAuthConfigs || []);
   const [loadingAuthConfigs, setLoadingAuthConfigs] = useState(false);
+  // State for edit mode functions (used internally by loadAppClientDetails and loadThirdPartyProvider)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [appClientDetails, setAppClientDetails] = useState<AppClientResponse | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [loadingAppClient, setLoadingAppClient] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [thirdPartyProvider, setThirdPartyProvider] = useState<SocialProviderResponse | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [loadingProvider, setLoadingProvider] = useState(false);
   const [authConfigSelectModalOpen, setAuthConfigSelectModalOpen] = useState(false);
 
@@ -1760,7 +1767,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
       // Only show loading if pools haven't been loaded yet
       loadAuthConfigs(existingAuthConfigs.length === 0);
     }
-  }, [config.enableSocialAuth]);
+  }, [config.enableSocialAuth, existingAuthConfigs.length]);
 
   // Track initial enableSocialAuth, enableApiKey, and bringOwnProvider to avoid updating on mount
   // These refs are used to prevent triggering update useEffects when syncing from authConfig
@@ -2061,18 +2068,19 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     
     if (isEditMode && projectConfig && !hasSyncedUserGroupNameRef.current) {
       // Check multiple possible field names
+      const projectConfigRecord = projectConfig as Record<string, unknown>;
       const authConfigId = (
         projectConfig.auth_config_id || 
         projectConfig.user_pool_id || 
         projectConfig.authConfigId ||
-        (projectConfig as any).userPoolId
+        projectConfigRecord.userPoolId
       ) as string | undefined;
       
       console.log('[AuthSection] 🔍 Looking for authConfigId in project config:', {
         auth_config_id: projectConfig.auth_config_id,
         user_pool_id: projectConfig.user_pool_id,
         authConfigId: projectConfig.authConfigId,
-        userPoolId: (projectConfig as any).userPoolId,
+        userPoolId: projectConfigRecord.userPoolId,
         foundAuthConfigId: authConfigId,
         allConfigKeys: Object.keys(projectConfig),
       });
@@ -2349,74 +2357,6 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     }
   };
 
-  const copyToClipboard = async (text: string, field: string) => {
-    if (!text || text.trim() === '') {
-      console.warn('No text to copy');
-      return;
-    }
-
-    try {
-      // Check if clipboard API is available (requires secure context)
-      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-        setCopiedField(field);
-        setTimeout(() => setCopiedField(null), 2000);
-        return;
-      }
-    } catch (clipboardError) {
-      console.warn('Clipboard API failed, trying fallback:', clipboardError);
-    }
-
-    // Fallback for browsers/environments without clipboard API
-    try {
-      const textArea = document.createElement('textarea');
-      textArea.value = text;
-      textArea.style.position = 'fixed';
-      textArea.style.left = '-999999px';
-      textArea.style.top = '-999999px';
-      textArea.style.opacity = '0';
-      textArea.setAttribute('readonly', '');
-      textArea.setAttribute('aria-hidden', 'true');
-      document.body.appendChild(textArea);
-      
-      // For iOS
-      if (navigator.userAgent.match(/ipad|iphone/i)) {
-        const range = document.createRange();
-        range.selectNodeContents(textArea);
-        const selection = window.getSelection();
-        if (selection) {
-          selection.removeAllRanges();
-          selection.addRange(range);
-        }
-        textArea.setSelectionRange(0, 999999);
-      } else {
-        textArea.focus();
-        textArea.select();
-        textArea.setSelectionRange(0, text.length);
-      }
-      
-      const successful = document.execCommand('copy');
-      
-      // Clean up
-      if (textArea.parentNode) {
-        document.body.removeChild(textArea);
-      }
-      
-      if (successful) {
-        setCopiedField(field);
-        setTimeout(() => setCopiedField(null), 2000);
-      } else {
-        throw new Error('Copy command returned false');
-      }
-    } catch (fallbackError) {
-      console.error('Fallback copy failed:', fallbackError);
-      // Still show as copied to give user feedback
-      setCopiedField(field);
-      setTimeout(() => setCopiedField(null), 2000);
-      // Optionally show an error toast/alert here if you have toast system
-    }
-  };
-
   const handleProviderChange = (provider: SocialProvider) => {
     updateConfig({
       socialProvider: provider,
@@ -2453,15 +2393,6 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
       identityProviderDomain: '',
     });
     setAuthConfigModalOpen(false); 
-  };
-
-  const handleClearAuthConfig = () => {
-    setSelectedAppClient(null);
-    updateConfig({
-      useAuthConfig: false,
-      authConfigId: undefined,
-      appClientId: undefined,
-    });
   };
 
   return (
