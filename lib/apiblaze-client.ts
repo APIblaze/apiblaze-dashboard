@@ -32,7 +32,7 @@ export interface CreateProxyPayload {
     client_secret: string;
     scopes?: string;
   };
-  user_pool_id?: string;
+  auth_config_id?: string;
   app_client_id?: string;
   default_app_client_id?: string;
   environments?: Record<string, { target: string; description?: string }>;
@@ -263,47 +263,47 @@ export class APIBlazeClient {
   }
 
   /**
-   * UserPool methods
+   * AuthConfig methods
    */
-  async createUserPool(
+  async createAuthConfig(
     userClaims: UserAssertionClaims,
     data: { name: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean }
   ) {
-    return this.request('/user-pools', {
+    return this.request('/auth-configs', {
       method: 'POST',
       body: JSON.stringify(data),
       userClaims,
     });
   }
 
-  async listUserPools(userClaims: UserAssertionClaims) {
-    return this.request('/user-pools', {
+  async listAuthConfigs(userClaims: UserAssertionClaims) {
+    return this.request('/auth-configs', {
       method: 'GET',
       userClaims,
     });
   }
 
-  async getUserPool(userClaims: UserAssertionClaims, poolId: string) {
-    return this.request(`/user-pools/${poolId}`, {
+  async getAuthConfig(userClaims: UserAssertionClaims, authConfigId: string) {
+    return this.request(`/auth-configs/${authConfigId}`, {
       method: 'GET',
       userClaims,
     });
   }
 
-  async updateUserPool(
+  async updateAuthConfig(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     data: { name?: string; default_app_client_id?: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean }
   ) {
-    return this.request(`/user-pools/${poolId}`, {
+    return this.request(`/auth-configs/${authConfigId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
       userClaims,
     });
   }
 
-  async deleteUserPool(userClaims: UserAssertionClaims, poolId: string) {
-    return this.request(`/user-pools/${poolId}`, {
+  async deleteAuthConfig(userClaims: UserAssertionClaims, authConfigId: string) {
+    return this.request(`/auth-configs/${authConfigId}`, {
       method: 'DELETE',
       userClaims,
     });
@@ -314,7 +314,7 @@ export class APIBlazeClient {
    */
   async createAppClient(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     data: {
       name: string;
       refreshTokenExpiry?: number;
@@ -325,15 +325,15 @@ export class APIBlazeClient {
       scopes?: string[];
     }
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients`, {
       method: 'POST',
       body: JSON.stringify(data),
       userClaims,
     });
   }
 
-  async listAppClients(userClaims: UserAssertionClaims, poolId: string) {
-    return this.request(`/user-pools/${poolId}/app-clients`, {
+  async listAppClients(userClaims: UserAssertionClaims, authConfigId: string) {
+    return this.request(`/auth-configs/${authConfigId}/app-clients`, {
       method: 'GET',
       userClaims,
     });
@@ -341,10 +341,10 @@ export class APIBlazeClient {
 
   async getAppClient(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
       method: 'GET',
       userClaims,
     });
@@ -352,7 +352,7 @@ export class APIBlazeClient {
 
   async updateAppClient(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string,
     data: {
       name?: string;
@@ -364,7 +364,7 @@ export class APIBlazeClient {
       scopes?: string[];
     }
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
       userClaims,
@@ -373,10 +373,10 @@ export class APIBlazeClient {
 
   async deleteAppClient(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
       method: 'DELETE',
       userClaims,
     });
@@ -387,7 +387,7 @@ export class APIBlazeClient {
    */
   async addProvider(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string,
     data: {
       type: string;
@@ -396,7 +396,7 @@ export class APIBlazeClient {
       domain?: string;
     }
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}/providers`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`, {
       method: 'POST',
       body: JSON.stringify(data),
       userClaims,
@@ -405,10 +405,10 @@ export class APIBlazeClient {
 
   async listProviders(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}/providers`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`, {
       method: 'GET',
       userClaims,
     });
@@ -416,11 +416,11 @@ export class APIBlazeClient {
 
   async removeProvider(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string,
     providerId: string
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}/providers/${providerId}`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}`, {
       method: 'DELETE',
       userClaims,
     });

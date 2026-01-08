@@ -119,7 +119,7 @@ export default function DashboardPage() {
             </div>
           
             <div className="flex items-center gap-3">
-              <Button variant="outline" onClick={() => router.push('/dashboard/user-pools')}>
+              <Button variant="outline" onClick={() => router.push('/dashboard/auth-configs')}>
                 <UserCog className="mr-2 h-4 w-4" />
                 User Pools
               </Button>
@@ -243,9 +243,9 @@ export default function DashboardPage() {
           </div>
           
           <div className="flex items-center gap-3">
-            <Button variant="outline" onClick={() => router.push('/dashboard/user-pools')}>
+            <Button variant="outline" onClick={() => router.push('/dashboard/auth-configs')}>
               <UserCog className="mr-2 h-4 w-4" />
-              User Pools
+              Auth Configs
             </Button>
             <Button variant="outline" onClick={() => router.push('/dashboard/llm')}>
               <Bot className="mr-2 h-4 w-4" />

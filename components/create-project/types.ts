@@ -37,11 +37,11 @@ export interface ProjectConfig {
   userGroupName: string;
   enableApiKey: boolean;
   enableSocialAuth: boolean;
-  useUserPool: boolean;
-  userPoolId?: string;
+  useAuthConfig: boolean;
+  authConfigId?: string;
   appClientId?: string;
   defaultAppClient?: string; // ID of the default app client for this project
-  // Legacy OAuth fields (deprecated, use UserPool instead)
+  // Legacy OAuth fields (deprecated, use AuthConfig instead)
   bringOwnProvider: boolean;
   socialProvider: SocialProvider;
   identityProviderDomain: string;

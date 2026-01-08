@@ -13,10 +13,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { AlertCircle, Plus, X, Users, Key, Copy, Check, Trash2, Search, ChevronDown, Star, ExternalLink, Loader2 } from 'lucide-react';
 import { ProjectConfig, SocialProvider } from './types';
 import { useState, useEffect, useRef } from 'react';
-import { UserPoolModal } from '@/components/user-pool/user-pool-modal';
+import { AuthConfigModal } from '@/components/auth-config/auth-config-modal';
 import { api } from '@/lib/api';
 import { updateProjectConfig } from '@/lib/api/projects';
-import type { AppClient, UserPool, SocialProvider as UserPoolSocialProvider } from '@/types/user-pool';
+import type { AppClient, AuthConfig, SocialProvider as AuthConfigSocialProvider } from '@/types/auth-config';
 import type { Project } from '@/types/project';
 
 // API response may have snake_case fields from the database
@@ -26,7 +26,7 @@ type AppClientResponse = AppClient & {
   signout_uris?: string[];
 };
 
-type SocialProviderResponse = UserPoolSocialProvider & {
+type SocialProviderResponse = AuthConfigSocialProvider & {
   client_id?: string;
 };
 
@@ -36,9 +36,9 @@ interface AuthenticationSectionProps {
   isEditMode?: boolean;
   project?: Project | null;
   onProjectUpdate?: (updatedProject: Project) => void; // Callback to update project in parent
-  preloadedUserPools?: UserPool[]; // Optional preloaded user pools from parent
-  preloadedAppClients?: Record<string, AppClient[]>; // Optional preloaded app clients keyed by userPoolId
-  preloadedProviders?: Record<string, UserPoolSocialProvider[]>; // Optional preloaded providers keyed by `${userPoolId}-${appClientId}`
+  preloadedAuthConfigs?: AuthConfig[]; // Optional preloaded auth configs from parent
+  preloadedAppClients?: Record<string, AppClient[]>; // Optional preloaded app clients keyed by authConfigId
+  preloadedProviders?: Record<string, AuthConfigSocialProvider[]>; // Optional preloaded providers keyed by `${authConfigId}-${appClientId}`
   loadingAuthData?: boolean; // Loading state for auth data preloading
 }
 
@@ -109,8 +109,8 @@ function EditModeManagementUI({
   updateConfig, 
   project,
   onProjectUpdate,
-  initialUserPoolId,
-  preloadedUserPools,
+  initialAuthConfigId,
+  preloadedAuthConfigs,
   preloadedAppClients,
   preloadedProviders,
   loadingAuthData
@@ -119,10 +119,10 @@ function EditModeManagementUI({
   updateConfig: (updates: Partial<ProjectConfig>) => void; 
   project?: Project | null;
   onProjectUpdate?: (updatedProject: Project) => void;
-  initialUserPoolId?: string;
-  preloadedUserPools?: UserPool[];
+  initialAuthConfigId?: string;
+  preloadedAuthConfigs?: AuthConfig[];
   preloadedAppClients?: Record<string, AppClient[]>;
-  preloadedProviders?: Record<string, UserPoolSocialProvider[]>;
+  preloadedProviders?: Record<string, AuthConfigSocialProvider[]>;
   loadingAuthData?: boolean;
 }) {
   // Save config changes immediately to backend (without redeployment)
@@ -161,30 +161,47 @@ function EditModeManagementUI({
   };
 
   // Get initial values from project config in edit mode
-  const getInitialUserPoolId = () => {
-    if (initialUserPoolId) return initialUserPoolId;
-    if (config.userPoolId) return config.userPoolId;
+  const getInitialAuthConfigId = () => {
+    console.log('[AuthSection] 🔍 getInitialAuthConfigId called:', {
+      initialAuthConfigId,
+      configAuthConfigId: config.authConfigId,
+      projectConfigAuthConfigId: project?.config ? (project.config as Record<string, unknown>).auth_config_id : undefined,
+      hasProject: !!project,
+      hasProjectConfig: !!project?.config,
+    });
+    
+    if (initialAuthConfigId) {
+      console.log('[AuthSection] ✅ Using initialAuthConfigId:', initialAuthConfigId);
+      return initialAuthConfigId;
+    }
+    if (config.authConfigId) {
+      console.log('[AuthSection] ✅ Using config.authConfigId:', config.authConfigId);
+      return config.authConfigId;
+    }
     if (project?.config) {
       const projectConfig = project.config as Record<string, unknown>;
-      return projectConfig.user_pool_id as string | undefined;
+      const authConfigId = projectConfig.auth_config_id as string | undefined;
+      console.log('[AuthSection] ✅ Using project.config.auth_config_id:', authConfigId);
+      return authConfigId;
     }
+    console.log('[AuthSection] ⚠️ No authConfigId found, returning undefined');
     return undefined;
   };
 
   const getInitialAppClients = (): AppClient[] => {
-    const userPoolId = getInitialUserPoolId();
-    if (userPoolId && preloadedAppClients?.[userPoolId]) {
-      return preloadedAppClients[userPoolId];
+    const authConfigId = getInitialAuthConfigId();
+    if (authConfigId && preloadedAppClients?.[authConfigId]) {
+      return preloadedAppClients[authConfigId];
     }
     return [];
   };
 
   const getInitialProviders = (): Record<string, SocialProviderResponse[]> => {
-    const userPoolId = getInitialUserPoolId();
+    const authConfigId = getInitialAuthConfigId();
     const result: Record<string, SocialProviderResponse[]> = {};
-    if (userPoolId && preloadedAppClients?.[userPoolId]) {
-      preloadedAppClients[userPoolId].forEach((client) => {
-        const key = `${userPoolId}-${client.id}`;
+    if (authConfigId && preloadedAppClients?.[authConfigId]) {
+      preloadedAppClients[authConfigId].forEach((client) => {
+        const key = `${authConfigId}-${client.id}`;
         if (preloadedProviders?.[key]) {
           result[client.id] = preloadedProviders[key] as SocialProviderResponse[];
         }
@@ -193,13 +210,61 @@ function EditModeManagementUI({
     return result;
   };
 
-  // UserPool management
-  const [userPools, setUserPools] = useState<UserPool[]>(preloadedUserPools || []);
-  const [loadingUserPools, setLoadingUserPools] = useState(false);
-  const [selectedUserPoolId, setSelectedUserPoolId] = useState<string | undefined>(getInitialUserPoolId());
+  // AuthConfig management
+  const initialAuthConfigIdValue = getInitialAuthConfigId();
+  console.log('[AuthSection] 🚀 EditModeManagementUI mounting with initialAuthConfigId:', {
+    initialAuthConfigIdValue,
+    initialAuthConfigId,
+    configAuthConfigId: config.authConfigId,
+    projectAuthConfigId: project?.config ? (project.config as Record<string, unknown>).auth_config_id : undefined,
+    hasPreloadedAppClients: !!preloadedAppClients,
+    preloadedAppClientsKeys: preloadedAppClients ? Object.keys(preloadedAppClients) : [],
+  });
+  
+  const [authConfigs, setAuthConfigs] = useState<AuthConfig[]>(preloadedAuthConfigs || []);
+  const [loadingAuthConfigs, setLoadingAuthConfigs] = useState(false);
+  const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(initialAuthConfigIdValue);
+  
+  // Update selectedAuthConfigId when project/config/initialAuthConfigId changes (e.g., when project loads)
+  useEffect(() => {
+    console.log('[AuthSection] 🔄 useEffect [initialAuthConfigId/config.authConfigId/project?.config] triggered:', {
+      initialAuthConfigId,
+      configAuthConfigId: config.authConfigId,
+      projectAuthConfigId: project?.config ? (project.config as Record<string, unknown>).auth_config_id : undefined,
+      currentSelectedAuthConfigId: selectedAuthConfigId,
+    });
+    
+    const currentAuthConfigId = getInitialAuthConfigId();
+    console.log('[AuthSection] 🔍 Computed currentAuthConfigId:', currentAuthConfigId);
+    
+    if (currentAuthConfigId && currentAuthConfigId !== selectedAuthConfigId) {
+      console.log('[AuthSection] ✅ Updating selectedAuthConfigId from project/config:', {
+        currentAuthConfigId,
+        previousSelectedAuthConfigId: selectedAuthConfigId,
+        source: initialAuthConfigId ? 'initialAuthConfigId' : config.authConfigId ? 'config.authConfigId' : 'project.config',
+      });
+      setSelectedAuthConfigId(currentAuthConfigId);
+    } else {
+      console.log('[AuthSection] ⏭️ Skipping update - no change needed:', {
+        currentAuthConfigId,
+        selectedAuthConfigId,
+        areEqual: currentAuthConfigId === selectedAuthConfigId,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAuthConfigId, config.authConfigId, project?.config]);
   
   // AppClient management
-  const [appClients, setAppClients] = useState<AppClient[]>(getInitialAppClients());
+  const initialAppClients = getInitialAppClients();
+  console.log('[AuthSection] 📊 AppClients state initialization:', {
+    initialAppClientsCount: initialAppClients.length,
+    initialAppClients: initialAppClients.map(c => ({ id: c.id, name: c.name })),
+    selectedAuthConfigId,
+    hasPreloadedAppClients: !!preloadedAppClients,
+    preloadedAppClientsForSelectedId: selectedAuthConfigId ? preloadedAppClients?.[selectedAuthConfigId] : undefined,
+  });
+  
+  const [appClients, setAppClients] = useState<AppClient[]>(initialAppClients);
   const [loadingAppClients, setLoadingAppClients] = useState(false);
   const [appClientDetails, setAppClientDetails] = useState<Record<string, AppClientResponse>>({});
   const [loadingAppClientDetails, setLoadingAppClientDetails] = useState<Record<string, boolean>>({});
@@ -215,13 +280,13 @@ function EditModeManagementUI({
   
   // Update with preloaded app clients and providers when they become available
   useEffect(() => {
-    const userPoolId = getInitialUserPoolId();
+    const authConfigId = getInitialAuthConfigId();
     
-    if (userPoolId && preloadedAppClients?.[userPoolId] && appClients.length === 0) {
-      setAppClients(preloadedAppClients[userPoolId]);
+    if (authConfigId && preloadedAppClients?.[authConfigId] && appClients.length === 0) {
+      setAppClients(preloadedAppClients[authConfigId]);
       // Load providers for all app clients
-      preloadedAppClients[userPoolId].forEach((client) => {
-        const key = `${userPoolId}-${client.id}`;
+      preloadedAppClients[authConfigId].forEach((client) => {
+        const key = `${authConfigId}-${client.id}`;
         if (preloadedProviders?.[key]) {
           setProviders(prev => ({
             ...prev,
@@ -243,81 +308,83 @@ function EditModeManagementUI({
   // UI state
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  // Initialize with preloaded user pools if provided
+  // Initialize with preloaded auth configs if provided
   useEffect(() => {
-    if (preloadedUserPools && preloadedUserPools.length > 0) {
-      setUserPools(preloadedUserPools);
+    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
+      setAuthConfigs(preloadedAuthConfigs);
     }
-  }, [preloadedUserPools]);
+  }, [preloadedAuthConfigs]);
 
-  // Load UserPools on mount (only if not preloaded)
+  // Load AuthConfigs on mount (only if not preloaded)
   useEffect(() => {
-    if (!preloadedUserPools || preloadedUserPools.length === 0) {
-      loadUserPools();
+    if (!preloadedAuthConfigs || preloadedAuthConfigs.length === 0) {
+      loadAuthConfigs();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preloadedUserPools]);
+  }, [preloadedAuthConfigs]);
 
-  // In edit mode, load UserPool from project config and prepopulate
-  // Or use initialUserPoolId if provided (for create mode)
-  // This must run before the UserPool selection effect
-  // CRITICAL: Only run on initial load, NOT when user manually changes the userPool
+  // In edit mode, load AuthConfig from project config and prepopulate
+  // Or use initialAuthConfigId if provided (for create mode)
+  // This must run before the AuthConfig selection effect
+  // CRITICAL: Only run on initial load, NOT when user manually changes the authConfig
   useEffect(() => {
     // Only load from project config on initial mount, not after user changes
-    // Also check if config.userPoolId differs from project config - if so, user has changed it
-    const projectUserPoolId = project?.config ? (project.config as Record<string, unknown>)?.user_pool_id as string | undefined : undefined;
-    const configDiffersFromProject = projectUserPoolId && config.userPoolId && config.userPoolId !== projectUserPoolId;
+    // Also check if config.authConfigId differs from project config - if so, user has changed it
+    const projectAuthConfigId = project?.config ? (project.config as Record<string, unknown>)?.auth_config_id as string | undefined : undefined;
+    const configDiffersFromProject = projectAuthConfigId && config.authConfigId && config.authConfigId !== projectAuthConfigId;
     
-    if (!isInitialLoadRef.current || userManuallyChangedUserPoolRef.current || configDiffersFromProject) {
+    if (!isInitialLoadRef.current || userManuallyChangedAuthConfigRef.current || configDiffersFromProject) {
       console.log('[AuthSection] ⏭️ SKIPPING project config load:', {
         isInitialLoadRef: isInitialLoadRef.current,
-        userManuallyChanged: userManuallyChangedUserPoolRef.current,
+        userManuallyChanged: userManuallyChangedAuthConfigRef.current,
         configDiffersFromProject,
-        configUserPoolId: config.userPoolId,
-        projectUserPoolId,
-        reason: userManuallyChangedUserPoolRef.current 
-          ? 'user manually changed userPool' 
+        configAuthConfigId: config.authConfigId,
+        projectAuthConfigId,
+        reason: userManuallyChangedAuthConfigRef.current 
+          ? 'user manually changed authConfig' 
           : configDiffersFromProject 
-            ? 'config.userPoolId differs from project config (user changed it)'
+            ? 'config.authConfigId differs from project config (user changed it)'
             : 'initial load already done',
       });
       return;
     }
     
-    if (initialUserPoolId && initialUserPoolId !== selectedUserPoolId) {
-      console.log('[AuthSection] 📥 INITIAL LOAD - Setting userPoolId from initialUserPoolId:', {
-        initialUserPoolId,
-        currentSelectedUserPoolId: selectedUserPoolId,
+    if (initialAuthConfigId && initialAuthConfigId !== selectedAuthConfigId) {
+      console.log('[AuthSection] 📥 INITIAL LOAD - Setting authConfigId from initialAuthConfigId:', {
+        initialAuthConfigId,
+        currentSelectedAuthConfigId: selectedAuthConfigId,
         timestamp: new Date().toISOString(),
       });
-      setSelectedUserPoolId(initialUserPoolId);
+      setSelectedAuthConfigId(initialAuthConfigId);
       isInitialLoadRef.current = false; // Mark as loaded - don't run again
     } else if (project?.config) {
       const projectConfig = project.config as Record<string, unknown>;
-      const userPoolId = projectConfig.user_pool_id as string | undefined;
+      const authConfigId = projectConfig.auth_config_id as string | undefined;
       const defaultAppClientId = (projectConfig.default_app_client_id || projectConfig.defaultAppClient) as string | undefined;
       
-      console.log('[AuthSection] 📥 INITIAL LOAD FROM PROJECT - Project config userPoolId:', {
-        projectUserPoolId: userPoolId,
-        currentSelectedUserPoolId: selectedUserPoolId,
+      console.log('[AuthSection] 📥 INITIAL LOAD FROM PROJECT - Project config authConfigId:', {
+        projectAuthConfigId: authConfigId,
+        currentSelectedAuthConfigId: selectedAuthConfigId,
         projectId: project?.project_id,
-        willSet: userPoolId && userPoolId !== selectedUserPoolId,
+        willSet: authConfigId && authConfigId !== selectedAuthConfigId,
         timestamp: new Date().toISOString(),
       });
       
-      // CRITICAL: Only set from project config if config.userPoolId matches (user hasn't changed it)
-      // If config.userPoolId differs, user has manually changed it, so don't overwrite
-      if (userPoolId && userPoolId !== selectedUserPoolId) {
-        // Check if config.userPoolId already differs from project config
-        if (config.userPoolId && config.userPoolId !== userPoolId) {
-          console.log('[AuthSection] ⚠️ SKIPPING setting userPoolId from project config - config.userPoolId differs (user changed it):', {
-            projectUserPoolId: userPoolId,
-            configUserPoolId: config.userPoolId,
-            selectedUserPoolId,
+      // CRITICAL: Only set from project config if config.authConfigId matches (user hasn't changed it)
+      // If config.authConfigId differs, user has manually changed it, so don't overwrite
+      if (authConfigId && authConfigId !== selectedAuthConfigId) {
+        // Check if config.authConfigId already differs from project config
+        if (config.authConfigId && config.authConfigId !== authConfigId) {
+          console.log('[AuthSection] ⚠️ SKIPPING setting authConfigId from project config - config.authConfigId differs (user changed it):', {
+            projectAuthConfigId: authConfigId,
+            configAuthConfigId: config.authConfigId,
+            selectedAuthConfigId,
           });
         } else {
-          console.log('[AuthSection] ⚠️ SETTING userPoolId FROM OLD PROJECT CONFIG (initial load only):', userPoolId);
-          setSelectedUserPoolId(userPoolId);
+          console.log('[AuthSection] ⚠️ SETTING authConfigId FROM OLD PROJECT CONFIG (initial load only):', authConfigId);
+          setSelectedAuthConfigId(authConfigId);
+          // Also update config to set authConfigId and useAuthConfig
+          updateConfig({ authConfigId: authConfigId, useAuthConfig: true });
         }
       }
       
@@ -329,120 +396,120 @@ function EditModeManagementUI({
       isInitialLoadRef.current = false; // Mark as loaded - don't run again
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    // CRITICAL: Removed selectedUserPoolId from deps to prevent re-running when user changes it
-    // This effect should ONLY run on initial mount or when project/initialUserPoolId changes
-  }, [project, initialUserPoolId]);
+    // CRITICAL: Removed selectedAuthConfigId from deps to prevent re-running when user changes it
+    // This effect should ONLY run on initial mount or when project/initialAuthConfigId changes
+  }, [project, initialAuthConfigId]);
 
-  // Track initial UserPool to avoid clearing data on first load
-  const initialUserPoolIdRef = useRef<string | undefined>(getInitialUserPoolId());
+  // Track initial AuthConfig to avoid clearing data on first load
+  const initialAuthConfigIdRef = useRef<string | undefined>(getInitialAuthConfigId());
   const isInitialLoadRef = useRef(true); // Track if we've done the initial load from project config
-  const userManuallyChangedUserPoolRef = useRef(false); // Track if user has manually changed the userPool
+  const userManuallyChangedAuthConfigRef = useRef(false); // Track if user has manually changed the authConfig
   const previousUserGroupNameRef = useRef<string | undefined>(undefined); // Start undefined to ensure lookup happens on first render
-  const selectedUserPoolIdRef = useRef<string | undefined>(selectedUserPoolId);
+  const selectedAuthConfigIdRef = useRef<string | undefined>(selectedAuthConfigId);
   
-  // Track previous toggle values to prevent triggering update useEffects when syncing from userPool
+  // Track previous toggle values to prevent triggering update useEffects when syncing from authConfig
   const previousEnableSocialAuthRef = useRef<boolean | undefined>(config.enableSocialAuth);
   const previousEnableApiKeyRef = useRef<boolean | undefined>(config.enableApiKey);
   const previousBringOwnProviderRef = useRef<boolean | undefined>(config.bringOwnProvider);
 
   // Keep ref in sync with state
   useEffect(() => {
-    selectedUserPoolIdRef.current = selectedUserPoolId;
-  }, [selectedUserPoolId]);
+    selectedAuthConfigIdRef.current = selectedAuthConfigId;
+  }, [selectedAuthConfigId]);
 
-  // Watch userGroupName changes and look up userPool by name
+  // Watch userGroupName changes and look up authConfig by name
   // This handles both manual changes and automatic defaults
   useEffect(() => {
     const currentUserGroupName = config.userGroupName?.trim();
     const previousUserGroupName = previousUserGroupNameRef.current;
-    const currentSelectedUserPoolId = selectedUserPoolIdRef.current;
+    const currentSelectedAuthConfigId = selectedAuthConfigIdRef.current;
     
     console.log('[AuthSection] 🔍 userGroupName lookup effect:', {
       currentUserGroupName,
       previousUserGroupName,
-      currentSelectedUserPoolId,
-      userPoolsCount: userPools.length,
-      userPoolNames: userPools.map(p => p.name),
+      currentSelectedAuthConfigId,
+      authConfigsCount: authConfigs.length,
+      authConfigNames: authConfigs.map(p => p.name),
     });
     
     // If userGroupName is empty, clear selection
     if (!currentUserGroupName) {
-      if (currentSelectedUserPoolId !== undefined) {
-        setSelectedUserPoolId(undefined);
+      if (currentSelectedAuthConfigId !== undefined) {
+        setSelectedAuthConfigId(undefined);
         setAppClients([]);
         setAppClientDetails({});
         setProviders({});
-        // Don't call updateConfig here - let the selectedUserPoolId useEffect handle it
+        // Don't call updateConfig here - let the selectedAuthConfigId useEffect handle it
       }
       previousUserGroupNameRef.current = currentUserGroupName;
       return;
     }
     
-    // Look up userPool by name (always check, even if name hasn't changed, in case userPools just loaded)
+    // Look up authConfig by name (always check, even if name hasn't changed, in case authConfigs just loaded)
     // This is critical for the default "my-api-users" case when creating a new project
-    const matchingPool = userPools.find(pool => pool.name === currentUserGroupName);
+    const matchingPool = authConfigs.find(pool => pool.name === currentUserGroupName);
     
     console.log('[AuthSection] 🔍 Lookup result:', {
       userGroupName: currentUserGroupName,
       matchingPool: matchingPool ? { id: matchingPool.id, name: matchingPool.name } : null,
-      currentSelectedUserPoolId,
-      shouldSet: matchingPool && matchingPool.id !== currentSelectedUserPoolId,
-      userPoolsLoaded: userPools.length > 0,
+      currentSelectedAuthConfigId,
+      shouldSet: matchingPool && matchingPool.id !== currentSelectedAuthConfigId,
+      authConfigsLoaded: authConfigs.length > 0,
     });
     
     if (matchingPool) {
-      // Found matching userPool - set it if different
+      // Found matching authConfig - set it if different
       // This handles both:
       // 1. User manually changed the name to match an existing pool
-      // 2. UserPools loaded and we have a name that matches (e.g., default "my-api-users")
-      if (matchingPool.id !== currentSelectedUserPoolId) {
-        console.log('[AuthSection] ✅ Setting selectedUserPoolId from name lookup:', {
+      // 2. AuthConfigs loaded and we have a name that matches (e.g., default "my-api-users")
+      if (matchingPool.id !== currentSelectedAuthConfigId) {
+        console.log('[AuthSection] ✅ Setting selectedAuthConfigId from name lookup:', {
           userGroupName: currentUserGroupName,
-          userPoolId: matchingPool.id,
-          userPoolName: matchingPool.name,
-          previousUserPoolId: currentSelectedUserPoolId,
+          authConfigId: matchingPool.id,
+          authConfigName: matchingPool.name,
+          previousAuthConfigId: currentSelectedAuthConfigId,
           nameChanged: currentUserGroupName !== previousUserGroupName,
-          reason: currentUserGroupName !== previousUserGroupName ? 'name changed' : 'userPools loaded',
+          reason: currentUserGroupName !== previousUserGroupName ? 'name changed' : 'authConfigs loaded',
         });
-        setSelectedUserPoolId(matchingPool.id);
-        // Don't call updateConfig here - let the selectedUserPoolId useEffect handle it
+        setSelectedAuthConfigId(matchingPool.id);
+        // Don't call updateConfig here - let the selectedAuthConfigId useEffect handle it
       } else {
         console.log('[AuthSection] ℹ️ Matching pool already selected:', matchingPool.id);
       }
     } else {
-      // No matching userPool found
-      // If userPools are loaded (length > 0), we know for sure there's no match
-      // If userPools aren't loaded yet, wait for them to load before clearing
-      if (userPools.length > 0) {
-        // UserPools are loaded and no match found - clear to blank state
-        // Only clear if name actually changed (user typed a new name) or if we had a selectedUserPoolId before
+      // No matching authConfig found
+      // If authConfigs are loaded (length > 0), we know for sure there's no match
+      // If authConfigs aren't loaded yet, wait for them to load before clearing
+      if (authConfigs.length > 0) {
+        // AuthConfigs are loaded and no match found - clear to blank state
+        // Only clear if name actually changed (user typed a new name) or if we had a selectedAuthConfigId before
         const nameChanged = currentUserGroupName !== previousUserGroupName;
-        if (nameChanged || (!isInitialLoadRef.current && currentSelectedUserPoolId !== undefined)) {
-          console.log('[AuthSection] ⚠️ No matching userPool found for name:', {
+        if (nameChanged || (!isInitialLoadRef.current && currentSelectedAuthConfigId !== undefined)) {
+          console.log('[AuthSection] ⚠️ No matching authConfig found for name:', {
             userGroupName: currentUserGroupName,
-            userPoolsCount: userPools.length,
-            userPoolNames: userPools.map(p => p.name),
+            authConfigsCount: authConfigs.length,
+            authConfigNames: authConfigs.map(p => p.name),
             nameChanged,
-            hadSelectedPool: currentSelectedUserPoolId !== undefined,
+            hadSelectedPool: currentSelectedAuthConfigId !== undefined,
           });
-          setSelectedUserPoolId(undefined);
+          setSelectedAuthConfigId(undefined);
           setAppClients([]);
           setAppClientDetails({});
           setProviders({});
-          // Don't call updateConfig here - let the selectedUserPoolId useEffect handle it
+          // Don't call updateConfig here - let the selectedAuthConfigId useEffect handle it
         }
       } else {
-        console.log('[AuthSection] ⏳ Waiting for userPools to load...');
+        console.log('[AuthSection] ⏳ Waiting for authConfigs to load...');
       }
-      // If userPools.length === 0, they might not be loaded yet, so don't clear yet
+      // If authConfigs.length === 0, they might not be loaded yet, so don't clear yet
     }
     
     // Update the ref after processing
     previousUserGroupNameRef.current = currentUserGroupName;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.userGroupName, userPools]);
+  }, [config.userGroupName, authConfigs]);
 
-  // Also reload userPools when userGroupName changes to ensure we have the latest list
+  // Also reload authConfigs when userGroupName changes to ensure we have the latest list
   // This is important for the automatic default case (e.g., "my-api-users")
   const lastUserGroupNameRef = useRef<string | undefined>(config.userGroupName);
   useEffect(() => {
@@ -450,113 +517,167 @@ function EditModeManagementUI({
     // Only reload if the name actually changed
     if (currentName && currentName !== lastUserGroupNameRef.current) {
       lastUserGroupNameRef.current = currentName;
-      // Refresh user pools in background to catch newly created pools
-      loadUserPools();
+      // Refresh auth configs in background to catch newly created configs
+      loadAuthConfigs();
     }
   }, [config.userGroupName]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
 
-  // Sync selectedUserPoolId when userPools load and we have a userGroupName but no selectedUserPoolId
-  // Use a ref to track the last userPools length to avoid unnecessary checks
-  const lastUserPoolsLengthRef = useRef<number>(userPools.length);
+  // Sync selectedAuthConfigId when authConfigs load and we have a userGroupName but no selectedAuthConfigId
+  // Use a ref to track the last authConfigs length to avoid unnecessary checks
+  const lastAuthConfigsLengthRef = useRef<number>(authConfigs.length);
   useEffect(() => {
-    // Check if userPools length changed (either increased or loaded for first time)
-    const poolsChanged = userPools.length !== lastUserPoolsLengthRef.current;
+    // Check if authConfigs length changed (either increased or loaded for first time)
+    const poolsChanged = authConfigs.length !== lastAuthConfigsLengthRef.current;
     const currentUserGroupName = config.userGroupName?.trim();
     
-    console.log('[AuthSection] 🔄 userPools sync effect:', {
+    console.log('[AuthSection] 🔄 authConfigs sync effect:', {
       poolsChanged,
-      userPoolsCount: userPools.length,
-      lastCount: lastUserPoolsLengthRef.current,
+      authConfigsCount: authConfigs.length,
+      lastCount: lastAuthConfigsLengthRef.current,
       currentUserGroupName,
-      currentSelectedUserPoolId: selectedUserPoolIdRef.current,
-      userPoolNames: userPools.map(p => p.name),
+      currentSelectedAuthConfigId: selectedAuthConfigIdRef.current,
+      authConfigNames: authConfigs.map(p => p.name),
     });
     
-    if (poolsChanged && userPools.length > 0) {
-      lastUserPoolsLengthRef.current = userPools.length;
+    if (poolsChanged && authConfigs.length > 0) {
+      lastAuthConfigsLengthRef.current = authConfigs.length;
       
-      // If we have a userGroupName but no selectedUserPoolId, try to find matching pool
-      // This handles both initial load and when userPools load after userGroupName is set
-      if (currentUserGroupName && !selectedUserPoolIdRef.current) {
-        const matchingPool = userPools.find(pool => pool.name === currentUserGroupName);
+      // If we have a userGroupName but no selectedAuthConfigId, try to find matching pool
+      // This handles both initial load and when authConfigs load after userGroupName is set
+      if (currentUserGroupName && !selectedAuthConfigIdRef.current) {
+        const matchingPool = authConfigs.find(pool => pool.name === currentUserGroupName);
         if (matchingPool) {
-          console.log('[AuthSection] ✅ Found matching userPool by name after userPools loaded:', {
+          console.log('[AuthSection] ✅ Found matching authConfig by name after authConfigs loaded:', {
             userGroupName: currentUserGroupName,
-            userPoolId: matchingPool.id,
-            userPoolName: matchingPool.name,
+            authConfigId: matchingPool.id,
+            authConfigName: matchingPool.name,
           });
-          setSelectedUserPoolId(matchingPool.id);
+          setSelectedAuthConfigId(matchingPool.id);
         } else {
           console.log('[AuthSection] ⚠️ No matching pool found for userGroupName:', {
             userGroupName: currentUserGroupName,
-            availableNames: userPools.map(p => p.name),
+            availableNames: authConfigs.map(p => p.name),
           });
         }
       }
-      // Also check if selectedUserPoolId exists but userGroupName doesn't match - update it
-      else if (currentUserGroupName && selectedUserPoolIdRef.current) {
-        const matchingPool = userPools.find(pool => pool.name === currentUserGroupName);
-        // If we found a matching pool but selectedUserPoolId is different, update it
-        if (matchingPool && matchingPool.id !== selectedUserPoolIdRef.current) {
-          console.log('[AuthSection] 🔄 Updating selectedUserPoolId to match userGroupName:', {
+      // Also check if selectedAuthConfigId exists but userGroupName doesn't match - update it
+      else if (currentUserGroupName && selectedAuthConfigIdRef.current) {
+        const matchingPool = authConfigs.find(pool => pool.name === currentUserGroupName);
+        // If we found a matching pool but selectedAuthConfigId is different, update it
+        if (matchingPool && matchingPool.id !== selectedAuthConfigIdRef.current) {
+          console.log('[AuthSection] 🔄 Updating selectedAuthConfigId to match userGroupName:', {
             userGroupName: currentUserGroupName,
-            oldUserPoolId: selectedUserPoolIdRef.current,
-            newUserPoolId: matchingPool.id,
+            oldAuthConfigId: selectedAuthConfigIdRef.current,
+            newAuthConfigId: matchingPool.id,
           });
-          setSelectedUserPoolId(matchingPool.id);
+          setSelectedAuthConfigId(matchingPool.id);
         }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userPools, config.userGroupName]);
+  }, [authConfigs, config.userGroupName]);
 
-  // Track previous selectedUserPoolId and userGroupName to detect changes
+  // Track previous selectedAuthConfigId and userGroupName to detect changes
   // Initialize to undefined so we always detect the first change
-  const previousSelectedUserPoolIdRef = useRef<string | undefined>(undefined);
-  const previousUserGroupNameForPoolRef = useRef<string | undefined>(undefined);
+  const previousSelectedAuthConfigIdRef = useRef<string | undefined>(undefined);
+  const previousUserGroupNameForAuthConfigRef = useRef<string | undefined>(undefined);
+  // Track which authConfigId we've already loaded data for to prevent duplicate loads
+  const loadedAuthConfigIdRef = useRef<string | undefined>(undefined);
 
-  // Load AppClients when UserPool is selected
+  // Load AppClients when AuthConfig is selected
   useEffect(() => {
-    const previousPoolId = previousSelectedUserPoolIdRef.current;
+    console.log('[AuthSection] 🔄 useEffect [selectedAuthConfigId/config.userGroupName/preloadedAppClients/preloadedProviders] triggered:', {
+      selectedAuthConfigId,
+      configUserGroupName: config.userGroupName,
+      hasPreloadedAppClients: !!preloadedAppClients,
+      preloadedAppClientsKeys: preloadedAppClients ? Object.keys(preloadedAppClients) : [],
+      hasPreloadedProviders: !!preloadedProviders,
+      preloadedProvidersKeys: preloadedProviders ? Object.keys(preloadedProviders) : [],
+      currentAppClientsCount: appClients.length,
+    });
+    
+    const previousAuthConfigId = previousSelectedAuthConfigIdRef.current;
     const currentUserGroupName = config.userGroupName?.trim();
-    const previousUserGroupName = previousUserGroupNameForPoolRef.current;
-    const poolChanged = previousPoolId !== selectedUserPoolId;
+    const previousUserGroupName = previousUserGroupNameForAuthConfigRef.current;
+    const authConfigChanged = previousAuthConfigId !== selectedAuthConfigId;
     const userGroupNameChanged = previousUserGroupName !== currentUserGroupName;
     
-    // If userGroupName changed, we need to reload even if pool ID is the same
-    // (this handles switching back to original pool after changing it)
-    const needsReload = poolChanged || (selectedUserPoolId && userGroupNameChanged && previousPoolId === selectedUserPoolId);
+    // If userGroupName changed, we need to reload even if auth config ID is the same
+    // (this handles switching back to original auth config after changing it)
+    const needsReload = authConfigChanged || (selectedAuthConfigId && userGroupNameChanged && previousAuthConfigId === selectedAuthConfigId);
     
-    if (selectedUserPoolId) {
+    console.log('[AuthSection] 🔍 Computed values:', {
+      previousAuthConfigId,
+      currentUserGroupName,
+      previousUserGroupName,
+      authConfigChanged,
+      userGroupNameChanged,
+      needsReload,
+      isInitialLoad: isInitialLoadRef.current,
+    });
+    
+    if (selectedAuthConfigId) {
+      console.log('[AuthSection] ✅ selectedAuthConfigId is set, checking if we need to load app clients:', {
+        selectedAuthConfigId,
+        previousAuthConfigId,
+        authConfigChanged,
+        needsReload,
+        hasClients: appClients.length > 0,
+        hasPreloaded: !!(preloadedAppClients?.[selectedAuthConfigId] && preloadedAppClients[selectedAuthConfigId].length > 0),
+        preloadedAppClientsForThisId: preloadedAppClients?.[selectedAuthConfigId],
+        isInitialLoad: isInitialLoadRef.current,
+      });
+      
+      // Check if we have preloaded data available (this handles the case where preloaded data arrives after selectedAuthConfigId is set)
+      const hasPreloaded = preloadedAppClients?.[selectedAuthConfigId] && preloadedAppClients[selectedAuthConfigId].length > 0;
+      const hasClients = appClients.length > 0;
+      const alreadyLoadedForThisId = loadedAuthConfigIdRef.current === selectedAuthConfigId;
+      
+      // If we've already loaded data for this authConfigId and clients are loaded, skip
+      if (alreadyLoadedForThisId && hasClients) {
+        console.log('[AuthSection] ⏭️ Already loaded data for this authConfigId, skipping:', selectedAuthConfigId);
+        return; // Exit early - data already loaded
+      }
+      
+      // If we have preloaded data and no clients loaded yet, use preloaded data immediately
+      if (hasPreloaded && !hasClients) {
+        console.log('[AuthSection] ✅ Using preloaded app clients for authConfig:', selectedAuthConfigId);
+        const clients = preloadedAppClients[selectedAuthConfigId];
+        setAppClients(clients);
+        // Load providers for all app clients
+        clients.forEach((client) => {
+          const key = `${selectedAuthConfigId}-${client.id}`;
+          if (preloadedProviders?.[key]) {
+            setProviders(prev => ({
+              ...prev,
+              [client.id]: preloadedProviders[key] as SocialProviderResponse[]
+            }));
+          } else {
+            // Load providers from API if not preloaded
+            loadProviders(selectedAuthConfigId, client.id, false);
+          }
+          // Load app client details
+          loadAppClientDetails(selectedAuthConfigId, client.id);
+        });
+        // Update refs to prevent unnecessary reloads
+        previousSelectedAuthConfigIdRef.current = selectedAuthConfigId;
+        previousUserGroupNameForAuthConfigRef.current = currentUserGroupName;
+        loadedAuthConfigIdRef.current = selectedAuthConfigId; // Mark as loaded
+        isInitialLoadRef.current = false;
+        return; // Exit early - we've loaded preloaded data
+      }
+      
       // Always clear old data when pool changes or userGroupName changes (unless it's the initial load)
       if (needsReload) {
-        if (isInitialLoadRef.current) {
-          isInitialLoadRef.current = false;
-        } else {
-          // Clear all data when switching pools (including switching back to original)
-          setAppClients([]);
-          setAppClientDetails({});
-          setProviders({});
-        }
-        // Update the refs AFTER we've handled the change
-        previousSelectedUserPoolIdRef.current = selectedUserPoolId;
-        previousUserGroupNameForPoolRef.current = currentUserGroupName;
-        
-        // Pool changed or userGroupName changed - always load fresh data
-        loadAppClients(selectedUserPoolId, true);
-      } else {
-        // Pool hasn't changed - check if we can use preloaded data
-        const hasPreloaded = preloadedAppClients?.[selectedUserPoolId] && preloadedAppClients[selectedUserPoolId].length > 0;
-        const hasClients = appClients.length > 0;
-        
+        // Check if we have preloaded data for this auth config - if so, use it instead of clearing and fetching
         if (hasPreloaded && !hasClients) {
-          // Use preloaded data immediately
-          const clients = preloadedAppClients[selectedUserPoolId];
+          console.log('[AuthSection] ✅ Using preloaded app clients (needsReload but preloaded data available):', selectedAuthConfigId);
+          const clients = preloadedAppClients[selectedAuthConfigId];
           setAppClients(clients);
           // Load providers for all app clients
           clients.forEach((client) => {
-            const key = `${selectedUserPoolId}-${client.id}`;
+            const key = `${selectedAuthConfigId}-${client.id}`;
             if (preloadedProviders?.[key]) {
               setProviders(prev => ({
                 ...prev,
@@ -564,103 +685,164 @@ function EditModeManagementUI({
               }));
             } else {
               // Load providers from API if not preloaded
-              loadProviders(selectedUserPoolId, client.id, false);
+              loadProviders(selectedAuthConfigId, client.id, false);
             }
             // Load app client details
-            loadAppClientDetails(selectedUserPoolId, client.id);
+            loadAppClientDetails(selectedAuthConfigId, client.id);
           });
-        } else if (!hasClients) {
-          // No preloaded data and no clients - load fresh
-          loadAppClients(selectedUserPoolId, true);
+          // Update refs to prevent unnecessary reloads
+          previousSelectedAuthConfigIdRef.current = selectedAuthConfigId;
+          previousUserGroupNameForAuthConfigRef.current = currentUserGroupName;
+          loadedAuthConfigIdRef.current = selectedAuthConfigId; // Mark as loaded
+          isInitialLoadRef.current = false;
+          return; // Exit early - we've loaded preloaded data
+        }
+        
+        if (isInitialLoadRef.current) {
+          console.log('[AuthSection] 📥 Initial load - loading app clients for:', selectedAuthConfigId);
+          isInitialLoadRef.current = false;
+          // On initial load, don't clear existing data, but still load app clients
+          // Update the refs
+          previousSelectedAuthConfigIdRef.current = selectedAuthConfigId;
+          previousUserGroupNameForAuthConfigRef.current = currentUserGroupName;
+          // Always load app clients on initial load if we have a selectedAuthConfigId
+          // loadAppClients will check for preloaded data first
+          loadAppClients(selectedAuthConfigId, true).then(() => {
+            loadedAuthConfigIdRef.current = selectedAuthConfigId; // Mark as loaded after completion
+          });
+        } else {
+          // Clear all data when switching pools (including switching back to original)
+          // But only if we don't have preloaded data to use
+          if (!hasPreloaded) {
+            console.log('[AuthSection] 🗑️ Clearing app clients data (no preloaded data available)');
+            setAppClients([]);
+            setAppClientDetails({});
+            setProviders({});
+          }
+          // Update the refs AFTER we've handled the change
+          previousSelectedAuthConfigIdRef.current = selectedAuthConfigId;
+          previousUserGroupNameForAuthConfigRef.current = currentUserGroupName;
+          // Pool changed or userGroupName changed - load data (will use preloaded if available)
+          loadAppClients(selectedAuthConfigId, true).then(() => {
+            loadedAuthConfigIdRef.current = selectedAuthConfigId; // Mark as loaded after completion
+          });
+        }
+      } else {
+        // Pool hasn't changed - check if we need to load
+        if (!hasClients && !alreadyLoadedForThisId) {
+          console.log('[AuthSection] 📥 No clients loaded yet - loading for:', selectedAuthConfigId);
+          // No clients loaded - try to load (will use preloaded if available, otherwise fetch)
+          loadAppClients(selectedAuthConfigId, true).then(() => {
+            loadedAuthConfigIdRef.current = selectedAuthConfigId; // Mark as loaded after completion
+          });
+          // Update refs to prevent reloading
+          previousSelectedAuthConfigIdRef.current = selectedAuthConfigId;
+          previousUserGroupNameForAuthConfigRef.current = currentUserGroupName;
+        } else {
+          console.log('[AuthSection] ✅ App clients already loaded, skipping reload');
         }
       }
       
-      console.log('[AuthSection] 🔄 USERPOOL CHANGED - Updating config with new userPoolId:', {
-        selectedUserPoolId,
-        previousConfigUserPoolId: config.userPoolId,
-        isChange: config.userPoolId !== selectedUserPoolId,
+      console.log('[AuthSection] 🔄 AUTHCONFIG CHANGED - Updating config with new authConfigId:', {
+        selectedAuthConfigId,
+        previousConfigAuthConfigId: config.authConfigId,
+        isChange: config.authConfigId !== selectedAuthConfigId,
         timestamp: new Date().toISOString(),
       });
       
-      // Fetch userPool details to sync toggles
-      const loadUserPoolAndSyncToggles = async () => {
+      // Fetch authConfig details to sync toggles
+      const loadAuthConfigAndSyncToggles = async () => {
         try {
-          const userPool = await api.getUserPool(selectedUserPoolId);
-          console.log('[AuthSection] 📥 Loaded userPool details:', {
-            id: userPool.id,
-            enableSocialAuth: userPool.enableSocialAuth,
-            enableApiKeyAuth: userPool.enableApiKeyAuth,
-            bringMyOwnOAuth: userPool.bringMyOwnOAuth,
+          const authConfig = await api.getAuthConfig(selectedAuthConfigId);
+          console.log('[AuthSection] 📥 Loaded authConfig details:', {
+            id: authConfig.id,
+            enableSocialAuth: authConfig.enableSocialAuth,
+            enableApiKeyAuth: authConfig.enableApiKeyAuth,
+            bringMyOwnOAuth: authConfig.bringMyOwnOAuth,
           });
           
-          // Sync toggles with userPool values
+          // Sync toggles with authConfig values
           updateConfig({ 
-            userPoolId: selectedUserPoolId, 
-            useUserPool: true,
-            enableSocialAuth: userPool.enableSocialAuth || false,
-            enableApiKey: userPool.enableApiKeyAuth || false,
-            bringOwnProvider: userPool.bringMyOwnOAuth || false,
+            authConfigId: selectedAuthConfigId, 
+            useAuthConfig: true,
+            enableSocialAuth: authConfig.enableSocialAuth || false,
+            enableApiKey: authConfig.enableApiKeyAuth || false,
+            bringOwnProvider: authConfig.bringMyOwnOAuth || false,
           });
           
           // Update refs to prevent triggering the update useEffects
-          previousEnableSocialAuthRef.current = userPool.enableSocialAuth || false;
-          previousEnableApiKeyRef.current = userPool.enableApiKeyAuth || false;
-          previousBringOwnProviderRef.current = userPool.bringMyOwnOAuth || false;
+          previousEnableSocialAuthRef.current = authConfig.enableSocialAuth || false;
+          previousEnableApiKeyRef.current = authConfig.enableApiKeyAuth || false;
+          previousBringOwnProviderRef.current = authConfig.bringMyOwnOAuth || false;
           
-          console.log('[AuthSection] ✅ Synced toggles from userPool:', {
-            enableSocialAuth: userPool.enableSocialAuth || false,
-            enableApiKeyAuth: userPool.enableApiKeyAuth || false,
-            bringOwnProvider: userPool.bringMyOwnOAuth || false,
+          console.log('[AuthSection] ✅ Synced toggles from authConfig:', {
+            enableSocialAuth: authConfig.enableSocialAuth || false,
+            enableApiKeyAuth: authConfig.enableApiKeyAuth || false,
+            bringOwnProvider: authConfig.bringMyOwnOAuth || false,
           });
         } catch (error) {
-          console.error('[AuthSection] ❌ Error loading userPool details:', error);
-          // Still update config with userPoolId even if fetch fails
-          updateConfig({ userPoolId: selectedUserPoolId, useUserPool: true });
+          console.error('[AuthSection] ❌ Error loading authConfig details:', error);
+          // Still update config with authConfigId even if fetch fails
+          updateConfig({ authConfigId: selectedAuthConfigId, useAuthConfig: true });
         }
       };
       
-      loadUserPoolAndSyncToggles();
+      loadAuthConfigAndSyncToggles();
       
       // Mark that user has made a change - prevent project config from overwriting
       isInitialLoadRef.current = false;
-      userManuallyChangedUserPoolRef.current = true; // CRITICAL: Mark that user manually changed it
+      userManuallyChangedAuthConfigRef.current = true; // CRITICAL: Mark that user manually changed it
     } else {
-      console.log('[AuthSection] 🔄 USERPOOL CLEARED - Removing userPoolId from config:', {
-        previousConfigUserPoolId: config.userPoolId,
+      console.log('[AuthSection] 🔄 AUTHCONFIG CLEARED - Removing authConfigId from config:', {
+        previousConfigAuthConfigId: config.authConfigId,
         timestamp: new Date().toISOString(),
       });
       setAppClients([]);
       setAppClientDetails({});
       setProviders({});
-      updateConfig({ userPoolId: undefined, appClientId: undefined, useUserPool: false });
-      console.log('[AuthSection] ✅ Config updated - userPoolId cleared');
-      previousSelectedUserPoolIdRef.current = undefined;
-      previousUserGroupNameForPoolRef.current = undefined;
+      updateConfig({ authConfigId: undefined, appClientId: undefined, useAuthConfig: false });
+      console.log('[AuthSection] ✅ Config updated - authConfigId cleared');
+      previousSelectedAuthConfigIdRef.current = undefined;
+      previousUserGroupNameForAuthConfigRef.current = undefined;
+      loadedAuthConfigIdRef.current = undefined; // Clear loaded ref when authConfigId is cleared
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUserPoolId, config.userGroupName]);
+    // NOTE: We intentionally don't include preloadedAppClients and preloadedProviders in deps
+    // because they're objects that change reference frequently, causing unnecessary re-runs.
+    // Instead, we check for them inside the effect.
+  }, [selectedAuthConfigId, config.userGroupName]);
 
-  const loadUserPools = async () => {
-    setLoadingUserPools(true);
+  const loadAuthConfigs = async () => {
+    setLoadingAuthConfigs(true);
     try {
-      const pools = await api.listUserPools();
-      setUserPools(Array.isArray(pools) ? pools : []);
+      const pools = await api.listAuthConfigs();
+      setAuthConfigs(Array.isArray(pools) ? pools : []);
     } catch (error) {
-      console.error('Error loading user pools:', error);
-      setUserPools([]);
+      console.error('Error loading auth configs:', error);
+      setAuthConfigs([]);
     } finally {
-      setLoadingUserPools(false);
+      setLoadingAuthConfigs(false);
     }
   };
 
-  const loadAppClients = async (poolId: string, showLoading = true, forceRefresh = false) => {
+  const loadAppClients = async (authConfigId: string, showLoading = true, forceRefresh = false) => {
+    console.log('[AuthSection] 📥 loadAppClients called:', {
+      authConfigId,
+      showLoading,
+      forceRefresh,
+      hasPreloadedAppClients: !!preloadedAppClients,
+      preloadedAppClientsForThisId: preloadedAppClients?.[authConfigId],
+      preloadedAppClientsCount: preloadedAppClients?.[authConfigId]?.length || 0,
+    });
+    
     // Check if we have preloaded data first (unless forcing refresh)
-    if (!forceRefresh && preloadedAppClients?.[poolId] && preloadedAppClients[poolId].length > 0) {
-      const clients = preloadedAppClients[poolId];
+    if (!forceRefresh && preloadedAppClients?.[authConfigId] && preloadedAppClients[authConfigId].length > 0) {
+      console.log('[AuthSection] ✅ Using preloaded app clients:', preloadedAppClients[authConfigId].length);
+      const clients = preloadedAppClients[authConfigId];
       setAppClients(clients);
       // Load providers and details for all app clients
       clients.forEach((client) => {
-        const key = `${poolId}-${client.id}`;
+        const key = `${authConfigId}-${client.id}`;
         if (preloadedProviders?.[key]) {
           setProviders(prev => ({
             ...prev,
@@ -668,10 +850,10 @@ function EditModeManagementUI({
           }));
         } else {
           // Load providers from API if not preloaded
-          loadProviders(poolId, client.id, false);
+          loadProviders(authConfigId, client.id, false);
         }
         // Load app client details
-        loadAppClientDetails(poolId, client.id);
+        loadAppClientDetails(authConfigId, client.id);
       });
       
       // Ensure one app client is always the default
@@ -679,21 +861,27 @@ function EditModeManagementUI({
         updateConfig({ defaultAppClient: clients[0].id });
         await saveConfigImmediately({ defaultAppClient: clients[0].id });
       }
+      console.log('[AuthSection] ✅ Finished loading preloaded app clients');
       return;
     }
     
+    console.log('[AuthSection] 📡 Fetching app clients from API for authConfigId:', authConfigId);
     if (showLoading) {
       setLoadingAppClients(true);
     }
     try {
-      const clients = await api.listAppClients(poolId);
+      const clients = await api.listAppClients(authConfigId);
       const clientsArray = Array.isArray(clients) ? clients : [];
+      console.log('[AuthSection] ✅ Fetched app clients from API:', {
+        count: clientsArray.length,
+        clientIds: clientsArray.map(c => c.id),
+      });
       setAppClients(clientsArray);
       
       // Load providers and details for all app clients
       clientsArray.forEach((client) => {
-        loadProviders(poolId, client.id, false);
-        loadAppClientDetails(poolId, client.id);
+        loadProviders(authConfigId, client.id, false);
+        loadAppClientDetails(authConfigId, client.id);
       });
       
       // Ensure one app client is always the default
@@ -701,8 +889,9 @@ function EditModeManagementUI({
         updateConfig({ defaultAppClient: clientsArray[0].id });
         await saveConfigImmediately({ defaultAppClient: clientsArray[0].id });
       }
+      console.log('[AuthSection] ✅ Finished loading app clients from API');
     } catch (error) {
-      console.error('Error loading app clients:', error);
+      console.error('[AuthSection] ❌ Error loading app clients:', error);
       setAppClients([]);
     } finally {
       if (showLoading) {
@@ -711,10 +900,10 @@ function EditModeManagementUI({
     }
   };
 
-  const loadAppClientDetails = async (poolId: string, clientId: string) => {
+  const loadAppClientDetails = async (authConfigId: string, clientId: string) => {
     setLoadingAppClientDetails(prev => ({ ...prev, [clientId]: true }));
     try {
-      const client = await api.getAppClient(poolId, clientId);
+      const client = await api.getAppClient(authConfigId, clientId);
       setAppClientDetails(prev => ({
         ...prev,
         [clientId]: client
@@ -733,11 +922,11 @@ function EditModeManagementUI({
     }
   };
 
-  const revealClientSecret = async (poolId: string, clientId: string) => {
+  const revealClientSecret = async (authConfigId: string, clientId: string) => {
     setLoadingSecret(clientId);
     try {
       // Fetch the app client - the API should now return the secret
-      const client = await api.getAppClient(poolId, clientId);
+      const client = await api.getAppClient(authConfigId, clientId);
       const secret = client.clientSecret;
       
       if (secret) {
@@ -765,9 +954,9 @@ function EditModeManagementUI({
     }
   };
 
-  const loadProviders = async (poolId: string, clientId: string, showLoading = true) => {
+  const loadProviders = async (authConfigId: string, clientId: string, showLoading = true) => {
     // Check if we have preloaded data first
-    const preloadKey = `${poolId}-${clientId}`;
+    const preloadKey = `${authConfigId}-${clientId}`;
     if (preloadedProviders?.[preloadKey] && preloadedProviders[preloadKey].length > 0) {
       setProviders(prev => ({
         ...prev,
@@ -780,7 +969,7 @@ function EditModeManagementUI({
       setLoadingProviders(prev => ({ ...prev, [clientId]: true }));
     }
     try {
-      const providerList = await api.listProviders(poolId, clientId);
+      const providerList = await api.listProviders(authConfigId, clientId);
       setProviders(prev => ({
         ...prev,
         [clientId]: Array.isArray(providerList) ? providerList : []
@@ -799,10 +988,10 @@ function EditModeManagementUI({
   };
 
   const handleCreateAppClient = async () => {
-    if (!selectedUserPoolId || !newAppClientName.trim()) return;
+    if (!selectedAuthConfigId || !newAppClientName.trim()) return;
     
     try {
-      const newClient = await api.createAppClient(selectedUserPoolId, {
+      const newClient = await api.createAppClient(selectedAuthConfigId, {
         name: newAppClientName,
         scopes: ['email', 'openid', 'profile'],
       });
@@ -815,8 +1004,8 @@ function EditModeManagementUI({
       
       // Load details and providers for the new client
       const clientId = clientToAdd.id;
-      loadAppClientDetails(selectedUserPoolId, clientId);
-      loadProviders(selectedUserPoolId, clientId, false);
+      loadAppClientDetails(selectedAuthConfigId, clientId);
+      loadProviders(selectedAuthConfigId, clientId, false);
       
       // If this is the only app client (or no default is set), make it the default
       if (updatedClients.length === 1 || !config.defaultAppClient) {
@@ -825,7 +1014,7 @@ function EditModeManagementUI({
       }
       
       // Also refresh the full list to ensure consistency (force refresh to bypass preloaded data)
-      await loadAppClients(selectedUserPoolId, false, true);
+      await loadAppClients(selectedAuthConfigId, false, true);
       
       setNewAppClientName('');
       setShowAddAppClient(false);
@@ -836,11 +1025,11 @@ function EditModeManagementUI({
   };
 
   const handleDeleteAppClient = async (clientId: string) => {
-    if (!selectedUserPoolId) return;
+    if (!selectedAuthConfigId) return;
     if (!confirm('Are you sure you want to delete this AppClient? This action cannot be undone.')) return;
     
     try {
-      await api.deleteAppClient(selectedUserPoolId, clientId);
+      await api.deleteAppClient(selectedAuthConfigId, clientId);
       
       // Check if the deleted client was the default
       const wasDefault = config.defaultAppClient === clientId;
@@ -887,7 +1076,7 @@ function EditModeManagementUI({
   };
 
   const handleAddProvider = async (clientId: string) => {
-    if (!selectedUserPoolId) return;
+    if (!selectedAuthConfigId) return;
     const provider = newProvider[clientId];
     if (!provider || !provider.clientId || !provider.clientSecret) {
       alert('Please provide Client ID and Client Secret');
@@ -895,7 +1084,7 @@ function EditModeManagementUI({
     }
     
     try {
-      await api.addProvider(selectedUserPoolId, clientId, {
+      await api.addProvider(selectedAuthConfigId, clientId, {
         type: provider.type,
         clientId: provider.clientId,
         clientSecret: provider.clientSecret,
@@ -903,7 +1092,7 @@ function EditModeManagementUI({
         tokenType: provider.tokenType || 'thirdParty',
       });
       
-      await loadProviders(selectedUserPoolId, clientId);
+      await loadProviders(selectedAuthConfigId, clientId);
       setNewProvider(prev => {
         const next = { ...prev };
         delete next[clientId];
@@ -917,12 +1106,12 @@ function EditModeManagementUI({
   };
 
   const handleDeleteProvider = async (clientId: string, providerId: string) => {
-    if (!selectedUserPoolId) return;
+    if (!selectedAuthConfigId) return;
     if (!confirm('Are you sure you want to delete this provider?')) return;
     
     try {
-      await api.removeProvider(selectedUserPoolId, clientId, providerId);
-      await loadProviders(selectedUserPoolId, clientId);
+      await api.removeProvider(selectedAuthConfigId, clientId, providerId);
+      await loadProviders(selectedAuthConfigId, clientId);
     } catch (error) {
       console.error('Error deleting provider:', error);
       alert('Failed to delete provider');
@@ -1000,12 +1189,12 @@ function EditModeManagementUI({
   };
 
   // Determine if we're still loading initial data
-  const userPoolId = getInitialUserPoolId();
-  const effectiveUserPoolId = userPoolId || selectedUserPoolId;
+  const authConfigId = getInitialAuthConfigId();
+  const effectiveAuthConfigId = authConfigId || selectedAuthConfigId;
   const isLoadingInitialData = loadingAuthData || 
-    (effectiveUserPoolId && 
-     (!preloadedAppClients?.[effectiveUserPoolId] || 
-      preloadedAppClients[effectiveUserPoolId].length === 0) &&
+    (effectiveAuthConfigId && 
+     (!preloadedAppClients?.[effectiveAuthConfigId] || 
+      preloadedAppClients[effectiveAuthConfigId].length === 0) &&
      appClients.length === 0 && !loadingAppClients);
 
   return (
@@ -1013,7 +1202,7 @@ function EditModeManagementUI({
       <div>
         <Label className="text-base font-semibold">OAuth Configuration</Label>
         <p className="text-sm text-muted-foreground">
-          Manage AppClients and Providers for this project. The UserPool is selected via the &quot;User Pool Name&quot; field above.
+          Manage AppClients and Providers for this project. The AuthConfig is selected via the &quot;Auth Config Name&quot; field above.
         </p>
       </div>
 
@@ -1026,7 +1215,7 @@ function EditModeManagementUI({
       )}
 
       {/* AppClient Management */}
-      {selectedUserPoolId && (
+      {selectedAuthConfigId && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-medium">AppClients</Label>
@@ -1255,8 +1444,8 @@ function EditModeManagementUI({
                                         variant="ghost"
                                         size="sm"
                                         onClick={() => {
-                                          if (selectedUserPoolId) {
-                                            revealClientSecret(selectedUserPoolId, client.id);
+                                          if (selectedAuthConfigId) {
+                                            revealClientSecret(selectedAuthConfigId, client.id);
                                           }
                                         }}
                                         className="h-8 px-3 text-xs hover:bg-blue-100"
@@ -1531,38 +1720,58 @@ function EditModeManagementUI({
   );
 }
 
-export function AuthenticationSection({ config, updateConfig, isEditMode = false, project, onProjectUpdate, preloadedUserPools, preloadedAppClients, preloadedProviders, loadingAuthData }: AuthenticationSectionProps) {
+export function AuthenticationSection({ config, updateConfig, isEditMode = false, project, onProjectUpdate, preloadedAuthConfigs, preloadedAppClients, preloadedProviders, loadingAuthData }: AuthenticationSectionProps) {
+  // Log the full project config to see what fields are available
+  const projectConfig = project?.config as Record<string, unknown> | undefined;
+  console.log('[AuthSection] 🚀 AuthenticationSection component rendered:', {
+    isEditMode,
+    hasProject: !!project,
+    projectId: project?.project_id,
+    projectConfigKeys: projectConfig ? Object.keys(projectConfig) : [],
+    projectConfigFull: projectConfig,
+    projectAuthConfigId: projectConfig?.auth_config_id,
+    projectUserPoolId: projectConfig?.user_pool_id, // Check for old field name
+    configAuthConfigId: config.authConfigId,
+    configUserPoolId: (config as any).userPoolId, // Check for old field name
+    configEnableSocialAuth: config.enableSocialAuth,
+    hasPreloadedAuthConfigs: !!preloadedAuthConfigs,
+    preloadedAuthConfigsCount: preloadedAuthConfigs?.length || 0,
+    preloadedAuthConfigs: preloadedAuthConfigs?.map(ac => ({ id: ac.id, name: ac.name })),
+    hasPreloadedAppClients: !!preloadedAppClients,
+    preloadedAppClientsKeys: preloadedAppClients ? Object.keys(preloadedAppClients) : [],
+    preloadedAppClientsFull: preloadedAppClients,
+  });
   
   const [newScope, setNewScope] = useState('');
-  const [userPoolModalOpen, setUserPoolModalOpen] = useState(false);
-  const [selectedAppClient, setSelectedAppClient] = useState<AppClient & { userPoolId: string } | null>(null);
-  const [existingUserPools, setExistingUserPools] = useState<UserPool[]>(preloadedUserPools || []);
-  const [loadingUserPools, setLoadingUserPools] = useState(false);
+  const [authConfigModalOpen, setAuthConfigModalOpen] = useState(false);
+  const [selectedAppClient, setSelectedAppClient] = useState<AppClient & { authConfigId: string } | null>(null);
+  const [existingAuthConfigs, setExistingAuthConfigs] = useState<AuthConfig[]>(preloadedAuthConfigs || []);
+  const [loadingAuthConfigs, setLoadingAuthConfigs] = useState(false);
   const [appClientDetails, setAppClientDetails] = useState<AppClientResponse | null>(null);
   const [loadingAppClient, setLoadingAppClient] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [thirdPartyProvider, setThirdPartyProvider] = useState<SocialProviderResponse | null>(null);
   const [loadingProvider, setLoadingProvider] = useState(false);
-  const [userPoolSelectModalOpen, setUserPoolSelectModalOpen] = useState(false);
+  const [authConfigSelectModalOpen, setAuthConfigSelectModalOpen] = useState(false);
 
-  // Load existing UserPools when social auth is enabled
+  // Load existing AuthConfigs when social auth is enabled
   useEffect(() => {
     if (config.enableSocialAuth) {
       // Only show loading if pools haven't been loaded yet
-      loadUserPools(existingUserPools.length === 0);
+      loadAuthConfigs(existingAuthConfigs.length === 0);
     }
   }, [config.enableSocialAuth]);
 
   // Track initial enableSocialAuth, enableApiKey, and bringOwnProvider to avoid updating on mount
-  // These refs are used to prevent triggering update useEffects when syncing from userPool
+  // These refs are used to prevent triggering update useEffects when syncing from authConfig
   const previousEnableSocialAuthRef = useRef<boolean | undefined>(config.enableSocialAuth);
   const previousEnableApiKeyRef = useRef<boolean | undefined>(config.enableApiKey);
   const previousBringOwnProviderRef = useRef<boolean | undefined>(config.bringOwnProvider);
 
-  // Update userPool's enable_social_auth when enableSocialAuth changes
+  // Update authConfig's enable_social_auth when enableSocialAuth changes
   useEffect(() => {
-    // Only update if we have a userPoolId and we're in edit mode
-    if (!isEditMode || !config.userPoolId || !project) {
+    // Only update if we have a authConfigId and we're in edit mode
+    if (!isEditMode || !config.authConfigId || !project) {
       previousEnableSocialAuthRef.current = config.enableSocialAuth;
       return;
     }
@@ -1572,27 +1781,39 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
       return;
     }
 
-    // Update the userPool with the new enableSocialAuth value
-    const updateUserPoolSocialAuth = async () => {
+    // Update the authConfig with the new enableSocialAuth value
+    const updateAuthConfigSocialAuth = async () => {
       try {
-        await api.updateUserPool(config.userPoolId!, {
+        // Backend requires 'name' field, so we need to include it
+        // Try to get name from existingAuthConfigs list, or fetch it, or use userGroupName as fallback
+        let name = config.userGroupName;
+        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
+        if (authConfig) {
+          name = authConfig.name;
+        } else if (!name) {
+          // Fetch the auth config to get its name
+          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
+          name = fullAuthConfig.name;
+        }
+        await api.updateAuthConfig(config.authConfigId!, {
+          name: name || 'Unnamed Auth Config',
           enableSocialAuth: config.enableSocialAuth,
         });
-        console.log('[AuthSection] ✅ Updated userPool enable_social_auth:', config.enableSocialAuth);
+        console.log('[AuthSection] ✅ Updated authConfig enable_social_auth:', config.enableSocialAuth);
         previousEnableSocialAuthRef.current = config.enableSocialAuth;
       } catch (error) {
-        console.error('[AuthSection] ❌ Error updating userPool enable_social_auth:', error);
+        console.error('[AuthSection] ❌ Error updating authConfig enable_social_auth:', error);
       }
     };
 
-    updateUserPoolSocialAuth();
+    updateAuthConfigSocialAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.enableSocialAuth, config.userPoolId, isEditMode, project]);
+  }, [config.enableSocialAuth, config.authConfigId, isEditMode, project]);
 
-  // Update userPool's enable_api_key_auth when enableApiKey changes
+  // Update authConfig's enable_api_key_auth when enableApiKey changes
   useEffect(() => {
-    // Only update if we have a userPoolId and we're in edit mode
-    if (!isEditMode || !config.userPoolId || !project) {
+    // Only update if we have a authConfigId and we're in edit mode
+    if (!isEditMode || !config.authConfigId || !project) {
       previousEnableApiKeyRef.current = config.enableApiKey;
       return;
     }
@@ -1602,27 +1823,39 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
       return;
     }
 
-    // Update the userPool with the new enableApiKey value
-    const updateUserPoolApiKey = async () => {
+    // Update the authConfig with the new enableApiKey value
+    const updateAuthConfigApiKey = async () => {
       try {
-        await api.updateUserPool(config.userPoolId!, {
+        // Backend requires 'name' field, so we need to include it
+        // Try to get name from existingAuthConfigs list, or fetch it, or use userGroupName as fallback
+        let name = config.userGroupName;
+        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
+        if (authConfig) {
+          name = authConfig.name;
+        } else if (!name) {
+          // Fetch the auth config to get its name
+          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
+          name = fullAuthConfig.name;
+        }
+        await api.updateAuthConfig(config.authConfigId!, {
+          name: name || 'Unnamed Auth Config',
           enableApiKeyAuth: config.enableApiKey,
         });
-        console.log('[AuthSection] ✅ Updated userPool enable_api_key_auth:', config.enableApiKey);
+        console.log('[AuthSection] ✅ Updated authConfig enable_api_key_auth:', config.enableApiKey);
         previousEnableApiKeyRef.current = config.enableApiKey;
       } catch (error) {
-        console.error('[AuthSection] ❌ Error updating userPool enable_api_key_auth:', error);
+        console.error('[AuthSection] ❌ Error updating authConfig enable_api_key_auth:', error);
       }
     };
 
-    updateUserPoolApiKey();
+    updateAuthConfigApiKey();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.enableApiKey, config.userPoolId, isEditMode, project]);
+  }, [config.enableApiKey, config.authConfigId, isEditMode, project]);
 
-  // Update userPool's bringMyOwnOAuth when bringOwnProvider changes
+  // Update authConfig's bringMyOwnOAuth when bringOwnProvider changes
   useEffect(() => {
-    // Only update if we have a userPoolId and we're in edit mode
-    if (!isEditMode || !config.userPoolId || !project) {
+    // Only update if we have a authConfigId and we're in edit mode
+    if (!isEditMode || !config.authConfigId || !project) {
       previousBringOwnProviderRef.current = config.bringOwnProvider;
       return;
     }
@@ -1632,100 +1865,127 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
       return;
     }
 
-    // Update the userPool with the new bringOwnProvider value
-    const updateUserPoolBringOwnOAuth = async () => {
+    // Update the authConfig with the new bringOwnProvider value
+    const updateAuthConfigBringOwnOAuth = async () => {
       try {
-        await api.updateUserPool(config.userPoolId!, {
+        // Backend requires 'name' field, so we need to include it
+        // Try to get name from existingAuthConfigs list, or fetch it, or use userGroupName as fallback
+        let name = config.userGroupName;
+        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
+        if (authConfig) {
+          name = authConfig.name;
+        } else if (!name) {
+          // Fetch the auth config to get its name
+          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
+          name = fullAuthConfig.name;
+        }
+        await api.updateAuthConfig(config.authConfigId!, {
+          name: name || 'Unnamed Auth Config',
           bringMyOwnOAuth: config.bringOwnProvider,
         });
-        console.log('[AuthSection] ✅ Updated userPool bringMyOwnOAuth:', config.bringOwnProvider);
+        console.log('[AuthSection] ✅ Updated authConfig bringMyOwnOAuth:', config.bringOwnProvider);
         previousBringOwnProviderRef.current = config.bringOwnProvider;
       } catch (error) {
-        console.error('[AuthSection] ❌ Error updating userPool bringMyOwnOAuth:', error);
+        console.error('[AuthSection] ❌ Error updating authConfig bringMyOwnOAuth:', error);
       }
     };
 
-    updateUserPoolBringOwnOAuth();
+    updateAuthConfigBringOwnOAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.bringOwnProvider, config.userPoolId, isEditMode, project]);
+  }, [config.bringOwnProvider, config.authConfigId, isEditMode, project]);
 
-  // Initialize with preloaded user pools if provided
+  // Initialize with preloaded auth configs if provided
   useEffect(() => {
-    if (preloadedUserPools && preloadedUserPools.length > 0) {
-      setExistingUserPools(preloadedUserPools);
+    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
+      setExistingAuthConfigs(preloadedAuthConfigs);
     }
-  }, [preloadedUserPools]);
+  }, [preloadedAuthConfigs]);
 
-  // Preload user pools in the background when component mounts (if not already preloaded)
+  // Preload auth configs in the background when component mounts (if not already preloaded)
   // This ensures the dropdown feels instant when opened
   useEffect(() => {
     console.log('[AuthSection] 🟢 Preload effect:', {
-      hasPreloaded: !!(preloadedUserPools && preloadedUserPools.length > 0),
-      preloadedCount: preloadedUserPools?.length || 0,
-      existingUserPoolsCount: existingUserPools.length,
+      hasPreloaded: !!(preloadedAuthConfigs && preloadedAuthConfigs.length > 0),
+      preloadedCount: preloadedAuthConfigs?.length || 0,
+      existingAuthConfigsCount: existingAuthConfigs.length,
     });
     
     // Initialize with preloaded pools if available
-    if (preloadedUserPools && preloadedUserPools.length > 0) {
-      console.log('[AuthSection] ✅ Using preloaded user pools:', preloadedUserPools.length);
-      setExistingUserPools(preloadedUserPools);
-    } else if (existingUserPools.length === 0) {
+    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
+      console.log('[AuthSection] ✅ Using preloaded auth configs:', preloadedAuthConfigs.length);
+      setExistingAuthConfigs(preloadedAuthConfigs);
+    } else if (existingAuthConfigs.length === 0) {
       // Only load if we don't have preloaded data and existing pools are empty
-      console.log('[AuthSection] 📥 Loading user pools from API...');
-      loadUserPools(false);
+      console.log('[AuthSection] 📥 Loading auth configs from API...');
+      loadAuthConfigs(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preloadedUserPools]);
+  }, [preloadedAuthConfigs]);
 
-  // Track selected userPoolId (like edit mode)
-  const [selectedUserPoolId, setSelectedUserPoolId] = useState<string | undefined>(config.userPoolId);
+  // Track selected authConfigId (like edit mode)
+  const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(config.authConfigId);
   
-  // Look up userPool by name when userPools load or userGroupName changes
+  // Sync selectedAuthConfigId with config.authConfigId when it changes (e.g., from project config in edit mode)
+  useEffect(() => {
+    if (config.authConfigId && config.authConfigId !== selectedAuthConfigId) {
+      console.log('[AuthSection] 🔄 Syncing selectedAuthConfigId from config.authConfigId:', {
+        configAuthConfigId: config.authConfigId,
+        currentSelectedAuthConfigId: selectedAuthConfigId,
+      });
+      setSelectedAuthConfigId(config.authConfigId);
+    } else if (!config.authConfigId && selectedAuthConfigId) {
+      // Clear selectedAuthConfigId if config.authConfigId is cleared
+      console.log('[AuthSection] 🔄 Clearing selectedAuthConfigId (config.authConfigId is empty)');
+      setSelectedAuthConfigId(undefined);
+    }
+  }, [config.authConfigId, selectedAuthConfigId]);
+  
+  // Look up authConfig by name when authConfigs load or userGroupName changes
   // This handles the default "my-api-users" case when creating a new project
   useEffect(() => {
     const currentUserGroupName = config.userGroupName?.trim();
     
-    if (!currentUserGroupName || existingUserPools.length === 0) {
+    if (!currentUserGroupName || existingAuthConfigs.length === 0) {
       return;
     }
     
-    // Look for matching userPool by name
-    const matchingPool = existingUserPools.find(pool => pool.name === currentUserGroupName);
+    // Look for matching authConfig by name
+    const matchingPool = existingAuthConfigs.find(pool => pool.name === currentUserGroupName);
     
-    if (matchingPool && matchingPool.id !== selectedUserPoolId) {
-      // Set selectedUserPoolId and immediately update config and load data
-      setSelectedUserPoolId(matchingPool.id);
+    if (matchingPool && matchingPool.id !== selectedAuthConfigId) {
+      // Set selectedAuthConfigId and immediately update config and load data
+      setSelectedAuthConfigId(matchingPool.id);
       
-      // Load userPool details to sync toggles
-      const loadUserPoolAndSyncToggles = async () => {
+      // Load authConfig details to sync toggles
+      const loadAuthConfigAndSyncToggles = async () => {
         try {
-          const userPool = await api.getUserPool(matchingPool.id);
-          console.log('[AuthSection] 📥 Loaded userPool details from name match:', {
-            id: userPool.id,
-            enableSocialAuth: userPool.enableSocialAuth,
-            enableApiKeyAuth: userPool.enableApiKeyAuth,
-            bringMyOwnOAuth: userPool.bringMyOwnOAuth,
+          const authConfig = await api.getAuthConfig(matchingPool.id);
+          console.log('[AuthSection] 📥 Loaded authConfig details from name match:', {
+            id: authConfig.id,
+            enableSocialAuth: authConfig.enableSocialAuth,
+            enableApiKeyAuth: authConfig.enableApiKeyAuth,
+            bringMyOwnOAuth: authConfig.bringMyOwnOAuth,
           });
           
-          // Update config with userPoolId and sync toggles
+          // Update config with authConfigId and sync toggles
           updateConfig({ 
-            userPoolId: matchingPool.id, 
-            useUserPool: true,
-            enableSocialAuth: userPool.enableSocialAuth || false,
-            enableApiKey: userPool.enableApiKeyAuth || false,
-            bringOwnProvider: userPool.bringMyOwnOAuth || false,
+            authConfigId: matchingPool.id, 
+            useAuthConfig: true,
+            enableSocialAuth: authConfig.enableSocialAuth || false,
+            enableApiKey: authConfig.enableApiKeyAuth || false,
+            bringOwnProvider: authConfig.bringMyOwnOAuth || false,
           });
         } catch (error) {
-          console.error('[AuthSection] ❌ Error loading userPool details:', error);
-          // Still update config with userPoolId even if fetch fails
+          console.error('[AuthSection] ❌ Error loading authConfig details:', error);
+          // Still update config with authConfigId even if fetch fails
           updateConfig({ 
-            userPoolId: matchingPool.id, 
-            useUserPool: true,
+            authConfigId: matchingPool.id, 
+            useAuthConfig: true,
           });
         }
       };
       
-      loadUserPoolAndSyncToggles();
+      loadAuthConfigAndSyncToggles();
       
       // Load ALL data immediately (don't wait for state update)
       const loadAllData = async () => {
@@ -1767,7 +2027,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   identityProviderClientId: provider.client_id || provider.clientId || '',
                 });
               }
-            } else if ((isEditMode || config.useUserPool) && !config.bringOwnProvider) {
+            } else if ((isEditMode || config.useAuthConfig) && !config.bringOwnProvider) {
               // Load providers from API
               loadThirdPartyProvider(matchingPool.id, client.id);
             }
@@ -1780,122 +2040,177 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
       loadAllData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.userGroupName, existingUserPools]);
+  }, [config.userGroupName, existingAuthConfigs]);
 
-  // In edit mode, populate userGroupName from project's user pool
-  // Only sync on initial load, not when existingUserPools changes (to avoid reverting user changes)
+  // In edit mode, populate userGroupName from project's auth config
+  // Only sync on initial load, not when existingAuthConfigs changes (to avoid reverting user changes)
   const hasSyncedUserGroupNameRef = useRef(false);
   useEffect(() => {
-    if (isEditMode && project?.config && !hasSyncedUserGroupNameRef.current) {
-      const projectConfig = project.config as Record<string, unknown>;
-      const userPoolId = projectConfig.user_pool_id as string | undefined;
+    const projectConfig = project?.config as Record<string, unknown> | undefined;
+    console.log('[AuthSection] 🔄 useEffect [isEditMode/project/preloadedAuthConfigs] for syncing userGroupName:', {
+      isEditMode,
+      hasProject: !!project,
+      hasProjectConfig: !!projectConfig,
+      projectConfigKeys: projectConfig ? Object.keys(projectConfig) : [],
+      projectConfigFull: projectConfig,
+      projectConfigStringified: projectConfig ? JSON.stringify(projectConfig, null, 2) : 'no config',
+      hasSynced: hasSyncedUserGroupNameRef.current,
+      preloadedAuthConfigsCount: preloadedAuthConfigs?.length || 0,
+      preloadedAuthConfigs: preloadedAuthConfigs?.map(ac => ({ id: ac.id, name: ac.name })),
+    });
+    
+    if (isEditMode && projectConfig && !hasSyncedUserGroupNameRef.current) {
+      // Check multiple possible field names
+      const authConfigId = (
+        projectConfig.auth_config_id || 
+        projectConfig.user_pool_id || 
+        projectConfig.authConfigId ||
+        (projectConfig as any).userPoolId
+      ) as string | undefined;
       
-      if (userPoolId) {
-        // Try to find the user pool name from preloaded user pools first
-        const allPools = preloadedUserPools && preloadedUserPools.length > 0 
-          ? preloadedUserPools 
-          : existingUserPools;
+      console.log('[AuthSection] 🔍 Looking for authConfigId in project config:', {
+        auth_config_id: projectConfig.auth_config_id,
+        user_pool_id: projectConfig.user_pool_id,
+        authConfigId: projectConfig.authConfigId,
+        userPoolId: (projectConfig as any).userPoolId,
+        foundAuthConfigId: authConfigId,
+        allConfigKeys: Object.keys(projectConfig),
+      });
+      
+      // If no authConfigId in project config, but we have preloaded auth configs, try to use the first one
+      // This handles cases where the project was created but the auth_config_id wasn't saved properly
+      let authConfigIdToUse = authConfigId;
+      if (!authConfigIdToUse && preloadedAuthConfigs && preloadedAuthConfigs.length === 1) {
+        console.log('[AuthSection] ⚠️ No authConfigId in project config, but found exactly one preloaded auth config, using it:', {
+          preloadedAuthConfigId: preloadedAuthConfigs[0].id,
+          preloadedAuthConfigName: preloadedAuthConfigs[0].name,
+        });
+        authConfigIdToUse = preloadedAuthConfigs[0].id;
+      }
+      
+      if (authConfigIdToUse) {
+        // Try to find the auth config name from preloaded auth configs first
+        const allPools = preloadedAuthConfigs && preloadedAuthConfigs.length > 0 
+          ? preloadedAuthConfigs 
+          : existingAuthConfigs;
         
-        const userPool = allPools.find(pool => pool.id === userPoolId);
-        if (userPool) {
-          // Load full userPool details to sync toggles
-          const loadUserPoolDetails = async () => {
+        const authConfig = allPools.find(pool => pool.id === authConfigIdToUse);
+        if (authConfig) {
+          console.log('[AuthSection] ✅ Found matching auth config:', {
+            authConfigId: authConfigIdToUse,
+            authConfigName: authConfig.name,
+          });
+          // Set selectedAuthConfigId first to trigger app clients loading
+          // This will be picked up by the useEffect that watches selectedAuthConfigId
+          console.log('[AuthSection] 🎯 Setting selectedAuthConfigId to trigger app clients loading:', authConfigIdToUse);
+          setSelectedAuthConfigId(authConfigIdToUse);
+          
+          // Load full authConfig details to sync toggles
+          const loadAuthConfigDetails = async () => {
             try {
-              const fullUserPool = await api.getUserPool(userPoolId);
-              console.log('[AuthSection] 📥 Loaded userPool details in edit mode:', {
-                id: fullUserPool.id,
-                enableSocialAuth: fullUserPool.enableSocialAuth,
-                enableApiKeyAuth: fullUserPool.enableApiKeyAuth,
-                bringMyOwnOAuth: fullUserPool.bringMyOwnOAuth,
+              const fullAuthConfig = await api.getAuthConfig(authConfigIdToUse);
+              console.log('[AuthSection] 📥 Loaded authConfig details in edit mode:', {
+                id: fullAuthConfig.id,
+                enableSocialAuth: fullAuthConfig.enableSocialAuth,
+                enableApiKeyAuth: fullAuthConfig.enableApiKeyAuth,
+                bringMyOwnOAuth: fullAuthConfig.bringMyOwnOAuth,
               });
               
-              // Sync toggles and userGroupName
+              // Sync toggles, userGroupName, and auth config selection
               const updates: Partial<ProjectConfig> = {
-                userGroupName: userPool.name !== config.userGroupName ? userPool.name : config.userGroupName,
-                enableSocialAuth: fullUserPool.enableSocialAuth || false,
-                enableApiKey: fullUserPool.enableApiKeyAuth || false,
-                bringOwnProvider: fullUserPool.bringMyOwnOAuth || false,
+                userGroupName: authConfig.name !== config.userGroupName ? authConfig.name : config.userGroupName,
+                authConfigId: authConfigIdToUse,
+                useAuthConfig: true,
+                enableSocialAuth: fullAuthConfig.enableSocialAuth || false,
+                enableApiKey: fullAuthConfig.enableApiKeyAuth || false,
+                bringOwnProvider: fullAuthConfig.bringMyOwnOAuth || false,
               };
               updateConfig(updates);
               
               // Update refs to prevent triggering the update useEffects
-              previousEnableSocialAuthRef.current = fullUserPool.enableSocialAuth || false;
-              previousEnableApiKeyRef.current = fullUserPool.enableApiKeyAuth || false;
-              previousBringOwnProviderRef.current = fullUserPool.bringMyOwnOAuth || false;
+              previousEnableSocialAuthRef.current = fullAuthConfig.enableSocialAuth || false;
+              previousEnableApiKeyRef.current = fullAuthConfig.enableApiKeyAuth || false;
+              previousBringOwnProviderRef.current = fullAuthConfig.bringMyOwnOAuth || false;
             } catch (error) {
-              console.error('[AuthSection] ❌ Error loading userPool details in edit mode:', error);
-              // Still update userGroupName even if fetch fails
-              if (userPool.name !== config.userGroupName) {
-                updateConfig({ userGroupName: userPool.name });
-              }
+              console.error('[AuthSection] ❌ Error loading authConfig details in edit mode:', error);
+              // Still update userGroupName, authConfigId, and useAuthConfig even if fetch fails
+              const fallbackUpdates: Partial<ProjectConfig> = {
+                userGroupName: authConfig.name !== config.userGroupName ? authConfig.name : config.userGroupName,
+                authConfigId: authConfigIdToUse,
+                useAuthConfig: true,
+              };
+              updateConfig(fallbackUpdates);
             }
           };
           
-          loadUserPoolDetails();
+          loadAuthConfigDetails();
           hasSyncedUserGroupNameRef.current = true;
+        } else {
+          // Auth config not found in preloaded or existing configs - might need to load it
+          console.log('[AuthSection] ⚠️ Auth config not found in preloaded/existing configs, will be loaded when authConfigs are fetched');
         }
       } else {
-        // No userPoolId in project config, mark as synced anyway
+        // No authConfigId in project config, mark as synced anyway
         hasSyncedUserGroupNameRef.current = true;
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditMode, project, preloadedUserPools]);
+  }, [isEditMode, project, preloadedAuthConfigs]);
   
   // Reset sync flag when project changes
   useEffect(() => {
     hasSyncedUserGroupNameRef.current = false;
   }, [project]);
 
-  // When selectedUserPoolId changes, update config and load ALL data (exactly like edit mode)
+  // When selectedAuthConfigId changes, update config and load ALL data (exactly like edit mode)
   useEffect(() => {
-    if (selectedUserPoolId) {
-      console.log('[AuthSection] 📥 selectedUserPoolId changed, loading all data:', selectedUserPoolId);
+    if (selectedAuthConfigId) {
+      console.log('[AuthSection] 📥 selectedAuthConfigId changed, loading all data:', selectedAuthConfigId);
       
-      // Load userPool details to sync toggles
-      const loadUserPoolAndSyncToggles = async () => {
+      // Load authConfig details to sync toggles
+      const loadAuthConfigAndSyncToggles = async () => {
         try {
-          const userPool = await api.getUserPool(selectedUserPoolId);
-          console.log('[AuthSection] 📥 Loaded userPool details:', {
-            id: userPool.id,
-            enableSocialAuth: userPool.enableSocialAuth,
-            enableApiKeyAuth: userPool.enableApiKeyAuth,
-            bringMyOwnOAuth: userPool.bringMyOwnOAuth,
+          const authConfig = await api.getAuthConfig(selectedAuthConfigId);
+          console.log('[AuthSection] 📥 Loaded authConfig details:', {
+            id: authConfig.id,
+            enableSocialAuth: authConfig.enableSocialAuth,
+            enableApiKeyAuth: authConfig.enableApiKeyAuth,
+            bringMyOwnOAuth: authConfig.bringMyOwnOAuth,
           });
           
-          // Update config with userPoolId and sync toggles
+          // Update config with authConfigId and sync toggles
           updateConfig({ 
-            userPoolId: selectedUserPoolId, 
-            useUserPool: true,
-            enableSocialAuth: userPool.enableSocialAuth || false,
-            enableApiKey: userPool.enableApiKeyAuth || false,
-            bringOwnProvider: userPool.bringMyOwnOAuth || false,
+            authConfigId: selectedAuthConfigId, 
+            useAuthConfig: true,
+            enableSocialAuth: authConfig.enableSocialAuth || false,
+            enableApiKey: authConfig.enableApiKeyAuth || false,
+            bringOwnProvider: authConfig.bringMyOwnOAuth || false,
           });
         } catch (error) {
-          console.error('[AuthSection] ❌ Error loading userPool details:', error);
-          // Still update config with userPoolId even if fetch fails
+          console.error('[AuthSection] ❌ Error loading authConfig details:', error);
+          // Still update config with authConfigId even if fetch fails
           updateConfig({ 
-            userPoolId: selectedUserPoolId, 
-            useUserPool: true,
+            authConfigId: selectedAuthConfigId, 
+            useAuthConfig: true,
           });
         }
       };
       
-      loadUserPoolAndSyncToggles();
+      loadAuthConfigAndSyncToggles();
       
       // Load ALL data for this pool (AppClients, details, providers)
       const loadAllData = async () => {
         try {
-          console.log('[AuthSection] 📥 Loading AppClients for pool:', selectedUserPoolId);
+          console.log('[AuthSection] 📥 Loading AppClients for pool:', selectedAuthConfigId);
           
           // Get AppClients (use preloaded if available)
           let clients: AppClient[] = [];
-          if (preloadedAppClients?.[selectedUserPoolId]) {
-            clients = preloadedAppClients[selectedUserPoolId];
+          if (preloadedAppClients?.[selectedAuthConfigId]) {
+            clients = preloadedAppClients[selectedAuthConfigId];
             console.log('[AuthSection] ✅ Using preloaded AppClients:', clients.length);
           } else {
             console.log('[AuthSection] 📥 Fetching AppClients from API...');
-            const clientsResponse = await api.listAppClients(selectedUserPoolId);
+            const clientsResponse = await api.listAppClients(selectedAuthConfigId);
             clients = Array.isArray(clientsResponse) ? clientsResponse : [];
             console.log('[AuthSection] ✅ AppClients loaded from API:', clients.length);
           }
@@ -1915,10 +2230,10 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
             console.log('[AuthSection] 📥 Loading details and providers for AppClient:', client.id);
             
             // Load AppClient details
-            loadAppClientDetails(selectedUserPoolId, client.id);
+            loadAppClientDetails(selectedAuthConfigId, client.id);
             
             // Load providers (use preloaded if available)
-            const providerKey = `${selectedUserPoolId}-${client.id}`;
+            const providerKey = `${selectedAuthConfigId}-${client.id}`;
             if (preloadedProviders?.[providerKey]) {
               const providers = preloadedProviders[providerKey];
               console.log('[AuthSection] ✅ Using preloaded providers:', providers.length);
@@ -1932,10 +2247,10 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   identityProviderClientId: provider.client_id || provider.clientId || '',
                 });
               }
-            } else if ((isEditMode || config.useUserPool) && !config.bringOwnProvider) {
+            } else if ((isEditMode || config.useAuthConfig) && !config.bringOwnProvider) {
               console.log('[AuthSection] 📥 Loading providers from API...');
               // Load providers from API
-              loadThirdPartyProvider(selectedUserPoolId, client.id);
+              loadThirdPartyProvider(selectedAuthConfigId, client.id);
             }
           }
         } catch (error) {
@@ -1945,48 +2260,48 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
       
       loadAllData();
     } else {
-      console.log('[AuthSection] ⏭️ No selectedUserPoolId, skipping data load');
+      console.log('[AuthSection] ⏭️ No selectedAuthConfigId, skipping data load');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUserPoolId, preloadedAppClients, preloadedProviders]);
+  }, [selectedAuthConfigId, preloadedAppClients, preloadedProviders]);
 
-  const loadUserPools = async (showLoading = false) => {
+  const loadAuthConfigs = async (showLoading = false) => {
     // Only show loading state if explicitly requested (e.g., first load)
     // For background refreshes, don't show loading to keep UI responsive
     if (showLoading) {
-      setLoadingUserPools(true);
+      setLoadingAuthConfigs(true);
     }
     try {
-      console.log('[AuthSection] 📥 Fetching user pools from API...');
-      const pools = await api.listUserPools();
+      console.log('[AuthSection] 📥 Fetching auth configs from API...');
+      const pools = await api.listAuthConfigs();
       const poolsArray = Array.isArray(pools) ? pools : [];
-      console.log('[AuthSection] ✅ User pools loaded:', {
+      console.log('[AuthSection] ✅ Auth configs loaded:', {
         count: poolsArray.length,
         names: poolsArray.map(p => p.name),
       });
-      setExistingUserPools(poolsArray);
+      setExistingAuthConfigs(poolsArray);
     } catch (error) {
-      console.error('[AuthSection] ❌ Error loading user pools:', error);
+      console.error('[AuthSection] ❌ Error loading auth configs:', error);
       // Only clear pools if this was the initial load
       if (showLoading) {
-        setExistingUserPools([]);
+        setExistingAuthConfigs([]);
       }
     } finally {
       if (showLoading) {
-        setLoadingUserPools(false);
+        setLoadingAuthConfigs(false);
       }
     }
   };
 
-  const loadAppClientDetails = async (userPoolId?: string, appClientId?: string) => {
-    const poolId = userPoolId || config.userPoolId;
+  const loadAppClientDetails = async (authConfigId?: string, appClientId?: string) => {
+    const authConfigIdToUse = authConfigId || config.authConfigId;
     const clientId = appClientId || config.appClientId;
     
-    if (!poolId || !clientId) return;
+    if (!authConfigIdToUse || !clientId) return;
     
     setLoadingAppClient(true);
     try {
-      const client = await api.getAppClient(poolId, clientId);
+      const client = await api.getAppClient(authConfigIdToUse, clientId);
       setAppClientDetails(client);
     } catch (error) {
       console.error('Error loading app client details:', error);
@@ -1996,15 +2311,15 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     }
   };
 
-  const loadThirdPartyProvider = async (userPoolId?: string, appClientId?: string) => {
-    const poolId = userPoolId || config.userPoolId;
+  const loadThirdPartyProvider = async (authConfigId?: string, appClientId?: string) => {
+    const authConfigIdToUse = authConfigId || config.authConfigId;
     const clientId = appClientId || config.appClientId;
     
-    if (!poolId || !clientId) return;
+    if (!authConfigIdToUse || !clientId) return;
     
     setLoadingProvider(true);
     try {
-      const providers = await api.listProviders(poolId, clientId);
+      const providers = await api.listProviders(authConfigIdToUse, clientId);
       // Get the first provider (usually there's one per app client)
       if (providers && providers.length > 0) {
         const provider = providers[0];
@@ -2125,45 +2440,45 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     });
   };
 
-  const handleUseExistingUserPool = (appClient: AppClient & { userPoolId: string }) => {
+  const handleUseExistingAuthConfig = (appClient: AppClient & { authConfigId: string }) => {
     setSelectedAppClient(appClient);
     updateConfig({
-      useUserPool: true,
-      userPoolId: appClient.userPoolId,
+      useAuthConfig: true,
+      authConfigId: appClient.authConfigId,
       appClientId: appClient.id,
-      // Clear bringOwnProvider when using existing UserPool
+      // Clear bringOwnProvider when using existing AuthConfig
       bringOwnProvider: false,
       identityProviderClientId: '',
       identityProviderClientSecret: '',
       identityProviderDomain: '',
     });
-    setUserPoolModalOpen(false); 
+    setAuthConfigModalOpen(false); 
   };
 
-  const handleClearUserPool = () => {
+  const handleClearAuthConfig = () => {
     setSelectedAppClient(null);
     updateConfig({
-      useUserPool: false,
-      userPoolId: undefined,
+      useAuthConfig: false,
+      authConfigId: undefined,
       appClientId: undefined,
     });
   };
 
   return (
     <div className="space-y-6">
-      {/* User Pool Name */}
+      {/* Auth Config Name */}
       <div>
         <Label htmlFor="userGroupName" className="text-base font-semibold">
-          User Pool Name
+          Auth Config Name
         </Label>
         <p className="text-sm text-muted-foreground mb-3">
-          User pools are groups of users with specific permissions that can be reused between various APIs
+          Give a name to your Auth Config if its new or Search for an existing Auth Config to reuse
         </p>
         <div className="relative">
           <Input
             id="userGroupName"
             placeholder={
-              loadingUserPools || (loadingAuthData && !config.userGroupName)
+              loadingAuthConfigs || (loadingAuthData && !config.userGroupName)
                 ? "Loading..."
                 : "Enter a unique name (e.g., my-api-users)"
             }
@@ -2172,19 +2487,19 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
             className="pr-10"
             disabled={loadingAuthData && !config.userGroupName}
           />
-          {loadingUserPools || (loadingAuthData && !config.userGroupName) ? (
+          {loadingAuthConfigs || (loadingAuthData && !config.userGroupName) ? (
             <div className="absolute right-10 top-1/2 -translate-y-1/2">
               <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
             </div>
           ) : null}
           <DropdownMenu
             onOpenChange={(open) => {
-              // Refresh user pools in background when dropdown opens
+              // Refresh auth configs in background when dropdown opens
               // Show cached data immediately, refresh silently
               if (open) {
                 // Load in background without blocking UI
                 // Only show loading if we have no cached data
-                loadUserPools(existingUserPools.length === 0);
+                loadAuthConfigs(existingAuthConfigs.length === 0);
               }
             }}
           >
@@ -2194,18 +2509,18 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                 variant="ghost"
                 size="icon"
                 className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                title="Select existing user pool"
+                title="Select existing auth config"
               >
                 <Search className="h-4 w-4 text-muted-foreground" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-[200px] max-w-[400px]">
-              {loadingUserPools && existingUserPools.length === 0 ? (
+              {loadingAuthConfigs && existingAuthConfigs.length === 0 ? (
                 <DropdownMenuItem disabled>Loading...</DropdownMenuItem>
-              ) : existingUserPools.length === 0 ? (
-                <DropdownMenuItem disabled>No user pools found</DropdownMenuItem>
+              ) : existingAuthConfigs.length === 0 ? (
+                <DropdownMenuItem disabled>No auth configs found</DropdownMenuItem>
               ) : (
-                existingUserPools.map((pool) => (
+                existingAuthConfigs.map((pool) => (
                   <DropdownMenuItem
                     key={pool.id}
                     onClick={() => {
@@ -2267,31 +2582,44 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         </div>
 
         {/* OAuth Provider Configuration */}
-        {config.enableSocialAuth && (
+        {/* In edit mode, always show EditModeManagementUI if we have a project (to load auth config data) */}
+        {/* In create mode, only show if enableSocialAuth is true */}
+        {((isEditMode && project) || config.enableSocialAuth) && (
           <div className="space-y-4 pl-4 border-l-2 border-blue-200">
-            {/* Edit Mode: Show UserPool/AppClient/Provider Management UI */}
+            {/* Edit Mode: Show AuthConfig/AppClient/Provider Management UI */}
             {isEditMode ? (
-              <EditModeManagementUI
-                config={config}
-                updateConfig={updateConfig}
-                project={project}
-                onProjectUpdate={onProjectUpdate}
-                preloadedUserPools={preloadedUserPools}
-                preloadedAppClients={preloadedAppClients}
-                preloadedProviders={preloadedProviders}
-                loadingAuthData={loadingAuthData}
-              />
-            ) : (
-              /* Create Mode: Show UserPool data if selected AND social auth enabled, otherwise show third-party provider config */
-              <div className="space-y-4">
-                {/* Show UserPool/AppClient/Provider info when useUserPool is true AND social auth is enabled */}
-                {config.useUserPool && config.userPoolId && config.enableSocialAuth ? (
+              (() => {
+                const projectAuthConfigId = project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : undefined;
+                console.log('[AuthSection] 🎯 Rendering EditModeManagementUI in edit mode:', {
+                  projectAuthConfigId,
+                  configAuthConfigId: config.authConfigId,
+                  initialAuthConfigId: projectAuthConfigId || config.authConfigId,
+                });
+                return (
                   <EditModeManagementUI
                     config={config}
                     updateConfig={updateConfig}
                     project={project}
                     onProjectUpdate={onProjectUpdate}
-                    preloadedUserPools={preloadedUserPools}
+                    initialAuthConfigId={projectAuthConfigId || config.authConfigId}
+                    preloadedAuthConfigs={preloadedAuthConfigs}
+                    preloadedAppClients={preloadedAppClients}
+                    preloadedProviders={preloadedProviders}
+                    loadingAuthData={loadingAuthData}
+                  />
+                );
+              })()
+            ) : (
+              /* Create Mode: Show AuthConfig data if selected AND social auth enabled, otherwise show third-party provider config */
+              <div className="space-y-4">
+                {/* Show AuthConfig/AppClient/Provider info when useAuthConfig is true AND social auth is enabled */}
+                {config.useAuthConfig && config.authConfigId && config.enableSocialAuth ? (
+                  <EditModeManagementUI
+                    config={config}
+                    updateConfig={updateConfig}
+                    project={project}
+                    onProjectUpdate={onProjectUpdate}
+                    preloadedAuthConfigs={preloadedAuthConfigs}
                     preloadedAppClients={preloadedAppClients}
                     preloadedProviders={preloadedProviders}
                     loadingAuthData={loadingAuthData}
@@ -2493,37 +2821,37 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         )}
       </div>
 
-      <UserPoolModal
-        open={userPoolModalOpen}
-        onOpenChange={setUserPoolModalOpen}
+      <AuthConfigModal
+        open={authConfigModalOpen}
+        onOpenChange={setAuthConfigModalOpen}
         mode="select"
-        onSelect={handleUseExistingUserPool}
+        onSelect={handleUseExistingAuthConfig}
       />
 
-      {/* Simple User Pool Name Selection Modal */}
-      <Dialog open={userPoolSelectModalOpen} onOpenChange={setUserPoolSelectModalOpen}>
+      {/* Simple Auth Config Name Selection Modal */}
+      <Dialog open={authConfigSelectModalOpen} onOpenChange={setAuthConfigSelectModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Select User Pool</DialogTitle>
+            <DialogTitle>Select Auth Config</DialogTitle>
             <DialogDescription>
-              Select an existing user pool to reuse its name
+              Select an existing auth config to reuse its name
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            {loadingUserPools ? (
-              <div className="text-sm text-muted-foreground text-center py-4">Loading user pools...</div>
-            ) : existingUserPools.length === 0 ? (
-              <div className="text-sm text-muted-foreground text-center py-4">No user pools found</div>
+            {loadingAuthConfigs ? (
+              <div className="text-sm text-muted-foreground text-center py-4">Loading auth configs...</div>
+            ) : existingAuthConfigs.length === 0 ? (
+              <div className="text-sm text-muted-foreground text-center py-4">No auth configs found</div>
             ) : (
               <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {existingUserPools.map((pool) => (
+                {existingAuthConfigs.map((pool) => (
                   <Button
                     key={pool.id}
                     variant="outline"
                     className="w-full justify-start"
                     onClick={() => {
                       updateConfig({ userGroupName: pool.name });
-                      setUserPoolSelectModalOpen(false);
+                      setAuthConfigSelectModalOpen(false);
                     }}
                   >
                     <Users className="h-4 w-4 mr-2" />
@@ -2534,7 +2862,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUserPoolSelectModalOpen(false)}>
+            <Button variant="outline" onClick={() => setAuthConfigSelectModalOpen(false)}>
               Cancel
             </Button>
           </DialogFooter>

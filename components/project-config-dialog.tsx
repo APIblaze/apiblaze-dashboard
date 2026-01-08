@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Loader2, ExternalLink, Users, Key, Globe, Settings } from 'lucide-react';
 import { api } from '@/lib/api';
-import type { UserPool, AppClient, SocialProvider } from '@/types/user-pool';
+import type { AuthConfig, AppClient, SocialProvider } from '@/types/auth-config';
 
 // API response may have snake_case fields from the database
 type AppClientResponse = AppClient & {
@@ -29,46 +29,46 @@ interface ProjectConfigDialogProps {
 
 export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConfigDialogProps) {
   const [loading, setLoading] = useState(false);
-  const [userPool, setUserPool] = useState<UserPool | null>(null);
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
   const [appClient, setAppClient] = useState<AppClientResponse | null>(null);
   const [providers, setProviders] = useState<SocialProviderResponse[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !project) {
-      setUserPool(null);
+      setAuthConfig(null);
       setAppClient(null);
       setProviders([]);
       setError(null);
       return;
     }
 
-    // Extract user_pool_id and default_app_client_id from project config
+    // Extract auth_config_id and default_app_client_id from project config
     const config = project.config as Record<string, unknown> | undefined;
-    const userPoolId = config?.user_pool_id as string | undefined;
+    const authConfigId = config?.auth_config_id as string | undefined;
     const defaultAppClientId = (config?.default_app_client_id || config?.defaultAppClient) as string | undefined;
     const appClientId = defaultAppClientId || (config?.app_client_id as string | undefined);
 
-    if (!userPoolId || !appClientId) {
+    if (!authConfigId || !appClientId) {
       // No user pool configured for this project
       return;
     }
 
     // Fetch user pool, app client, and providers
-    const fetchUserPoolDetails = async () => {
+    const fetchAuthConfigDetails = async () => {
       setLoading(true);
       setError(null);
       try {
-        // Fetch UserPool
-        const pool = await api.getUserPool(userPoolId);
-        setUserPool(pool);
+        // Fetch AuthConfig
+        const pool = await api.getAuthConfig(authConfigId);
+        setAuthConfig(pool);
 
         // Fetch AppClient
-        const client = await api.getAppClient(userPoolId, appClientId);
+        const client = await api.getAppClient(authConfigId, appClientId);
         setAppClient(client);
 
         // Fetch Providers
-        const providerList = await api.listProviders(userPoolId, appClientId);
+        const providerList = await api.listProviders(authConfigId, appClientId);
         setProviders(providerList);
       } catch (err) {
         console.error('Error fetching user pool details:', err);
@@ -78,7 +78,7 @@ export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConf
       }
     };
 
-    fetchUserPoolDetails();
+    fetchAuthConfigDetails();
   }, [open, project]);
 
   if (!project) {
@@ -86,10 +86,10 @@ export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConf
   }
 
   const config = project.config as Record<string, unknown> | undefined;
-  const userPoolId = config?.user_pool_id as string | undefined;
+  const authConfigId = config?.auth_config_id as string | undefined;
   const defaultAppClientId = (config?.default_app_client_id || config?.defaultAppClient) as string | undefined;
   const appClientId = defaultAppClientId || (config?.app_client_id as string | undefined);
-  const hasUserPool = !!userPoolId && !!appClientId;
+  const hasAuthConfig = !!authConfigId && !!appClientId;
   
   // Build portal URL with clientId if available
   const getPortalUrl = () => {
@@ -218,7 +218,7 @@ export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConf
           </Card>
 
           {/* User Pool Configuration */}
-          {hasUserPool && (
+          {hasAuthConfig && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
@@ -238,8 +238,8 @@ export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConf
                   <div className="text-sm text-destructive py-4">{error}</div>
                 ) : (
                   <div className="space-y-6">
-                    {/* UserPool Details */}
-                    {userPool && (
+                    {/* AuthConfig Details */}
+                    {authConfig && (
                       <div>
                         <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
                           <Users className="h-4 w-4" />
@@ -248,16 +248,16 @@ export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConf
                         <div className="bg-muted/50 rounded-lg p-4 space-y-2">
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-muted-foreground">Name</span>
-                            <span className="text-sm font-medium">{userPool.name}</span>
+                            <span className="text-sm font-medium">{authConfig.name}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-muted-foreground">ID</span>
-                            <span className="text-sm font-mono">{userPool.id}</span>
+                            <span className="text-sm font-mono">{authConfig.id}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-muted-foreground">Created</span>
                             <span className="text-sm">
-                              {new Date(userPool.created_at).toLocaleDateString()}
+                              {new Date(authConfig.created_at).toLocaleDateString()}
                             </span>
                           </div>
                         </div>
@@ -362,7 +362,7 @@ export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConf
           )}
 
           {/* No User Pool Message */}
-          {!hasUserPool && (
+          {!hasAuthConfig && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">

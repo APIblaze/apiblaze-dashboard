@@ -31,19 +31,19 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
     try {
       setLoadingClientId(true);
       
-      // Get defaultAppClient and userPoolId from project config
+      // Get defaultAppClient and authConfigId from project config
       const projectConfig = project.config as Record<string, unknown> | undefined;
       const defaultAppClientId = (projectConfig?.default_app_client_id || projectConfig?.defaultAppClient) as string | undefined;
-      const userPoolId = projectConfig?.user_pool_id as string | undefined;
+      const authConfigId = projectConfig?.auth_config_id as string | undefined;
       
       let portalUrl = project.api_version
         ? `${project.urls.portal}/${project.api_version}`
         : project.urls.portal;
       
       // If we have a default app client, fetch its clientId and add it as a query parameter
-      if (defaultAppClientId && userPoolId) {
+      if (defaultAppClientId && authConfigId) {
         try {
-          const appClient = await api.getAppClient(userPoolId, defaultAppClientId);
+          const appClient = await api.getAppClient(authConfigId, defaultAppClientId);
           const clientId = (appClient as { client_id?: string; clientId?: string }).client_id || appClient.clientId;
           
           if (clientId) {
@@ -56,7 +56,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
           // Continue without clientId if fetch fails
         }
       } else if (defaultAppClientId) {
-        // If we have defaultAppClientId but no userPoolId, log a warning
+        // If we have defaultAppClientId but no authConfigId, log a warning
         console.warn('Default app client ID found but no user pool ID', { defaultAppClientId });
       }
       

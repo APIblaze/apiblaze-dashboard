@@ -3,7 +3,7 @@
  * Handles communication with internalapi.apiblaze.com
  */
 
-import type { UserPool, AppClient, SocialProvider } from '@/types/user-pool';
+import type { AuthConfig, AppClient, SocialProvider } from '@/types/auth-config';
 
 // Use Next.js API routes to proxy requests (keeps API key server-side)
 const API_BASE_URL = '/api';
@@ -155,7 +155,7 @@ class ApiClient {
       client_secret: string;
       scopes: string;
     };
-    user_pool_id?: string;
+    auth_config_id?: string;
     app_client_id?: string;
     default_app_client_id?: string;
     environments?: Record<string, { target: string }>;
@@ -189,8 +189,8 @@ class ApiClient {
     if (data.oauth_config) {
       backendData.oauth_config = data.oauth_config;
     }
-    if (data.user_pool_id) {
-      backendData.user_pool_id = data.user_pool_id;
+    if (data.auth_config_id) {
+      backendData.auth_config_id = data.auth_config_id;
     }
     if (data.app_client_id) {
       backendData.app_client_id = data.app_client_id;
@@ -227,45 +227,45 @@ class ApiClient {
     });
   }
 
-  // UserPools
-  async listUserPools() {
-    return this.request<UserPool[]>('/user-pools');
+  // AuthConfigs
+  async listAuthConfigs() {
+    return this.request<AuthConfig[]>('/auth-configs');
   }
 
-  async getUserPool(poolId: string): Promise<UserPool> {
-    return this.request<UserPool>(`/user-pools/${poolId}`);
+  async getAuthConfig(authConfigId: string): Promise<AuthConfig> {
+    return this.request<AuthConfig>(`/auth-configs/${authConfigId}`);
   }
 
-  async createUserPool(data: { name: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean }) {
-    return this.request('/user-pools', {
+  async createAuthConfig(data: { name: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean }) {
+    return this.request('/auth-configs', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async updateUserPool(poolId: string, data: { name?: string; default_app_client_id?: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean }) {
-    return this.request(`/user-pools/${poolId}`, {
+  async updateAuthConfig(authConfigId: string, data: { name?: string; default_app_client_id?: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean }) {
+    return this.request(`/auth-configs/${authConfigId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
 
-  async deleteUserPool(poolId: string) {
-    return this.request(`/user-pools/${poolId}`, {
+  async deleteAuthConfig(authConfigId: string) {
+    return this.request(`/auth-configs/${authConfigId}`, {
       method: 'DELETE',
     });
   }
 
   // AppClients
-  async listAppClients(poolId: string) {
-    return this.request<AppClient[]>(`/user-pools/${poolId}/app-clients`);
+  async listAppClients(authConfigId: string) {
+    return this.request<AppClient[]>(`/auth-configs/${authConfigId}/app-clients`);
   }
 
-  async getAppClient(poolId: string, clientId: string): Promise<AppClientResponse> {
-    return this.request<AppClientResponse>(`/user-pools/${poolId}/app-clients/${clientId}`);
+  async getAppClient(authConfigId: string, clientId: string): Promise<AppClientResponse> {
+    return this.request<AppClientResponse>(`/auth-configs/${authConfigId}/app-clients/${clientId}`);
   }
 
-  async createAppClient(poolId: string, data: {
+  async createAppClient(authConfigId: string, data: {
     name: string;
     refreshTokenExpiry?: number;
     idTokenExpiry?: number;
@@ -274,13 +274,13 @@ class ApiClient {
     signoutUris?: string[];
     scopes?: string[];
   }) {
-    return this.request(`/user-pools/${poolId}/app-clients`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async updateAppClient(poolId: string, clientId: string, data: {
+  async updateAppClient(authConfigId: string, clientId: string, data: {
     name?: string;
     refreshTokenExpiry?: number;
     idTokenExpiry?: number;
@@ -289,68 +289,68 @@ class ApiClient {
     signoutUris?: string[];
     scopes?: string[];
   }) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
 
-  async deleteAppClient(poolId: string, clientId: string) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}`, {
+  async deleteAppClient(authConfigId: string, clientId: string) {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
       method: 'DELETE',
     });
   }
 
   // Providers
-  async listProviders(poolId: string, clientId: string): Promise<SocialProviderResponse[]> {
-    return this.request<SocialProviderResponse[]>(`/user-pools/${poolId}/app-clients/${clientId}/providers`);
+  async listProviders(authConfigId: string, clientId: string): Promise<SocialProviderResponse[]> {
+    return this.request<SocialProviderResponse[]>(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`);
   }
 
-  async addProvider(poolId: string, clientId: string, data: {
+  async addProvider(authConfigId: string, clientId: string, data: {
     type: string;
     clientId: string;
     clientSecret: string;
     domain?: string;
     tokenType?: 'apiblaze' | 'thirdParty';
   }) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}/providers`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async updateProvider(poolId: string, clientId: string, providerId: string, data: {
+  async updateProvider(authConfigId: string, clientId: string, providerId: string, data: {
     type: string;
     clientId: string;
     clientSecret: string;
     domain?: string;
     tokenType?: 'apiblaze' | 'thirdParty';
   }) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}/providers/${providerId}`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
 
-  async removeProvider(poolId: string, clientId: string, providerId: string) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}/providers/${providerId}`, {
+  async removeProvider(authConfigId: string, clientId: string, providerId: string) {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}`, {
       method: 'DELETE',
     });
   }
 
   /**
-   * Create UserPool, AppClient, and Provider with default GitHub credentials
+   * Create AuthConfig, AppClient, and Provider with default GitHub credentials
    * This keeps the GitHub client secret server-side only
    */
-  async createUserPoolWithDefaultGitHub(data: {
-    userPoolName: string;
+  async createAuthConfigWithDefaultGitHub(data: {
+    authConfigName: string;
     appClientName: string;
     scopes?: string[];
     enableSocialAuth?: boolean;
     enableApiKeyAuth?: boolean;
     bringMyOwnOAuth?: boolean;
   }) {
-    return this.request<{ userPoolId: string; appClientId: string }>('/user-pools/create-with-default-github', {
+    return this.request<{ authConfigId: string; appClientId: string }>('/auth-configs/create-with-default-github', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -358,16 +358,16 @@ class ApiClient {
 
   // TODO: Users and Groups management methods
   // These will be implemented when the backend API routes are available:
-  // - listUsers(poolId: string)
-  // - getUser(poolId: string, userId: string)
-  // - createUser(poolId: string, data: {...})
-  // - updateUser(poolId: string, userId: string, data: {...})
-  // - deleteUser(poolId: string, userId: string)
-  // - listGroups(poolId: string)
-  // - getGroup(poolId: string, groupId: string)
-  // - createGroup(poolId: string, data: {...})
-  // - updateGroup(poolId: string, groupId: string, data: {...})
-  // - deleteGroup(poolId: string, groupId: string)
+  // - listUsers(authConfigId: string)
+  // - getUser(authConfigId: string, userId: string)
+  // - createUser(authConfigId: string, data: {...})
+  // - updateUser(authConfigId: string, userId: string, data: {...})
+  // - deleteUser(authConfigId: string, userId: string)
+  // - listGroups(authConfigId: string)
+  // - getGroup(authConfigId: string, groupId: string)
+  // - createGroup(authConfigId: string, data: {...})
+  // - updateGroup(authConfigId: string, groupId: string, data: {...})
+  // - deleteGroup(authConfigId: string, groupId: string)
 }
 
 export const api = new ApiClient();
