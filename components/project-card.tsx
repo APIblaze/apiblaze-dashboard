@@ -118,15 +118,15 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
         ? `${project.urls.portal}/${project.api_version}`
         : project.urls.portal;
       
-      // If an app client is provided, use its name
+      // If an app client is provided, use its clientId
       if (appClient) {
-        if (appClient.name) {
-          // Add /login?clientName={clientName} to the portal URL
+        if (appClient.clientId) {
+          // Add /login?clientId={clientId} to the portal URL
           const url = new URL(portalUrl);
           url.pathname = url.pathname.endsWith('/') 
             ? `${url.pathname}login` 
             : `${url.pathname}/login`;
-          url.searchParams.set('clientName', appClient.name);
+          url.searchParams.set('clientId', appClient.clientId);
           portalUrl = url.toString();
         }
       } else {
