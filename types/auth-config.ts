@@ -23,6 +23,16 @@ export interface AppClient {
   redirectUris: string[];
   signoutUris: string[];
   scopes: string[];
+  jwks?: {
+    keys: Array<{
+      kty: string;
+      use: string;
+      kid: string;
+      n: string;
+      e: string;
+      alg: string;
+    }>;
+  };
   created_at: string;
   updated_at: string;
   providers_count?: number;
