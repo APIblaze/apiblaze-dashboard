@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlertCircle, Plus, X, Users, Key, Copy, Check, Trash2, Search, ChevronDown, Star, ExternalLink, Loader2 } from 'lucide-react';
 import { ProjectConfig, SocialProvider } from './types';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { AuthConfigModal } from '@/components/auth-config/auth-config-modal';
 import { api } from '@/lib/api';
 import { updateProjectConfig } from '@/lib/api/projects';
@@ -160,8 +160,8 @@ function EditModeManagementUI({
     }
   };
 
-  // Get initial values from project config in edit mode
-  const getInitialAuthConfigId = () => {
+  // Get initial values from project config in edit mode - memoized to prevent recalculation
+  const authConfigId = useMemo(() => {
     if (initialAuthConfigId) {
       return initialAuthConfigId;
     }
@@ -170,35 +170,36 @@ function EditModeManagementUI({
     }
     if (project?.config) {
       const projectConfig = project.config as Record<string, unknown>;
-      const authConfigId = projectConfig.auth_config_id as string | undefined;
-      if (authConfigId) {
-        return authConfigId;
+      const id = projectConfig.auth_config_id as string | undefined;
+      if (id) {
+        return id;
       }
     }
     // If no authConfigId in project, but we have exactly one preloaded auth config, use it
     if (preloadedAuthConfigs && preloadedAuthConfigs.length === 1) {
-      console.log('[AuthSection] ✅ No authConfigId in project, but found exactly one preloaded auth config, using it:', preloadedAuthConfigs[0].id);
       return preloadedAuthConfigs[0].id;
     }
     // Check if we have preloaded app clients - use the first key
     if (preloadedAppClients && Object.keys(preloadedAppClients).length === 1) {
-      const authConfigIdFromPreload = Object.keys(preloadedAppClients)[0];
-      console.log('[AuthSection] ✅ No authConfigId in project, but found preloaded app clients for authConfigId:', authConfigIdFromPreload);
-      return authConfigIdFromPreload;
+      return Object.keys(preloadedAppClients)[0];
     }
     return undefined;
-  };
+  }, [initialAuthConfigId, config.authConfigId, project?.config, preloadedAuthConfigs, preloadedAppClients]);
 
-  const getInitialAppClients = (): AppClient[] => {
-    const authConfigId = getInitialAuthConfigId();
+  // State
+  const [authConfigs, setAuthConfigs] = useState<AuthConfig[]>(preloadedAuthConfigs || []);
+  const [loadingAuthConfigs, setLoadingAuthConfigs] = useState(false);
+  const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(authConfigId);
+  
+  // Memoize initial app clients and providers
+  const initialAppClients = useMemo(() => {
     if (authConfigId && preloadedAppClients?.[authConfigId]) {
       return preloadedAppClients[authConfigId];
     }
     return [];
-  };
+  }, [authConfigId, preloadedAppClients]);
 
-  const getInitialProviders = (): Record<string, SocialProviderResponse[]> => {
-    const authConfigId = getInitialAuthConfigId();
+  const initialProviders = useMemo(() => {
     const result: Record<string, SocialProviderResponse[]> = {};
     if (authConfigId && preloadedAppClients?.[authConfigId]) {
       preloadedAppClients[authConfigId].forEach((client) => {
@@ -209,25 +210,15 @@ function EditModeManagementUI({
       });
     }
     return result;
-  };
-
-  // State
-  const [authConfigs, setAuthConfigs] = useState<AuthConfig[]>(preloadedAuthConfigs || []);
-  const [loadingAuthConfigs, setLoadingAuthConfigs] = useState(false);
-  
-  // Get authConfigId from project - recalculate when preloaded data changes
-  const authConfigId = getInitialAuthConfigId();
-  const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(() => getInitialAuthConfigId());
+  }, [authConfigId, preloadedAppClients, preloadedProviders]);
   
   // Update selectedAuthConfigId when authConfigId changes (e.g., when preloaded data arrives)
   useEffect(() => {
     if (authConfigId && authConfigId !== selectedAuthConfigId) {
-      console.log('[AuthSection] 🔧 Updating selectedAuthConfigId from:', selectedAuthConfigId, 'to:', authConfigId);
       setSelectedAuthConfigId(authConfigId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authConfigId, preloadedAuthConfigs, preloadedAppClients]);
-  const [appClients, setAppClients] = useState<AppClient[]>(getInitialAppClients());
+  }, [authConfigId, selectedAuthConfigId]);
+  const [appClients, setAppClients] = useState<AppClient[]>(initialAppClients);
   const [loadingAppClients, setLoadingAppClients] = useState(false);
   const [appClientDetails, setAppClientDetails] = useState<Record<string, AppClientResponse>>({});
   const [loadingAppClientDetails, setLoadingAppClientDetails] = useState<Record<string, boolean>>({});
@@ -241,7 +232,7 @@ function EditModeManagementUI({
     return [`https://${projectName}.portal.apiblaze.com/${apiVersion}`];
   });
   const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
-  const [providers, setProviders] = useState<Record<string, SocialProviderResponse[]>>(getInitialProviders());
+  const [providers, setProviders] = useState<Record<string, SocialProviderResponse[]>>(initialProviders);
   const [loadingProviders, setLoadingProviders] = useState<Record<string, boolean>>({});
   const [showAddProvider, setShowAddProvider] = useState<Record<string, boolean>>({});
   const [newProvider, setNewProvider] = useState<Record<string, {
@@ -347,9 +338,7 @@ function EditModeManagementUI({
 
   // ONE simple useEffect to load everything
   useEffect(() => {
-    // Recalculate authConfigId in case preloaded data changed
-    const calculatedAuthConfigId = getInitialAuthConfigId();
-    const currentAuthConfigId = calculatedAuthConfigId || selectedAuthConfigId;
+    const currentAuthConfigId = authConfigId || selectedAuthConfigId;
     
     if (!currentAuthConfigId) {
       return;
@@ -419,7 +408,7 @@ function EditModeManagementUI({
         });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authConfigId, selectedAuthConfigId, preloadedAuthConfigs, preloadedAppClients]);
+  }, [authConfigId, selectedAuthConfigId]);
 
   // Load auth configs if not preloaded
   useEffect(() => {
@@ -1624,26 +1613,6 @@ function EditModeManagementUI({
 }
 
 export function AuthenticationSection({ config, updateConfig, isEditMode = false, project, onProjectUpdate, preloadedAuthConfigs, preloadedAppClients, preloadedProviders, loadingAuthData }: AuthenticationSectionProps) {
-  // Log the full project config to see what fields are available
-  const projectConfig = project?.config as Record<string, unknown> | undefined;
-  console.log('[AuthSection] 🚀 AuthenticationSection component rendered:', {
-    isEditMode,
-    hasProject: !!project,
-    projectId: project?.project_id,
-    projectConfigKeys: projectConfig ? Object.keys(projectConfig) : [],
-    projectConfigFull: projectConfig,
-    projectAuthConfigId: projectConfig?.auth_config_id,
-    projectUserPoolId: projectConfig?.user_pool_id, // Check for old field name
-    configAuthConfigId: config.authConfigId,
-    configUserPoolId: (config as unknown as Record<string, unknown>).userPoolId as string | undefined, // Check for old field name
-    configEnableSocialAuth: config.enableSocialAuth,
-    hasPreloadedAuthConfigs: !!preloadedAuthConfigs,
-    preloadedAuthConfigsCount: preloadedAuthConfigs?.length || 0,
-    preloadedAuthConfigs: preloadedAuthConfigs?.map(ac => ({ id: ac.id, name: ac.name })),
-    hasPreloadedAppClients: !!preloadedAppClients,
-    preloadedAppClientsKeys: preloadedAppClients ? Object.keys(preloadedAppClients) : [],
-    preloadedAppClientsFull: preloadedAppClients,
-  });
   
   const [newScope, setNewScope] = useState('');
   // Helper to get default callback URL based on current project name
@@ -1718,28 +1687,25 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   const hasLoadedAuthConfigsRef = useRef(false);
 
   // Load existing AuthConfigs when social auth is enabled (only once or when enabled changes)
+  // Skip if we have preloaded data - create-project-dialog already handles loading
   useEffect(() => {
-    // Use preloaded data if available
     if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
-      if (existingAuthConfigs.length === 0 || JSON.stringify(existingAuthConfigs) !== JSON.stringify(preloadedAuthConfigs)) {
-        console.log('[AuthSection] ✅ Using preloaded auth configs');
+      if (existingAuthConfigs.length === 0) {
         setExistingAuthConfigs(preloadedAuthConfigs);
         hasLoadedAuthConfigsRef.current = true;
       }
       return;
     }
     
+    // Only load if no preloaded data and social auth is enabled
     if (config.enableSocialAuth && !hasLoadedAuthConfigsRef.current && existingAuthConfigs.length === 0) {
-      // Only load if we haven't loaded yet and we don't have any configs
-      console.log('[AuthSection] 📡 Loading auth configs from API (no preloaded data)');
       loadAuthConfigs(true);
       hasLoadedAuthConfigsRef.current = true;
     } else if (!config.enableSocialAuth) {
-      // Reset the ref when social auth is disabled
       hasLoadedAuthConfigsRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.enableSocialAuth, preloadedAuthConfigs]); // Removed existingAuthConfigs.length to prevent infinite loop
+  }, [config.enableSocialAuth, preloadedAuthConfigs]);
 
   // Track initial enableSocialAuth, enableApiKey, and bringOwnProvider to avoid updating on mount
   // These refs are used to prevent triggering update useEffects when syncing from authConfig
@@ -1880,24 +1846,12 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     }
   }, [preloadedAuthConfigs]);
 
-  // Preload auth configs in the background when component mounts (if not already preloaded)
-  // This ensures the dropdown feels instant when opened
+  // Initialize with preloaded auth configs - no need to load if already preloaded
   useEffect(() => {
-    console.log('[AuthSection] 🟢 Preload effect:', {
-      hasPreloaded: !!(preloadedAuthConfigs && preloadedAuthConfigs.length > 0),
-      preloadedCount: preloadedAuthConfigs?.length || 0,
-      existingAuthConfigsCount: existingAuthConfigs.length,
-    });
-    
-    // Initialize with preloaded pools if available
     if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
-      console.log('[AuthSection] ✅ Using preloaded auth configs:', preloadedAuthConfigs.length);
       setExistingAuthConfigs(preloadedAuthConfigs);
-    } else if (existingAuthConfigs.length === 0) {
-      // Only load if we don't have preloaded data and existing pools are empty
-      console.log('[AuthSection] 📥 Loading auth configs from API...');
-      loadAuthConfigs(false);
     }
+    // Don't load from API here - create-project-dialog already handles it
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preloadedAuthConfigs]);
 
@@ -2227,15 +2181,9 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
             </div>
           ) : null}
           <DropdownMenu
-            onOpenChange={(open) => {
-              // Refresh auth configs in background when dropdown opens (only if we haven't loaded recently)
-              // Show cached data immediately, refresh silently
-              if (open && !hasLoadedAuthConfigsRef.current && existingAuthConfigs.length === 0) {
-                // Only load if we haven't loaded yet and have no cached data
-                // Use the same ref to prevent repeated calls
-                loadAuthConfigs(false);
-                hasLoadedAuthConfigsRef.current = true;
-              }
+            onOpenChange={() => {
+              // Don't load here - use preloaded data or existing data
+              // create-project-dialog already handles preloading
             }}
           >
             <DropdownMenuTrigger asChild>
@@ -2323,27 +2271,17 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           <div className="space-y-4 pl-4 border-l-2 border-blue-200">
             {/* Edit Mode: Show AuthConfig/AppClient/Provider Management UI */}
             {isEditMode ? (
-              (() => {
-                const projectAuthConfigId = project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : undefined;
-                console.log('[AuthSection] 🎯 Rendering EditModeManagementUI in edit mode:', {
-                  projectAuthConfigId,
-                  configAuthConfigId: config.authConfigId,
-                  initialAuthConfigId: projectAuthConfigId || config.authConfigId,
-                });
-                return (
-                  <EditModeManagementUI
-                    config={config}
-                    updateConfig={updateConfig}
-                    project={project}
-                    onProjectUpdate={onProjectUpdate}
-                    initialAuthConfigId={projectAuthConfigId || config.authConfigId}
-                    preloadedAuthConfigs={preloadedAuthConfigs}
-                    preloadedAppClients={preloadedAppClients}
-                    preloadedProviders={preloadedProviders}
-                    loadingAuthData={loadingAuthData}
-                  />
-                );
-              })()
+              <EditModeManagementUI
+                config={config}
+                updateConfig={updateConfig}
+                project={project}
+                onProjectUpdate={onProjectUpdate}
+                initialAuthConfigId={project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : config.authConfigId}
+                preloadedAuthConfigs={preloadedAuthConfigs}
+                preloadedAppClients={preloadedAppClients}
+                preloadedProviders={preloadedProviders}
+                loadingAuthData={loadingAuthData}
+              />
             ) : (
               /* Create Mode: Show AuthConfig data if selected AND social auth enabled, otherwise show third-party provider config */
               <div className="space-y-4">

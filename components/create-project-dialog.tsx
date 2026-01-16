@@ -247,35 +247,42 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     }
   }, [open, currentProject, project]);
 
-  // Preload auth data when project is selected (even if dialog is not open yet)
+  // Track if we're currently loading to prevent duplicate loads
+  const isLoadingAuthDataRef = useRef(false);
+  const hasLoadedAuthConfigsRef = useRef(false);
+
+  // Preload auth data when project is selected OR when dialog opens
   // This ensures data is ready when user switches to auth tab
   useEffect(() => {
     const projectForEdit = currentProject || project;
-    if (!projectForEdit) {
-      setLoadingAuthData(false);
+    
+    // Only load if dialog is open or we have a project
+    if (!open && !projectForEdit) {
+      return;
+    }
+
+    // Skip if already loading or already loaded
+    if (isLoadingAuthDataRef.current || (hasLoadedAuthConfigsRef.current && preloadedAuthConfigs.length > 0)) {
       return;
     }
 
     const loadAuthData = async () => {
+      isLoadingAuthDataRef.current = true;
       setLoadingAuthData(true);
       try {
-        const projectConfig = projectForEdit.config as Record<string, unknown> | undefined;
+        const projectConfig = projectForEdit?.config as Record<string, unknown> | undefined;
         let authConfigId = (projectConfig?.auth_config_id || projectConfig?.user_pool_id) as string | undefined;
         
         // Load auth configs first (if not already loaded)
-        // Note: We check preloadedAuthConfigs.length inside the effect but don't include it in deps
-        // to avoid re-running when configs are loaded. We only want to run when project changes.
-        if (preloadedAuthConfigs.length === 0) {
+        if (preloadedAuthConfigs.length === 0 && !hasLoadedAuthConfigsRef.current) {
           try {
-            console.log('[CreateProjectDialog] 📥 Preloading auth configs...');
             const pools = await api.listAuthConfigs();
             const poolsArray = Array.isArray(pools) ? pools : [];
             setPreloadedAuthConfigs(poolsArray);
-            console.log('[CreateProjectDialog] ✅ Preloaded auth configs:', poolsArray.length);
+            hasLoadedAuthConfigsRef.current = true;
             
             // If no authConfigId in project config but we have exactly one auth config, use it
             if (!authConfigId && poolsArray.length === 1) {
-              console.log('[CreateProjectDialog] ⚠️ No authConfigId in project config, but found exactly one auth config, using it:', poolsArray[0].id);
               authConfigId = poolsArray[0].id;
             }
           } catch (error) {
@@ -284,24 +291,21 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         } else {
           // Auth configs already loaded - check if we should use the first one
           if (!authConfigId && preloadedAuthConfigs.length === 1) {
-            console.log('[CreateProjectDialog] ⚠️ No authConfigId in project config, but found exactly one preloaded auth config, using it:', preloadedAuthConfigs[0].id);
             authConfigId = preloadedAuthConfigs[0].id;
           }
         }
         
         if (authConfigId) {
-          console.log('[CreateProjectDialog] 📥 Preloading app clients for authConfigId:', authConfigId);
           // Preload ALL AppClients for this authConfig
           try {
             const clients = await api.listAppClients(authConfigId);
             const clientsArray = Array.isArray(clients) ? clients : [];
-            console.log('[CreateProjectDialog] ✅ Preloaded app clients:', clientsArray.length);
             setPreloadedAppClients(prev => ({
               ...prev,
               [authConfigId]: clientsArray,
             }));
             
-            // Preload providers for ALL app clients (not just one)
+            // Preload providers for ALL app clients
             const providerPromises = clientsArray.map(async (client) => {
               try {
                 const providers = await api.listProviders(authConfigId, client.id);
@@ -312,7 +316,6 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                 }));
               } catch (error) {
                 console.error(`Error preloading providers for app client ${client.id}:`, error);
-                // Set empty array on error
                 setPreloadedProviders(prev => ({
                   ...prev,
                   [`${authConfigId}-${client.id}`]: [],
@@ -320,83 +323,64 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               }
             });
             
-            // Wait for all provider loads to complete
             await Promise.all(providerPromises);
-            console.log('[CreateProjectDialog] ✅ Finished preloading all auth data');
           } catch (error) {
             console.error('Error preloading app clients:', error);
           }
-        } else {
-          console.log('[CreateProjectDialog] ⏭️ No authConfigId found, skipping app clients preload');
         }
       } catch (error) {
         console.error('Error preloading auth data:', error);
       } finally {
         setLoadingAuthData(false);
+        isLoadingAuthDataRef.current = false;
       }
     };
 
     void loadAuthData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProject, project]); // Run when project changes, not when dialog opens
+  }, [open, currentProject, project]); // Run when dialog opens OR project changes
 
-  // Preload data when dialog opens - this ensures instant response
+  // Preload GitHub repos when dialog opens
   useEffect(() => {
-    if (open) {
-      // Only load auth configs if not already loaded (to avoid duplicate calls)
-      const loadAuthConfigs = async () => {
-        if (preloadedAuthConfigs.length === 0) {
-          try {
-            console.log('[CreateProjectDialog] 📥 Loading auth configs on dialog open...');
-            const pools = await api.listAuthConfigs();
-            setPreloadedAuthConfigs(Array.isArray(pools) ? pools : []);
-            console.log('[CreateProjectDialog] ✅ Loaded auth configs on dialog open:', Array.isArray(pools) ? pools.length : 0);
-          } catch (error) {
-            console.error('Error preloading auth configs:', error);
-            setPreloadedAuthConfigs([]);
-          }
-        } else {
-          console.log('[CreateProjectDialog] ⏭️ Auth configs already loaded, skipping');
-        }
-      };
+    if (!open) {
+      return;
+    }
 
-      // Preload GitHub repos if GitHub app is installed
-      const loadGitHubRepos = async () => {
-        try {
-          // Check if GitHub app is installed first
-          const statusResponse = await fetchGitHubAPI('/api/github/installation-status', {
-            cache: 'no-store',
-          });
-          
-          if (statusResponse.ok) {
-            const status = await statusResponse.json() as { installed?: boolean };
-            if (status.installed) {
-              // App is installed, preload repos
-              const reposResponse = await fetchGitHubAPI('/api/github/repos');
-              if (reposResponse.ok) {
-                const repos = await reposResponse.json() as Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>;
-                setPreloadedGitHubRepos(Array.isArray(repos) ? repos : []);
-              }
+    const loadGitHubRepos = async () => {
+      try {
+        const statusResponse = await fetchGitHubAPI('/api/github/installation-status', {
+          cache: 'no-store',
+        });
+        
+        if (statusResponse.ok) {
+          const status = await statusResponse.json() as { installed?: boolean };
+          if (status.installed) {
+            const reposResponse = await fetchGitHubAPI('/api/github/repos');
+            if (reposResponse.ok) {
+              const repos = await reposResponse.json() as Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>;
+              setPreloadedGitHubRepos(Array.isArray(repos) ? repos : []);
             }
           }
-        } catch (error) {
-          console.error('Error preloading GitHub repos:', error);
-          // Silently fail - not critical
         }
-      };
+      } catch (error) {
+        // Silently fail - not critical
+      }
+    };
 
-      // Load all data in parallel
-      void loadAuthConfigs();
-      void loadGitHubRepos();
-    } else {
-      // Clear preloaded data when dialog closes
+    void loadGitHubRepos();
+  }, [open]);
+
+  // Clear preloaded data when dialog closes
+  useEffect(() => {
+    if (!open) {
       setPreloadedAuthConfigs([]);
       setPreloadedGitHubRepos([]);
       setPreloadedAppClients({});
       setPreloadedProviders({});
       setLoadingAuthData(false);
+      isLoadingAuthDataRef.current = false;
+      hasLoadedAuthConfigsRef.current = false;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const updateConfig = (updates: Partial<ProjectConfig>) => {
