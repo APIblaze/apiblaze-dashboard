@@ -22,7 +22,7 @@ import type { Project } from '@/types/project';
 // API response may have snake_case fields from the database
 type AppClientResponse = AppClient & {
   client_id?: string;
-  redirect_uris?: string[];
+  authorized_callback_urls?: string[];
   signout_uris?: string[];
 };
 
@@ -272,6 +272,40 @@ function EditModeManagementUI({
   const [loadingSecret, setLoadingSecret] = useState<string | null>(null);
   const [showAddAppClient, setShowAddAppClient] = useState(false);
   const [newAppClientName, setNewAppClientName] = useState('');
+  // Initialize with default URL based on project name
+  const getDefaultCallbackUrl = () => {
+    const projectName = config.projectName || project?.project_id || 'project';
+    const apiVersion = config.apiVersion || '1.0.0';
+    return `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
+  };
+  const [authorizedCallbackUrls, setAuthorizedCallbackUrls] = useState<string[]>(() => {
+    return [getDefaultCallbackUrl()];
+  });
+  const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
+  
+  // Update default URL when project name changes in EditModeManagementUI
+  useEffect(() => {
+    const defaultUrl = getDefaultCallbackUrl();
+    const currentUrls = authorizedCallbackUrls;
+    
+    // Check if first URL is a portal.apiblaze.com URL (old default pattern without version, or new pattern with version)
+    const firstUrlIsDefault = currentUrls.length > 0 && 
+      (currentUrls[0].match(/^https:\/\/[^/]+\.portal\.apiblaze\.com$/) || 
+       currentUrls[0].match(/^https:\/\/[^/]+\.portal\.apiblaze\.com\/[^/]+$/));
+    
+    if (firstUrlIsDefault && currentUrls[0] !== defaultUrl) {
+      // Replace the first URL with the new default
+      const otherUrls = currentUrls.slice(1).filter(u => u !== defaultUrl);
+      const updatedUrls = [defaultUrl, ...otherUrls];
+      setAuthorizedCallbackUrls(updatedUrls);
+    } else if (currentUrls.length === 0 || !currentUrls.some(u => u.match(/^https:\/\/[^/]+\.portal\.apiblaze\.com(\/.*)?$/))) {
+      // No default URL present, add it as first
+      const otherUrls = currentUrls.filter(u => !u.match(/^https:\/\/[^/]+\.portal\.apiblaze\.com(\/.*)?$/));
+      const updatedUrls = [defaultUrl, ...otherUrls];
+      setAuthorizedCallbackUrls(updatedUrls);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.projectName, project?.project_id, config.apiVersion]);
   
   // Provider management - keyed by app client ID
   const [providers, setProviders] = useState<Record<string, SocialProviderResponse[]>>(getInitialProviders());
@@ -1011,13 +1045,64 @@ function EditModeManagementUI({
     }
   };
 
+  const validateHttpsUrl = (url: string): { valid: boolean; error?: string } => {
+    try {
+      const urlObj = new URL(url);
+      if (urlObj.protocol !== 'https:') {
+        return { valid: false, error: 'URL must use HTTPS protocol' };
+      }
+      return { valid: true };
+    } catch (error) {
+      return { valid: false, error: 'Invalid URL format' };
+    }
+  };
+
+  const addAuthorizedCallbackUrl = () => {
+    const url = newAuthorizedCallbackUrl.trim();
+    if (!url) return;
+
+    if (authorizedCallbackUrls.includes(url)) {
+      alert('This URL is already in the list');
+      return;
+    }
+
+    const validation = validateHttpsUrl(url);
+    if (!validation.valid) {
+      alert(validation.error || 'Invalid URL');
+      return;
+    }
+
+    setAuthorizedCallbackUrls([...authorizedCallbackUrls, url]);
+    setNewAuthorizedCallbackUrl('');
+  };
+
+  const removeAuthorizedCallbackUrl = (url: string) => {
+    setAuthorizedCallbackUrls(authorizedCallbackUrls.filter((u) => u !== url));
+  };
+
   const handleCreateAppClient = async () => {
     if (!selectedAuthConfigId || !newAppClientName.trim()) return;
+    
+    // Generate default callback URL from project name
+    const projectName = config.projectName || project?.project_id || 'project';
+    const apiVersion = config.apiVersion || '1.0.0';
+    const defaultCallbackUrl = `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
+    
+    // Ensure default URL is included and is first
+    const callbackUrls = authorizedCallbackUrls.length > 0 
+      ? authorizedCallbackUrls 
+      : [defaultCallbackUrl];
+    
+    // Make sure default URL is first if it's not already
+    const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
+      ? [defaultCallbackUrl, ...callbackUrls.filter(u => u !== defaultCallbackUrl)]
+      : [defaultCallbackUrl, ...callbackUrls];
     
     try {
       const newClient = await api.createAppClient(selectedAuthConfigId, {
         name: newAppClientName,
         scopes: ['email', 'openid', 'profile'],
+        authorizedCallbackUrls: finalCallbackUrls,
       });
       
       // Add the new client to the state immediately so it appears right away
@@ -1041,6 +1126,8 @@ function EditModeManagementUI({
       await loadAppClients(selectedAuthConfigId, false, true);
       
       setNewAppClientName('');
+      setAuthorizedCallbackUrls([]);
+      setNewAuthorizedCallbackUrl('');
       setShowAddAppClient(false);
     } catch (error) {
       console.error('Error creating app client:', error);
@@ -1270,6 +1357,51 @@ function EditModeManagementUI({
                     className="mt-1"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Authorized Callback URLs</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={newAuthorizedCallbackUrl}
+                      onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)}
+                      placeholder="https://example.com/callback"
+                      className="text-xs"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addAuthorizedCallbackUrl();
+                        }
+                      }}
+                    />
+                    <Button type="button" size="sm" onClick={addAuthorizedCallbackUrl}>
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {authorizedCallbackUrls.map((url, index) => (
+                      <div
+                        key={url}
+                        className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs"
+                      >
+                        {index === 0 && (
+                          <Badge variant="secondary" className="mr-1 text-xs">
+                            <Star className="h-2 w-2 mr-1" />
+                            Default
+                          </Badge>
+                        )}
+                        <span>{url}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-4 w-4 p-0"
+                          onClick={() => removeAuthorizedCallbackUrl(url)}
+                        >
+                          <X className="h-2 w-2" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -1286,6 +1418,8 @@ function EditModeManagementUI({
                     onClick={() => {
                       setShowAddAppClient(false);
                       setNewAppClientName('');
+                      setAuthorizedCallbackUrls([]);
+                      setNewAuthorizedCallbackUrl('');
                     }}
                   >
                     Cancel
@@ -1767,7 +1901,57 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   });
   
   const [newScope, setNewScope] = useState('');
+  // Helper to get default callback URL based on current project name
+  const getDefaultCallbackUrl = () => {
+    const projectName = config.projectName || 'project';
+    const apiVersion = config.apiVersion || '1.0.0';
+    return `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
+  };
+  
+  // Initialize with default URL if none exist
+  const [authorizedCallbackUrls, setAuthorizedCallbackUrls] = useState<string[]>(() => {
+    if (config.authorizedCallbackUrls && config.authorizedCallbackUrls.length > 0) {
+      return config.authorizedCallbackUrls;
+    }
+    const defaultUrl = getDefaultCallbackUrl();
+    return [defaultUrl];
+  });
+  const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
   const [authConfigModalOpen, setAuthConfigModalOpen] = useState(false);
+  
+  // Update default URL when project name changes
+  useEffect(() => {
+    const defaultUrl = getDefaultCallbackUrl();
+    const currentUrls = authorizedCallbackUrls;
+    
+    // Check if first URL is a portal.apiblaze.com URL (old default pattern without version, or new pattern with version)
+    const firstUrlIsDefault = currentUrls.length > 0 && 
+      (currentUrls[0].match(/^https:\/\/[^/]+\.portal\.apiblaze\.com$/) || 
+       currentUrls[0].match(/^https:\/\/[^/]+\.portal\.apiblaze\.com\/[^/]+$/));
+    
+    if (firstUrlIsDefault) {
+      // Replace the first URL with the new default
+      const otherUrls = currentUrls.slice(1).filter(u => u !== defaultUrl);
+      const updatedUrls = [defaultUrl, ...otherUrls];
+      if (JSON.stringify(updatedUrls) !== JSON.stringify(currentUrls)) {
+        setAuthorizedCallbackUrls(updatedUrls);
+        updateConfig({ authorizedCallbackUrls: updatedUrls });
+      }
+    } else if (currentUrls.length === 0 || !currentUrls.some(u => u.match(/^https:\/\/[^/]+\.portal\.apiblaze\.com(\/.*)?$/))) {
+      // No default URL present, add it as first
+      const otherUrls = currentUrls.filter(u => !u.match(/^https:\/\/[^/]+\.portal\.apiblaze\.com(\/.*)?$/));
+      const updatedUrls = [defaultUrl, ...otherUrls];
+      setAuthorizedCallbackUrls(updatedUrls);
+      updateConfig({ authorizedCallbackUrls: updatedUrls });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.projectName, config.apiVersion]);
+  
+  // Helper function to update both state and config
+  const updateAuthorizedCallbackUrls = (urls: string[]) => {
+    setAuthorizedCallbackUrls(urls);
+    updateConfig({ authorizedCallbackUrls: urls });
+  };
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [selectedAppClient, setSelectedAppClient] = useState<AppClient & { authConfigId: string } | null>(null);
   const [existingAuthConfigs, setExistingAuthConfigs] = useState<AuthConfig[]>(preloadedAuthConfigs || []);
@@ -2777,6 +2961,88 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                     </div>
                   </div>
                     )}
+
+                    {/* Authorized Callback URLs - Moved after Bring My Own OAuth Provider section */}
+                    <div className="space-y-2">
+                      <Label className="text-sm">Authorized Callback URLs</Label>
+                      <div className="flex gap-2 mb-2 mt-2">
+                        <Input
+                          value={newAuthorizedCallbackUrl}
+                          onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)}
+                          placeholder="https://example.com/callback"
+                          className="text-xs"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const url = newAuthorizedCallbackUrl.trim();
+                              if (url && !authorizedCallbackUrls.includes(url)) {
+                                try {
+                                  const urlObj = new URL(url);
+                                  if (urlObj.protocol !== 'https:') {
+                                    alert('URL must use HTTPS protocol');
+                                    return;
+                                  }
+                                  updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]);
+                                  setNewAuthorizedCallbackUrl('');
+                                } catch {
+                                  alert('Invalid URL format');
+                                }
+                              }
+                            }
+                          }}
+                        />
+                        <Button 
+                          type="button" 
+                          size="sm" 
+                          onClick={() => {
+                            const url = newAuthorizedCallbackUrl.trim();
+                            if (!url) return;
+                            if (authorizedCallbackUrls.includes(url)) {
+                              alert('This URL is already in the list');
+                              return;
+                            }
+                            try {
+                              const urlObj = new URL(url);
+                              if (urlObj.protocol !== 'https:') {
+                                alert('URL must use HTTPS protocol');
+                                return;
+                              }
+                              updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]);
+                              setNewAuthorizedCallbackUrl('');
+                            } catch {
+                              alert('Invalid URL format');
+                            }
+                          }}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {authorizedCallbackUrls.map((url, index) => (
+                          <div
+                            key={url}
+                            className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs"
+                          >
+                            {index === 0 && (
+                              <Badge variant="secondary" className="mr-1 text-xs">
+                                <Star className="h-2 w-2 mr-1" />
+                                Default
+                              </Badge>
+                            )}
+                            <span>{url}</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-4 w-4 p-0"
+                              onClick={() => updateAuthorizedCallbackUrls(authorizedCallbackUrls.filter((u) => u !== url))}
+                            >
+                              <X className="h-2 w-2" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </>
                 )}
               </div>

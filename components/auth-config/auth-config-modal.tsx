@@ -23,6 +23,7 @@ import {
   Check,
   Loader2,
   AlertCircle,
+  Star,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
@@ -310,10 +311,10 @@ export function AuthConfigModal({
     if (!selectedAuthConfigId || !selectedAppClientId || !currentAppClient) return;
     if (!newRedirectUri.trim()) return;
 
-    const updatedUris = [...(currentAppClient.redirectUris || []), newRedirectUri.trim()];
+    const updatedUris = [...(currentAppClient.authorizedCallbackUrls || []), newRedirectUri.trim()];
     try {
       await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
-        redirectUris: updatedUris,
+        authorizedCallbackUrls: updatedUris,
       });
       await loadAppClientDetails(selectedAuthConfigId, selectedAppClientId);
       setNewRedirectUri('');
@@ -385,10 +386,10 @@ export function AuthConfigModal({
   const handleRemoveRedirectUri = async (uri: string) => {
     if (!selectedAuthConfigId || !selectedAppClientId || !currentAppClient) return;
 
-    const updatedUris = currentAppClient.redirectUris?.filter(u => u !== uri) || [];
+    const updatedUris = currentAppClient.authorizedCallbackUrls?.filter(u => u !== uri) || [];
     try {
       await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
-        redirectUris: updatedUris,
+        authorizedCallbackUrls: updatedUris,
       });
       await loadAppClientDetails(selectedAuthConfigId, selectedAppClientId);
     } catch (error) {
@@ -789,14 +790,27 @@ export function AuthConfigModal({
                   </Button>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {currentAppClient.redirectUris?.map((uri) => (
-                    <Badge key={uri} variant="secondary" className="text-xs">
+                  {currentAppClient.authorizedCallbackUrls?.map((uri, index) => (
+                    <div key={uri} className="flex items-center gap-1">
+                      {index === 0 && (
+                        <Badge variant="secondary" className="text-xs mr-1">
+                          <Star className="h-2 w-2 mr-1" />
+                          Default
+                        </Badge>
+                      )}
+                    <Badge variant="outline" className="text-xs font-mono">
                       {uri}
-                      <X
-                        className="ml-1 h-3 w-3 cursor-pointer"
-                        onClick={() => handleRemoveRedirectUri(uri)}
-                      />
                     </Badge>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 w-5 p-0"
+                      onClick={() => handleRemoveRedirectUri(uri)}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
                   ))}
                 </div>
               </div>

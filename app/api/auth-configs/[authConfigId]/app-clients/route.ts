@@ -62,7 +62,7 @@ export async function POST(
       refreshTokenExpiry: body.refreshTokenExpiry ?? 2592000, // 30 days
       idTokenExpiry: body.idTokenExpiry ?? 3600, // 1 hour
       accessTokenExpiry: body.accessTokenExpiry ?? 3600, // 1 hour
-      redirectUris: body.redirectUris ?? [],
+      authorizedCallbackUrls: body.authorizedCallbackUrls ?? [],
       signoutUris: body.signoutUris ?? [],
       scopes: body.scopes ?? ['email', 'openid', 'profile'],
     };

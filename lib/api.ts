@@ -11,7 +11,7 @@ const API_BASE_URL = '/api';
 // API response may have snake_case fields from the database
 type AppClientResponse = AppClient & {
   client_id?: string;
-  redirect_uris?: string[];
+  authorized_callback_urls?: string[];
   signout_uris?: string[];
 };
 
@@ -270,7 +270,7 @@ class ApiClient {
     refreshTokenExpiry?: number;
     idTokenExpiry?: number;
     accessTokenExpiry?: number;
-    redirectUris?: string[];
+    authorizedCallbackUrls?: string[];
     signoutUris?: string[];
     scopes?: string[];
   }) {
@@ -285,7 +285,7 @@ class ApiClient {
     refreshTokenExpiry?: number;
     idTokenExpiry?: number;
     accessTokenExpiry?: number;
-    redirectUris?: string[];
+    authorizedCallbackUrls?: string[];
     signoutUris?: string[];
     scopes?: string[];
   }) {

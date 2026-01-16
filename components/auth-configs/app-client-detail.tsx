@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ArrowLeft, Settings, Trash2, Copy, Check } from 'lucide-react';
+import { Loader2, ArrowLeft, Settings, Trash2, Copy, Check, Star } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import type { AppClient } from '@/types/auth-config';
@@ -193,18 +193,26 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
           </Card>
         </div>
 
-        {/* Redirect URIs */}
-        {appClient.redirectUris && appClient.redirectUris.length > 0 && (
+        {/* Authorized Callback URLs */}
+        {appClient.authorizedCallbackUrls && appClient.authorizedCallbackUrls.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm font-medium">Redirect URIs</CardTitle>
+              <CardTitle className="text-sm font-medium">Authorized Callback URLs</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-2">
-                {appClient.redirectUris.map((uri) => (
-                  <Badge key={uri} variant="outline" className="font-mono text-xs">
-                    {uri}
-                  </Badge>
+                {appClient.authorizedCallbackUrls.map((uri, index) => (
+                  <div key={uri} className="flex items-center gap-1">
+                    {index === 0 && (
+                      <Badge variant="secondary" className="text-xs mr-1">
+                        <Star className="h-2 w-2 mr-1" />
+                        Default
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="font-mono text-xs">
+                      {uri}
+                    </Badge>
+                  </div>
                 ))}
               </div>
             </CardContent>

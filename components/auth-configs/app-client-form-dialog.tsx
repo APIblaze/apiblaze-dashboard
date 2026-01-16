@@ -12,7 +12,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Loader2, Plus, X } from 'lucide-react';
+import { Loader2, Plus, X, Star } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import type { AppClient, CreateAppClientRequest } from '@/types/auth-config';
@@ -41,8 +42,8 @@ export function AppClientFormDialog({
   const [refreshTokenExpiry, setRefreshTokenExpiry] = useState(2592000); // 30 days
   const [idTokenExpiry, setIdTokenExpiry] = useState(3600); // 1 hour
   const [accessTokenExpiry, setAccessTokenExpiry] = useState(3600); // 1 hour
-  const [redirectUris, setRedirectUris] = useState<string[]>([]);
-  const [newRedirectUri, setNewRedirectUri] = useState('');
+  const [authorizedCallbackUrls, setAuthorizedCallbackUrls] = useState<string[]>([]);
+  const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
   const [signoutUris, setSignoutUris] = useState<string[]>([]);
   const [newSignoutUri, setNewSignoutUri] = useState('');
   const [scopes, setScopes] = useState<string[]>(['email', 'openid', 'profile']);
@@ -57,7 +58,7 @@ export function AppClientFormDialog({
         setRefreshTokenExpiry(appClient.refreshTokenExpiry);
         setIdTokenExpiry(appClient.idTokenExpiry);
         setAccessTokenExpiry(appClient.accessTokenExpiry);
-        setRedirectUris(appClient.redirectUris || []);
+        setAuthorizedCallbackUrls(appClient.authorizedCallbackUrls || []);
         setSignoutUris(appClient.signoutUris || []);
         setScopes(appClient.scopes || []);
         setClientSecret(null);
@@ -66,7 +67,7 @@ export function AppClientFormDialog({
         setRefreshTokenExpiry(2592000);
         setIdTokenExpiry(3600);
         setAccessTokenExpiry(3600);
-        setRedirectUris([]);
+        setAuthorizedCallbackUrls([]);
         setSignoutUris([]);
         setScopes(['email', 'openid', 'profile']);
         setClientSecret(null);
@@ -74,15 +75,47 @@ export function AppClientFormDialog({
     }
   }, [open, appClient]);
 
-  const addRedirectUri = () => {
-    if (newRedirectUri.trim() && !redirectUris.includes(newRedirectUri.trim())) {
-      setRedirectUris([...redirectUris, newRedirectUri.trim()]);
-      setNewRedirectUri('');
+  const validateHttpsUrl = (url: string): { valid: boolean; error?: string } => {
+    try {
+      const urlObj = new URL(url);
+      if (urlObj.protocol !== 'https:') {
+        return { valid: false, error: 'URL must use HTTPS protocol' };
+      }
+      return { valid: true };
+    } catch (error) {
+      return { valid: false, error: 'Invalid URL format' };
     }
   };
 
-  const removeRedirectUri = (uri: string) => {
-    setRedirectUris(redirectUris.filter((u) => u !== uri));
+  const addAuthorizedCallbackUrl = () => {
+    const url = newAuthorizedCallbackUrl.trim();
+    if (!url) return;
+
+    if (authorizedCallbackUrls.includes(url)) {
+      toast({
+        title: 'Validation Error',
+        description: 'This URL is already in the list',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const validation = validateHttpsUrl(url);
+    if (!validation.valid) {
+      toast({
+        title: 'Validation Error',
+        description: validation.error || 'Invalid URL',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setAuthorizedCallbackUrls([...authorizedCallbackUrls, url]);
+    setNewAuthorizedCallbackUrl('');
+  };
+
+  const removeAuthorizedCallbackUrl = (url: string) => {
+    setAuthorizedCallbackUrls(authorizedCallbackUrls.filter((u) => u !== url));
   };
 
   const addSignoutUri = () => {
@@ -127,7 +160,7 @@ export function AppClientFormDialog({
         refreshTokenExpiry,
         idTokenExpiry,
         accessTokenExpiry,
-        redirectUris,
+        authorizedCallbackUrls,
         signoutUris,
         scopes,
       };
@@ -283,37 +316,49 @@ export function AppClientFormDialog({
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Redirect URIs</Label>
+                  <div className="flex items-center gap-2">
+                    <Label>Authorized Callback URLs</Label>
+                    <span className="text-xs text-muted-foreground">(HTTPS required)</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    The first URL will be marked as the default callback URL.
+                  </p>
                   <div className="flex gap-2">
                     <Input
-                      value={newRedirectUri}
-                      onChange={(e) => setNewRedirectUri(e.target.value)}
+                      value={newAuthorizedCallbackUrl}
+                      onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)}
                       placeholder="https://example.com/callback"
                       disabled={submitting}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          addRedirectUri();
+                          addAuthorizedCallbackUrl();
                         }
                       }}
                     />
-                    <Button type="button" onClick={addRedirectUri} disabled={submitting}>
+                    <Button type="button" onClick={addAuthorizedCallbackUrl} disabled={submitting}>
                       <Plus className="h-4 w-4" />
                     </Button>
                   </div>
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {redirectUris.map((uri) => (
+                    {authorizedCallbackUrls.map((url, index) => (
                       <div
-                        key={uri}
+                        key={url}
                         className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-sm"
                       >
-                        <span>{uri}</span>
+                        {index === 0 && (
+                          <Badge variant="secondary" className="mr-1 text-xs">
+                            <Star className="h-3 w-3 mr-1" />
+                            Default
+                          </Badge>
+                        )}
+                        <span>{url}</span>
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
                           className="h-5 w-5 p-0"
-                          onClick={() => removeRedirectUri(uri)}
+                          onClick={() => removeAuthorizedCallbackUrl(url)}
                           disabled={submitting}
                         >
                           <X className="h-3 w-3" />

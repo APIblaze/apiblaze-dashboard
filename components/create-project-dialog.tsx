@@ -712,9 +712,25 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             }
 
             // 2. Create AppClient
+            // Generate default callback URL from project name
+            const projectName = config.projectName || 'project';
+            const apiVersion = config.apiVersion || '1.0.0';
+            const defaultCallbackUrl = `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
+            
+            // Ensure default URL is included and is first
+            const callbackUrls = config.authorizedCallbackUrls && config.authorizedCallbackUrls.length > 0
+              ? config.authorizedCallbackUrls
+              : [defaultCallbackUrl];
+            
+            // Make sure default URL is first if it's not already
+            const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
+              ? [defaultCallbackUrl, ...callbackUrls.filter(u => u !== defaultCallbackUrl)]
+              : [defaultCallbackUrl, ...callbackUrls];
+            
             const appClient = await api.createAppClient(currentAuthConfigId, {
               name: `${config.projectName}-appclient`,
               scopes: config.authorizedScopes,
+              authorizedCallbackUrls: finalCallbackUrls,
             });
             const newAppClientId = (appClient as { id: string }).id;
             const createdAppClientClientId = (appClient as { clientId: string }).clientId;

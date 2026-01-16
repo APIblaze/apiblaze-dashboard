@@ -48,6 +48,7 @@ export interface ProjectConfig {
   identityProviderClientId: string;
   identityProviderClientSecret: string;
   authorizedScopes: string[];
+  authorizedCallbackUrls?: string[]; // Authorized callback URLs for AppClient
   tokenType?: 'apiblaze' | 'thirdParty';
   // Multiple providers for create mode (when bringOwnProvider is true)
   providers?: Array<{

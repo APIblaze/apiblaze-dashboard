@@ -218,8 +218,8 @@ export function AppClientList({ authConfigId, onRefresh }: AppClientListProps) {
                     <Badge variant="secondary">{client.providers_count || 0}</Badge>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Redirect URIs:</span>
-                    <Badge variant="outline">{client.redirectUris?.length || 0}</Badge>
+                    <span className="text-muted-foreground">Authorized Callback URLs:</span>
+                    <Badge variant="outline">{client.authorizedCallbackUrls?.length || 0}</Badge>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Scopes:</span>

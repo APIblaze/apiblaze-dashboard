@@ -13,7 +13,7 @@ import type { AuthConfig, AppClient, SocialProvider } from '@/types/auth-config'
 // API response may have snake_case fields from the database
 type AppClientResponse = AppClient & {
   client_id?: string;
-  redirect_uris?: string[];
+  authorized_callback_urls?: string[];
   signout_uris?: string[];
 };
 
@@ -292,11 +292,11 @@ export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConf
                               ))}
                             </div>
                           </div>
-                          {((appClient as AppClientResponse).redirectUris || (appClient as AppClientResponse).redirect_uris || []).length > 0 && (
+                          {((appClient as AppClientResponse).authorizedCallbackUrls || (appClient as AppClientResponse).authorized_callback_urls || []).length > 0 && (
                             <div className="flex items-start justify-between">
-                              <span className="text-sm text-muted-foreground">Redirect URIs</span>
+                              <span className="text-sm text-muted-foreground">Authorized Callback URLs</span>
                               <div className="flex flex-col gap-1 text-right">
-                                {((appClient as AppClientResponse).redirectUris || (appClient as AppClientResponse).redirect_uris || []).map((uri: string, idx: number) => (
+                                {((appClient as AppClientResponse).authorizedCallbackUrls || (appClient as AppClientResponse).authorized_callback_urls || []).map((uri: string, idx: number) => (
                                   <span key={idx} className="text-sm font-mono text-xs">
                                     {uri}
                                   </span>

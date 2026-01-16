@@ -20,7 +20,7 @@ export interface AppClient {
   refreshTokenExpiry: number; // seconds
   idTokenExpiry: number;
   accessTokenExpiry: number;
-  redirectUris: string[];
+  authorizedCallbackUrls: string[];
   signoutUris: string[];
   scopes: string[];
   created_at: string;
@@ -51,7 +51,7 @@ export interface CreateAppClientRequest {
   refreshTokenExpiry?: number;
   idTokenExpiry?: number;
   accessTokenExpiry?: number;
-  redirectUris?: string[];
+  authorizedCallbackUrls?: string[];
   signoutUris?: string[];
   scopes?: string[];
 }
@@ -61,7 +61,7 @@ export interface UpdateAppClientRequest {
   refreshTokenExpiry?: number;
   idTokenExpiry?: number;
   accessTokenExpiry?: number;
-  redirectUris?: string[];
+  authorizedCallbackUrls?: string[];
   signoutUris?: string[];
   scopes?: string[];
 }

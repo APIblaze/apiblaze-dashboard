@@ -320,7 +320,7 @@ export class APIBlazeClient {
       refreshTokenExpiry?: number;
       idTokenExpiry?: number;
       accessTokenExpiry?: number;
-      redirectUris?: string[];
+      authorizedCallbackUrls?: string[];
       signoutUris?: string[];
       scopes?: string[];
     }
@@ -359,7 +359,7 @@ export class APIBlazeClient {
       refreshTokenExpiry?: number;
       idTokenExpiry?: number;
       accessTokenExpiry?: number;
-      redirectUris?: string[];
+      authorizedCallbackUrls?: string[];
       signoutUris?: string[];
       scopes?: string[];
     }
