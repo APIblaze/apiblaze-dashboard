@@ -341,6 +341,26 @@ function EditModeManagementUI({
   
   // UI state
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  
+  // Advanced settings state for expiry values - keyed by app client ID
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState<Record<string, boolean>>({});
+  const [expiryValues, setExpiryValues] = useState<Record<string, {
+    accessTokenExpiry: number;
+    refreshTokenExpiry: number;
+    idTokenExpiry: number;
+  }>>({});
+  
+  // Helper functions to convert between seconds and days/minutes
+  const secondsToDaysAndMinutes = (seconds: number) => {
+    const days = Math.floor(seconds / 86400);
+    const remainingSeconds = seconds % 86400;
+    const minutes = Math.floor(remainingSeconds / 60);
+    return { days, minutes };
+  };
+  
+  const daysAndMinutesToSeconds = (days: number, minutes: number) => {
+    return (days * 86400) + (minutes * 60);
+  };
 
   // Initialize with preloaded auth configs if provided
   useEffect(() => {
@@ -973,6 +993,15 @@ function EditModeManagementUI({
           [clientId]: client.clientSecret || ''
         }));
       }
+      // Initialize expiry values from the client details
+      setExpiryValues(prev => ({
+        ...prev,
+        [clientId]: {
+          accessTokenExpiry: client.accessTokenExpiry || 3600, // Default 1h
+          refreshTokenExpiry: client.refreshTokenExpiry || 2592000, // Default 30 days
+          idTokenExpiry: client.idTokenExpiry || 3600, // Default 1h
+        }
+      }));
     } catch (error) {
       console.error('Error loading app client details:', error);
     } finally {
@@ -1132,6 +1161,28 @@ function EditModeManagementUI({
     } catch (error) {
       console.error('Error creating app client:', error);
       alert('Failed to create app client');
+    }
+  };
+
+  const handleUpdateAppClientExpiries = async (clientId: string) => {
+    if (!selectedAuthConfigId) return;
+    
+    const expiries = expiryValues[clientId];
+    if (!expiries) return;
+    
+    try {
+      // Values are already in seconds, send directly to API
+      await api.updateAppClient(selectedAuthConfigId, clientId, {
+        accessTokenExpiry: expiries.accessTokenExpiry,
+        refreshTokenExpiry: expiries.refreshTokenExpiry,
+        idTokenExpiry: expiries.idTokenExpiry,
+      });
+      
+      // Reload app client details to reflect the update
+      await loadAppClientDetails(selectedAuthConfigId, clientId);
+    } catch (error) {
+      console.error('Error updating app client expiries:', error);
+      alert('Failed to update token expiries');
     }
   };
 
@@ -1451,6 +1502,50 @@ function EditModeManagementUI({
                               <Key className="h-4 w-4 text-blue-600" />
                               <div>
                                 <div className="font-semibold text-base">{client.name}</div>
+                                {/* JWKS Display */}
+                                {clientDetails?.jwks && (() => {
+                                  const clientId = clientDetails?.client_id || clientDetails?.clientId;
+                                  const projectName = project?.project_id || 'project';
+                                  const apiVersion = project?.api_version || '1.0.0';
+                                  const jwksUrl = `https://${projectName}.auth.apiblaze.com/${apiVersion}/${clientId}/.well-known/jwk.json`;
+                                  
+                                  return (
+                                    <div className="mt-2 space-y-1">
+                                      <Label className="text-xs font-medium text-muted-foreground">JWKS (RS256 Public Key)</Label>
+                                      <div className="flex items-center gap-2">
+                                        <code className="flex-1 text-xs bg-white px-3 py-2 rounded-md border border-gray-200 font-mono break-all">
+                                          {jwksUrl}
+                                        </code>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            await copyToClipboard(jwksUrl, `jwks-${client.id}`);
+                                          }}
+                                          className="h-8 w-8 p-0 hover:bg-blue-100"
+                                        >
+                                          {copiedField === `jwks-${client.id}` ? (
+                                            <Check className="h-4 w-4 text-green-600" />
+                                          ) : (
+                                            <Copy className="h-4 w-4" />
+                                          )}
+                                        </Button>
+                                        <a
+                                          href={jwksUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-blue-600 hover:text-blue-800"
+                                          title="Open JWKS in new tab"
+                                        >
+                                          <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                                 {(() => {
                                   const clientId = clientDetails?.client_id || clientDetails?.clientId;
                                   const projectName = project?.project_id || 'project';
@@ -1614,6 +1709,265 @@ function EditModeManagementUI({
                                     )}
                                   </div>
                                 </div>
+                              </div>
+                              
+                              {/* Advanced Settings - Expiry Configuration */}
+                              <div className="pt-2 border-t border-blue-100">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setShowAdvancedSettings(prev => ({
+                                    ...prev,
+                                    [client.id]: !prev[client.id]
+                                  }))}
+                                  className="w-full justify-between h-8 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-blue-50"
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <ChevronDown className={`h-3 w-3 transition-transform ${showAdvancedSettings[client.id] ? 'rotate-180' : ''}`} />
+                                    Advanced Settings
+                                  </span>
+                                </Button>
+                                
+                                {showAdvancedSettings[client.id] && (
+                                  <div className="mt-3 space-y-4">
+                                    {/* Access Token Expiry */}
+                                    <div className="space-y-2">
+                                      <Label className="text-xs font-medium">Access Token Expiry</Label>
+                                      <div className="flex items-end gap-2">
+                                        <div className="w-20">
+                                          <Label htmlFor={`accessTokenDays-${client.id}`} className="text-xs text-muted-foreground">Days</Label>
+                                          <Input
+                                            id={`accessTokenDays-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
+                                              return secondsToDaysAndMinutes(seconds).days;
+                                            })()}
+                                            onChange={(e) => {
+                                              const days = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
+                                              const { minutes } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  accessTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                        <span className="text-xs text-muted-foreground pb-2">and</span>
+                                        <div className="w-20">
+                                          <Label htmlFor={`accessTokenMinutes-${client.id}`} className="text-xs text-muted-foreground">Minutes</Label>
+                                          <Input
+                                            id={`accessTokenMinutes-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
+                                              return secondsToDaysAndMinutes(seconds).minutes;
+                                            })()}
+                                            onChange={(e) => {
+                                              const minutes = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
+                                              const { days } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  accessTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Refresh Token Expiry */}
+                                    <div className="space-y-2">
+                                      <Label className="text-xs font-medium">Refresh Token Expiry</Label>
+                                      <div className="flex items-end gap-2">
+                                        <div className="w-20">
+                                          <Label htmlFor={`refreshTokenDays-${client.id}`} className="text-xs text-muted-foreground">Days</Label>
+                                          <Input
+                                            id={`refreshTokenDays-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
+                                              return secondsToDaysAndMinutes(seconds).days;
+                                            })()}
+                                            onChange={(e) => {
+                                              const days = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
+                                              const { minutes } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  refreshTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                        <span className="text-xs text-muted-foreground pb-2">and</span>
+                                        <div className="w-20">
+                                          <Label htmlFor={`refreshTokenMinutes-${client.id}`} className="text-xs text-muted-foreground">Minutes</Label>
+                                          <Input
+                                            id={`refreshTokenMinutes-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
+                                              return secondsToDaysAndMinutes(seconds).minutes;
+                                            })()}
+                                            onChange={(e) => {
+                                              const minutes = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
+                                              const { days } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  refreshTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* ID Token Expiry */}
+                                    <div className="space-y-2">
+                                      <Label className="text-xs font-medium">ID Token Expiry</Label>
+                                      <div className="flex items-end gap-2">
+                                        <div className="w-20">
+                                          <Label htmlFor={`idTokenDays-${client.id}`} className="text-xs text-muted-foreground">Days</Label>
+                                          <Input
+                                            id={`idTokenDays-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
+                                              return secondsToDaysAndMinutes(seconds).days;
+                                            })()}
+                                            onChange={(e) => {
+                                              const days = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
+                                              const { minutes } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  idTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                        <span className="text-xs text-muted-foreground pb-2">and</span>
+                                        <div className="w-20">
+                                          <Label htmlFor={`idTokenMinutes-${client.id}`} className="text-xs text-muted-foreground">Minutes</Label>
+                                          <Input
+                                            id={`idTokenMinutes-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
+                                              return secondsToDaysAndMinutes(seconds).minutes;
+                                            })()}
+                                            onChange={(e) => {
+                                              const minutes = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
+                                              const { days } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  idTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    
+                                    <div className="flex gap-2 pt-2">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={() => handleUpdateAppClientExpiries(client.id)}
+                                        className="text-xs"
+                                      >
+                                        Save Changes
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          // Reset to original values from clientDetails
+                                          if (clientDetails) {
+                                            setExpiryValues(prev => ({
+                                              ...prev,
+                                              [client.id]: {
+                                                accessTokenExpiry: clientDetails.accessTokenExpiry || 3600,
+                                                refreshTokenExpiry: clientDetails.refreshTokenExpiry || 2592000,
+                                                idTokenExpiry: clientDetails.idTokenExpiry || 3600,
+                                              }
+                                            }));
+                                          }
+                                        }}
+                                        className="text-xs"
+                                      >
+                                        Reset
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           )}
