@@ -343,14 +343,20 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
   // Preload data when dialog opens - this ensures instant response
   useEffect(() => {
     if (open) {
-      // Load auth configs in the background immediately when dialog opens
+      // Only load auth configs if not already loaded (to avoid duplicate calls)
       const loadAuthConfigs = async () => {
-        try {
-          const pools = await api.listAuthConfigs();
-          setPreloadedAuthConfigs(Array.isArray(pools) ? pools : []);
-        } catch (error) {
-          console.error('Error preloading auth configs:', error);
-          setPreloadedAuthConfigs([]);
+        if (preloadedAuthConfigs.length === 0) {
+          try {
+            console.log('[CreateProjectDialog] 📥 Loading auth configs on dialog open...');
+            const pools = await api.listAuthConfigs();
+            setPreloadedAuthConfigs(Array.isArray(pools) ? pools : []);
+            console.log('[CreateProjectDialog] ✅ Loaded auth configs on dialog open:', Array.isArray(pools) ? pools.length : 0);
+          } catch (error) {
+            console.error('Error preloading auth configs:', error);
+            setPreloadedAuthConfigs([]);
+          }
+        } else {
+          console.log('[CreateProjectDialog] ⏭️ Auth configs already loaded, skipping');
         }
       };
 
@@ -390,6 +396,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       setPreloadedProviders({});
       setLoadingAuthData(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const updateConfig = (updates: Partial<ProjectConfig>) => {
