@@ -124,14 +124,14 @@ export function ThrottlingSection({ config, updateConfig }: ThrottlingSectionPro
     if (!isNaN(numValue) && numValue > 0) {
       // If value exceeds max, reset to default daily quota
       if (numValue > throttling.accountMonthlyQuota) {
-        const defaultDailyQuota = DEFAULT_THROTTLING.proxyDailyQuota;
+        const clampedDailyQuota = throttling.accountMonthlyQuota;
         // If current userRateLimit exceeds default daily quota, clamp it
-        const newUserRateLimit = Math.min(throttling.userRateLimit, defaultDailyQuota);
+        const newUserRateLimit = Math.min(throttling.userRateLimit, clampedDailyQuota);
         updateThrottling({ 
-          proxyDailyQuota: defaultDailyQuota,
+          proxyDailyQuota: clampedDailyQuota,
           userRateLimit: newUserRateLimit
         });
-        setProxyDailyQuotaInput(defaultDailyQuota.toString());
+        setProxyDailyQuotaInput(clampedDailyQuota.toString());
         // Update userRateLimit input if it was clamped
         if (newUserRateLimit !== throttling.userRateLimit) {
           setUserRateLimitInput(newUserRateLimit.toString());
