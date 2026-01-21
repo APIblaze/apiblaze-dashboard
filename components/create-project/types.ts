@@ -64,11 +64,18 @@ export interface ProjectConfig {
   createPortal: boolean;
   portalLogoUrl: string;
   
-  // Throttling
-  throttlingRate: number;
-  throttlingBurst: number;
-  quota: number;
-  quotaInterval: QuotaInterval;
+  // Throttling (new structure)
+  throttling?: {
+    // Per-user rate limiting (req/sec)
+    userRateLimit: number;        // e.g., 10 req/sec per user
+    // userBurst: number;         // COMMENTED OUT - not using bucket model
+    
+    // Per-proxy daily quota (always per day)
+    proxyDailyQuota: number;      // e.g., 1000 requests per day
+    
+    // Per-account monthly quota
+    accountMonthlyQuota: number;  // e.g., 100000 requests per month
+  };
   
   // Pre/Post Processing
   preProcessingPath: string;
