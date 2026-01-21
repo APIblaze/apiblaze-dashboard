@@ -139,7 +139,7 @@ export function ThrottlingSection({ config, updateConfig }: ThrottlingSectionPro
         // Restore cursor position after state update
         setTimeout(() => {
           if (proxyDailyQuotaRef.current) {
-            const newPosition = defaultDailyQuota.toString().length;
+            const newPosition = clampedDailyQuota.toString().length;
             proxyDailyQuotaRef.current.setSelectionRange(newPosition, newPosition);
           }
         }, 0);
