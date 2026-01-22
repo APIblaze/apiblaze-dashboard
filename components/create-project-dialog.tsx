@@ -212,28 +212,25 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       
       // Throttling - handle both new and legacy structures
       throttling: (() => {
-        // Check if new structure exists
         if (projectConfig?.throttling && typeof projectConfig.throttling === 'object') {
-          const throttling = projectConfig.throttling as Record<string, unknown>;
+          const throttling = projectConfig.throttling as {
+            userRateLimit?: number;
+            proxyDailyQuota?: number;
+            accountMonthlyQuota?: number;
+          };
+      
           return {
-            userRateLimit: (throttling.userRateLimit as number) ?? 10,
-            proxyDailyQuota: (throttling.proxyDailyQuota as number) ?? 1000,
-            accountMonthlyQuota: (throttling.accountMonthlyQuota as number) ?? 30000,
+            userRateLimit: throttling.userRateLimit ?? 10,
+            proxyDailyQuota: throttling.proxyDailyQuota ?? 1000,
+            accountMonthlyQuota: throttling.accountMonthlyQuota ?? 30000,
           };
         }
-        
-        // Backward compatibility: map old structure to new
-        const oldThrottlingRate = (projectConfig?.throttlingRate as number) ?? 10;
-        const oldQuota = (projectConfig?.quota as number) ?? 1000;
-        const oldQuotaInterval = (projectConfig?.quotaInterval as string) ?? 'day';
-        
-        // Only use old quota if it was set to 'day', otherwise ignore
-        const proxyDailyQuota = oldQuotaInterval === 'day' ? oldQuota : 1000;
-        
+      
+        // Fallback for brand-new projects (no throttling stored yet)
         return {
-          userRateLimit: oldThrottlingRate,
-          proxyDailyQuota,
-          accountMonthlyQuota: 30000, // Default for legacy projects
+          userRateLimit: 10,
+          proxyDailyQuota: 1000,
+          accountMonthlyQuota: 30000,
         };
       })(),
       
