@@ -36,6 +36,11 @@ export interface CreateProxyPayload {
   app_client_id?: string;
   default_app_client_id?: string;
   environments?: Record<string, { target: string; description?: string }>;
+  throttling?: {
+    userRateLimit: number;
+    proxyDailyQuota: number;
+    accountMonthlyQuota: number;
+  };
 }
 
 interface APIBlazeClientOptions {

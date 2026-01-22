@@ -148,11 +148,12 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     createPortal: true,
     portalLogoUrl: '',
     
-    // Throttling
-    throttlingRate: 10,
-    throttlingBurst: 20,
-    quota: 1000,
-    quotaInterval: 'day',
+    // Throttling (new structure)
+    throttling: {
+      userRateLimit: 10,
+      proxyDailyQuota: 1000,
+      accountMonthlyQuota: 30000, // Free Tier default
+    },
     
     // Pre/Post Processing
     preProcessingPath: '',
@@ -209,11 +210,32 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       createPortal: true,
       portalLogoUrl: '',
       
-      // Throttling
-      throttlingRate: 10,
-      throttlingBurst: 20,
-      quota: 1000,
-      quotaInterval: 'day',
+      // Throttling - handle both new and legacy structures
+      throttling: (() => {
+        // Check if new structure exists
+        if (projectConfig?.throttling && typeof projectConfig.throttling === 'object') {
+          const throttling = projectConfig.throttling as Record<string, unknown>;
+          return {
+            userRateLimit: (throttling.userRateLimit as number) ?? 10,
+            proxyDailyQuota: (throttling.proxyDailyQuota as number) ?? 1000,
+            accountMonthlyQuota: (throttling.accountMonthlyQuota as number) ?? 30000,
+          };
+        }
+        
+        // Backward compatibility: map old structure to new
+        const oldThrottlingRate = (projectConfig?.throttlingRate as number) ?? 10;
+        const oldQuota = (projectConfig?.quota as number) ?? 1000;
+        const oldQuotaInterval = (projectConfig?.quotaInterval as string) ?? 'day';
+        
+        // Only use old quota if it was set to 'day', otherwise ignore
+        const proxyDailyQuota = oldQuotaInterval === 'day' ? oldQuota : 1000;
+        
+        return {
+          userRateLimit: oldThrottlingRate,
+          proxyDailyQuota,
+          accountMonthlyQuota: 30000, // Default for legacy projects
+        };
+      })(),
       
       // Pre/Post Processing
       preProcessingPath: '',
@@ -896,6 +918,11 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         app_client_id: appClientId, // AppClient selected at deployment time (not stored in config)
         default_app_client_id: defaultAppClientId, // Default app client ID stored in project config
         environments: Object.keys(environments).length > 0 ? environments : undefined,
+        throttling: config.throttling || {
+          userRateLimit: 10,
+          proxyDailyQuota: 1000,
+          accountMonthlyQuota: 30000,
+        },
       };
       
       console.log('[CreateProject] ⚠️ CRITICAL: Project data being sent to API:', {
