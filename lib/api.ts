@@ -159,6 +159,11 @@ class ApiClient {
     app_client_id?: string;
     default_app_client_id?: string;
     environments?: Record<string, { target: string }>;
+    throttling?: {
+      userRateLimit: number;
+      proxyDailyQuota: number;
+      accountMonthlyQuota: number;
+    };
   }): Promise<Record<string, unknown>> {
     // Map frontend data to backend API format
     const backendData: Record<string, unknown> = {
@@ -200,6 +205,9 @@ class ApiClient {
     }
     if (data.environments) {
       backendData.environments = data.environments;
+    }
+    if (data.throttling) {
+      backendData.throttling = data.throttling;
     }
 
     console.log('[API Client] Creating project:', data.name);
