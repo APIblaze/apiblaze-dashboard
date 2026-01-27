@@ -376,6 +376,7 @@ function EditModeManagementUI({
         updateConfig({ 
           authConfigId: currentAuthConfigId, 
           useAuthConfig: true,
+          userGroupName: preloadedAuthConfig.name, // Set the auth config name
           enableSocialAuth: preloadedAuthConfig.enableSocialAuth || false,
           enableApiKey: preloadedAuthConfig.enableApiKeyAuth || false,
           bringOwnProvider: preloadedAuthConfig.bringMyOwnOAuth || false,
@@ -1870,46 +1871,55 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     }
   }, [isEditMode, config.authConfigId, selectedAuthConfigId]);
 
-  // In edit mode, populate userGroupName from project's auth config
-  // Only sync on initial load, not when existingAuthConfigs changes (to avoid reverting user changes)
-  const hasSyncedUserGroupNameRef = useRef(false);
+  // Get the determined authConfigId (same logic as in EditModeManagementUI)
+  const determinedAuthConfigId = useMemo(() => {
+    if (!isEditMode || !project) {
+      return undefined;
+    }
+    const projectConfig = project.config as Record<string, unknown> | undefined;
+    const projectAuthConfigId = projectConfig?.auth_config_id as string | undefined;
+    
+    if (projectAuthConfigId) return projectAuthConfigId;
+    if (config.authConfigId) return config.authConfigId;
+    if (preloadedAuthConfigs && preloadedAuthConfigs.length === 1) return preloadedAuthConfigs[0].id;
+    if (preloadedAppClients && Object.keys(preloadedAppClients).length === 1) {
+      return Object.keys(preloadedAppClients)[0];
+    }
+    return undefined;
+  }, [isEditMode, project, config.authConfigId, preloadedAuthConfigs, preloadedAppClients]);
+
+  // In edit mode, populate userGroupName from project's auth config or from determined authConfigId
   useEffect(() => {
-    // Only sync in edit mode with an existing project, and only once
-    if (!isEditMode || !project?.config || hasSyncedUserGroupNameRef.current) {
+    if (!isEditMode || !project || !determinedAuthConfigId) {
       return;
     }
     
-    const projectConfig = project.config as Record<string, unknown>;
-    const authConfigId = projectConfig.auth_config_id as string | undefined;
+    // Find the auth config name from preloaded or existing configs
+    // Priority: preloadedAuthConfigs > existingAuthConfigs
+    const allPools = preloadedAuthConfigs && preloadedAuthConfigs.length > 0 
+      ? preloadedAuthConfigs 
+      : existingAuthConfigs;
     
-    if (authConfigId) {
-      // Find the auth config name from preloaded or existing configs
-      const allPools = preloadedAuthConfigs && preloadedAuthConfigs.length > 0 
-        ? preloadedAuthConfigs 
-        : existingAuthConfigs;
-      
-      const authConfig = allPools.find(pool => pool.id === authConfigId);
-      if (authConfig && !config.userGroupName) {
-        // Only set userGroupName if it's empty (don't overwrite user input)
-        updateConfig({ userGroupName: authConfig.name });
+    const authConfig = allPools.find(pool => pool.id === determinedAuthConfigId);
+    if (authConfig) {
+      // Always set userGroupName if we found the auth config and it's different or empty
+      if (!config.userGroupName || config.userGroupName !== authConfig.name) {
+        console.log('[AuthSection] Setting userGroupName:', authConfig.name, 'for authConfigId:', determinedAuthConfigId);
+        updateConfig({ 
+          userGroupName: authConfig.name,
+          authConfigId: determinedAuthConfigId, // Also ensure authConfigId is set
+        });
       }
-      
-      // Set selectedAuthConfigId to trigger data loading
-      if (authConfigId !== selectedAuthConfigId) {
-        setSelectedAuthConfigId(authConfigId);
-      }
-      
-      hasSyncedUserGroupNameRef.current = true;
     } else {
-      hasSyncedUserGroupNameRef.current = true;
+      console.log('[AuthSection] Auth config not found:', {
+        determinedAuthConfigId,
+        preloadedCount: preloadedAuthConfigs?.length || 0,
+        existingCount: existingAuthConfigs.length,
+        allPoolsCount: allPools.length,
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditMode, project, preloadedAuthConfigs]);
-  
-  // Reset sync flag when project changes
-  useEffect(() => {
-    hasSyncedUserGroupNameRef.current = false;
-  }, [project]);
+  }, [isEditMode, project, determinedAuthConfigId, config.userGroupName, preloadedAuthConfigs, existingAuthConfigs]);
 
   // Track which authConfigId we've already loaded data for to prevent duplicate loads
   const loadedAuthConfigIdRef = useRef<string | undefined>(undefined);

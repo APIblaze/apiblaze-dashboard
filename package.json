@@ -27,7 +27,7 @@
     "clsx": "^2.1.1",
     "js-yaml": "^4.1.0",
     "lucide-react": "^0.460.0",
-    "next": "15.0.5", 
+    "next": "15.0.5",
     "next-auth": "^4.24.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -42,6 +42,7 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.4.20",
+    "baseline-browser-mapping": "^2.9.16",
     "eslint": "^8",
     "eslint-config-next": "^15.0.3",
     "postcss": "^8",
@@ -50,4 +51,3 @@
     "wrangler": "^4.46.0"
   }
 }
-
