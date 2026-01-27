@@ -1,27 +1,28 @@
 'use client';
 
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { Zap, Plus, GitBranch, Globe, Users, Rocket, Bot, UserCog, Shield } from 'lucide-react';
+import { Zap, Plus, GitBranch, Globe, Rocket, Bot, UserCog, Shield } from 'lucide-react';
 import { UserMenu } from '@/components/user-menu';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CreateProjectDialog } from '@/components/create-project-dialog';
 import { ProjectList, ProjectListRef } from '@/components/project-list';
-import { listProjects } from '@/lib/api/projects';
-import { ProjectConfigDialog } from '@/components/project-config-dialog';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import { Project } from '@/types/project';
 
 export default function DashboardPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [hasProjects, setHasProjects] = useState<boolean | null>(null);
-  const [checkingProjects, setCheckingProjects] = useState(true);
-  const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const projectListRef = useRef<ProjectListRef>(null);
+
+  const projects = useDashboardCacheStore((s) => s.projects);
+  const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
+  const hasProjects = !isBootstrapping && projects.length > 0;
+  const checkingProjects = isBootstrapping;
   
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -54,44 +55,12 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const loadProjects = useCallback(async () => {
-    try {
-      setCheckingProjects(true);
-      
-      // Get user's team ID from session
-      const githubHandle = session?.user?.githubHandle;
-      const teamId = githubHandle ? `team_${githubHandle}` : undefined;
-      
-      const response = await listProjects({
-        team_id: teamId,
-        page: 1,
-        limit: 1, // Just check if any exist
-      });
-      
-      // Check if there are actually projects in the array, not just pagination total
-      // This handles cases where pagination.total > 0 but projects array is empty
-      setHasProjects(response.projects.length > 0 && response.pagination.total > 0);
-    } catch (error) {
-      console.error('Error loading projects:', error);
-      setHasProjects(false);
-    } finally {
-      setCheckingProjects(false);
-    }
-  }, [session?.user?.githubHandle]);
-
-  useEffect(() => {
-    if (status === 'authenticated') {
-      loadProjects();
-    }
-  }, [status, loadProjects]);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
 
   const handleProjectCreated = async () => {
     setCreateDialogOpen(false);
-    setHasProjects(true);
-    // Refresh the project list to show the newly created/updated project
-    if (projectListRef.current) {
-      await projectListRef.current.refresh();
-    }
+    const teamId = session?.user?.githubHandle ? `team_${(session.user as { githubHandle?: string }).githubHandle}` : undefined;
+    await invalidateAndRefetch(teamId);
   };
   
   if (status === 'loading' || status === 'unauthenticated' || checkingProjects) {
@@ -268,7 +237,10 @@ export default function DashboardPage() {
         <ProjectList 
           ref={projectListRef}
           teamId={user?.githubHandle ? `team_${user.githubHandle}` : undefined}
-          onRefresh={loadProjects}
+          onRefresh={async () => {
+            const teamId = user?.githubHandle ? `team_${user.githubHandle}` : undefined;
+            await invalidateAndRefetch(teamId);
+          }}
           onUpdateConfig={(project: Project) => {
             setSelectedProject(project);
             setCreateDialogOpen(true);

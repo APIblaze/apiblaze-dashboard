@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AuthConfig, AppClient, SocialProvider, CreateProviderRequest } from '@/types/auth-config';
 
 interface AuthConfigModalProps {
@@ -61,25 +62,21 @@ export function AuthConfigModal({
   mode = 'select'
 }: AuthConfigModalProps) {
   const { toast } = useToast();
-  
-  // Data state
-  const [authConfigs, setAuthConfigs] = useState<AuthConfig[]>([]);
-  const [appClients, setAppClients] = useState<AppClient[]>([]);
-  const [providers, setProviders] = useState<SocialProvider[]>([]);
-  
-  // Selection state
+  const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
+  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
+  const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
+  const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
+  const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
+
   const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string>('');
   const [selectedAppClientId, setSelectedAppClientId] = useState<string>('');
   const [newAuthConfigName, setNewAuthConfigName] = useState('');
   const [newAppClientName, setNewAppClientName] = useState('');
-  
-  // Creation state
   const [isCreatingAuthConfig, setIsCreatingAuthConfig] = useState(false);
   const [isCreatingAppClient, setIsCreatingAppClient] = useState(false);
   const [newAppClientSecret, setNewAppClientSecret] = useState<string | null>(null);
   const [newAppClientId, setNewAppClientId] = useState<string | null>(null);
-  
-  // Provider state
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [newProvider, setNewProvider] = useState<CreateProviderRequest>({
     type: 'google',
@@ -88,94 +85,30 @@ export function AuthConfigModal({
     domain: '',
   });
   const [isAddingProvider, setIsAddingProvider] = useState(false);
-  
-  // Redirect URIs and Scopes
   const [newRedirectUri, setNewRedirectUri] = useState('');
   const [newSignoutUri, setNewSignoutUri] = useState('');
   const [newScope, setNewScope] = useState('');
-  
-  // Loading states
-  const [isLoading, setIsLoading] = useState(false);
-  const [currentAppClient, setCurrentAppClient] = useState<AppClient | null>(null);
 
-  // Load auth configs on mount
-  useEffect(() => {
-    if (open) {
-      loadAuthConfigs();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  const authConfigs = open ? getAuthConfigs() : [];
+  const appClients = selectedAuthConfigId ? getAppClients(selectedAuthConfigId) : [];
+  const providers = selectedAuthConfigId && selectedAppClientId
+    ? getProviders(selectedAuthConfigId, selectedAppClientId)
+    : [];
+  const currentAppClient = selectedAuthConfigId && selectedAppClientId
+    ? (getAppClient(selectedAuthConfigId, selectedAppClientId) as AppClient | undefined) ?? null
+    : null;
+  const isLoading = isBootstrapping;
 
-  // Load app clients when auth config is selected
   useEffect(() => {
-    if (selectedAuthConfigId) {
-      loadAppClients(selectedAuthConfigId);
-    } else {
-      setAppClients([]);
+    if (!open) {
+      setSelectedAuthConfigId('');
       setSelectedAppClientId('');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAuthConfigId]);
+  }, [open]);
 
-  // Load providers and app client details when app client is selected
   useEffect(() => {
-    if (selectedAuthConfigId && selectedAppClientId) {
-      loadProviders(selectedAuthConfigId, selectedAppClientId);
-      loadAppClientDetails(selectedAuthConfigId, selectedAppClientId);
-    } else {
-      setProviders([]);
-      setCurrentAppClient(null);
-    }
-  }, [selectedAuthConfigId, selectedAppClientId]);
-
-  const loadAuthConfigs = async () => {
-    setIsLoading(true);
-    try {
-      const data = await api.listAuthConfigs();
-      setAuthConfigs(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Error loading auth configs:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load auth configs',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const loadAppClients = async (authConfigId: string) => {
-    try {
-      const data = await api.listAppClients(authConfigId);
-      setAppClients(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Error loading app clients:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load app clients',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const loadAppClientDetails = async (authConfigId: string, clientId: string) => {
-    try {
-      const data = await api.getAppClient(authConfigId, clientId);
-      setCurrentAppClient(data as AppClient);
-    } catch (error) {
-      console.error('Error loading app client details:', error);
-    }
-  };
-
-  const loadProviders = async (authConfigId: string, clientId: string) => {
-    try {
-      const data = await api.listProviders(authConfigId, clientId);
-      setProviders(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Error loading providers:', error);
-    }
-  };
+    if (!selectedAuthConfigId) setSelectedAppClientId('');
+  }, [selectedAuthConfigId]);
 
   const handleCreateAuthConfig = async () => {
     if (!newAuthConfigName.trim()) {
@@ -190,7 +123,7 @@ export function AuthConfigModal({
     setIsCreatingAuthConfig(true);
     try {
       const data = await api.createAuthConfig({ name: newAuthConfigName.trim() });
-      await loadAuthConfigs();
+      await invalidateAndRefetch();
       setSelectedAuthConfigId((data as AuthConfig).id);
       setNewAuthConfigName('');
       toast({
@@ -238,7 +171,7 @@ export function AuthConfigModal({
       setNewAppClientId(appClient.clientId);
       setNewAppClientSecret(appClient.clientSecret || null);
       setNewAppClientName('');
-      await loadAppClients(selectedAuthConfigId);
+      await invalidateAndRefetch();
       setSelectedAppClientId(appClient.id);
       toast({
         title: 'Success',
@@ -283,7 +216,7 @@ export function AuthConfigModal({
         clientSecret: newProvider.clientSecret,
         domain: newProvider.domain || PROVIDER_DOMAINS[newProvider.type],
       });
-      await loadProviders(selectedAuthConfigId, selectedAppClientId);
+      await invalidateAndRefetch();
       setNewProvider({
         type: 'google',
         clientId: '',
@@ -316,7 +249,7 @@ export function AuthConfigModal({
       await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
         authorizedCallbackUrls: updatedUris,
       });
-      await loadAppClientDetails(selectedAuthConfigId, selectedAppClientId);
+      await invalidateAndRefetch();
       setNewRedirectUri('');
       toast({
         title: 'Success',
@@ -341,7 +274,7 @@ export function AuthConfigModal({
       await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
         signoutUris: updatedUris,
       });
-      await loadAppClientDetails(selectedAuthConfigId, selectedAppClientId);
+      await invalidateAndRefetch();
       setNewSignoutUri('');
       toast({
         title: 'Success',
@@ -367,7 +300,7 @@ export function AuthConfigModal({
       await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
         scopes: updatedScopes,
       });
-      await loadAppClientDetails(selectedAuthConfigId, selectedAppClientId);
+      await invalidateAndRefetch();
       setNewScope('');
       toast({
         title: 'Success',
@@ -391,7 +324,7 @@ export function AuthConfigModal({
       await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
         authorizedCallbackUrls: updatedUris,
       });
-      await loadAppClientDetails(selectedAuthConfigId, selectedAppClientId);
+      await invalidateAndRefetch();
     } catch (error) {
       console.error('Error removing redirect URI:', error);
     }
@@ -405,7 +338,7 @@ export function AuthConfigModal({
       await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
         signoutUris: updatedUris,
       });
-      await loadAppClientDetails(selectedAuthConfigId, selectedAppClientId);
+      await invalidateAndRefetch();
     } catch (error) {
       console.error('Error removing signout URI:', error);
     }
@@ -420,7 +353,7 @@ export function AuthConfigModal({
       await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
         scopes: updatedScopes,
       });
-      await loadAppClientDetails(selectedAuthConfigId, selectedAppClientId);
+      await invalidateAndRefetch();
     } catch (error) {
       console.error('Error removing scope:', error);
     }
@@ -431,7 +364,7 @@ export function AuthConfigModal({
 
     try {
       await api.removeProvider(selectedAuthConfigId, selectedAppClientId, providerId);
-      await loadProviders(selectedAuthConfigId, selectedAppClientId);
+      await invalidateAndRefetch();
       toast({
         title: 'Success',
         description: 'Provider removed',

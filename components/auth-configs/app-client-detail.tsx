@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, ArrowLeft, Settings, Trash2, Copy, Check, Star } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AppClient } from '@/types/auth-config';
 import { ProviderList } from './provider-list';
 import { AppClientFormDialog } from './app-client-form-dialog';
@@ -29,33 +30,14 @@ interface AppClientDetailProps {
 export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDetailProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const [appClient, setAppClient] = useState<AppClient | null>(null);
-  const [loading, setLoading] = useState(true);
+  const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
+  const appClient = getAppClient(authConfigId, clientId) as AppClient | undefined ?? null;
+  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    fetchAppClient();
-  }, [authConfigId, clientId]);
-
-  const fetchAppClient = async () => {
-    try {
-      setLoading(true);
-      const client = await api.getAppClient(authConfigId, clientId);
-      setAppClient(client);
-    } catch (error) {
-      console.error('Error fetching app client:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load app client',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleCopy = async (text: string) => {
     try {
@@ -82,6 +64,7 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
     try {
       setDeleting(true);
       await api.deleteAppClient(authConfigId, appClient.id);
+      await invalidateAndRefetch();
       toast({
         title: 'Success',
         description: 'App client deleted successfully',
@@ -100,9 +83,9 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
     }
   };
 
-  const handleSuccess = () => {
+  const handleSuccess = async () => {
     setEditDialogOpen(false);
-    fetchAppClient();
+    await invalidateAndRefetch();
   };
 
   if (loading) {
@@ -257,7 +240,7 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
 
         {/* Providers Section */}
         <div>
-          <ProviderList authConfigId={authConfigId} clientId={clientId} onRefresh={fetchAppClient} />
+          <ProviderList authConfigId={authConfigId} clientId={clientId} onRefresh={() => invalidateAndRefetch()} />
         </div>
       </div>
 

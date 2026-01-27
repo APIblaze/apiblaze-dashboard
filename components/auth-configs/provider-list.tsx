@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { SocialProvider } from '@/types/auth-config';
 import { ProviderFormDialog } from './provider-form-dialog';
 
@@ -44,34 +45,15 @@ const PROVIDER_TYPE_LABELS: Record<SocialProvider['type'], string> = {
 export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderListProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const [providers, setProviders] = useState<SocialProvider[]>([]);
-  const [loading, setLoading] = useState(true);
+  const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
+  const providers = getProviders(authConfigId, clientId);
+  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<SocialProvider | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  const fetchProviders = useCallback(async () => {
-    try {
-      setLoading(true);
-      const providersList = await api.listProviders(authConfigId, clientId);
-      setProviders(providersList);
-    } catch (error) {
-      console.error('Error fetching providers:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load providers',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [authConfigId, clientId, toast]);
-
-  useEffect(() => {
-    fetchProviders();
-  }, [fetchProviders]);
 
   const handleCreate = () => {
     setSelectedProvider(null);
@@ -94,13 +76,13 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
     try {
       setDeleting(true);
       await api.removeProvider(authConfigId, clientId, selectedProvider.id);
+      await invalidateAndRefetch();
       toast({
         title: 'Success',
         description: 'Provider deleted successfully',
       });
       setDeleteDialogOpen(false);
       setSelectedProvider(null);
-      fetchProviders();
       onRefresh?.();
     } catch (error) {
       console.error('Error deleting provider:', error);
@@ -118,11 +100,11 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
     router.push(`/dashboard/auth-configs?authConfig=${authConfigId}&client=${clientId}&provider=${provider.id}`);
   };
 
-  const handleSuccess = () => {
+  const handleSuccess = async () => {
     setCreateDialogOpen(false);
     setEditDialogOpen(false);
     setSelectedProvider(null);
-    fetchProviders();
+    await invalidateAndRefetch();
     onRefresh?.();
   };
 

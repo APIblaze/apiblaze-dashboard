@@ -16,6 +16,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { AuthConfigModal } from '@/components/auth-config/auth-config-modal';
 import { api } from '@/lib/api';
 import { updateProjectConfig } from '@/lib/api/projects';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AppClient, AuthConfig, SocialProvider as AuthConfigSocialProvider } from '@/types/auth-config';
 import type { Project } from '@/types/project';
 
@@ -35,11 +36,8 @@ interface AuthenticationSectionProps {
   updateConfig: (updates: Partial<ProjectConfig>) => void;
   isEditMode?: boolean;
   project?: Project | null;
-  onProjectUpdate?: (updatedProject: Project) => void; // Callback to update project in parent
-  preloadedAuthConfigs?: AuthConfig[]; // Optional preloaded auth configs from parent
-  preloadedAppClients?: Record<string, AppClient[]>; // Optional preloaded app clients keyed by authConfigId
-  preloadedProviders?: Record<string, AuthConfigSocialProvider[]>; // Optional preloaded providers keyed by `${authConfigId}-${appClientId}`
-  loadingAuthData?: boolean; // Loading state for auth data preloading
+  onProjectUpdate?: (updatedProject: Project) => void;
+  teamId?: string;
 }
 
 const PROVIDER_DOMAINS: Record<SocialProvider, string> = {
@@ -110,21 +108,22 @@ function EditModeManagementUI({
   project,
   onProjectUpdate,
   initialAuthConfigId,
-  preloadedAuthConfigs,
-  preloadedAppClients,
-  preloadedProviders,
-  loadingAuthData
+  teamId,
 }: { 
   config: ProjectConfig; 
   updateConfig: (updates: Partial<ProjectConfig>) => void; 
   project?: Project | null;
   onProjectUpdate?: (updatedProject: Project) => void;
   initialAuthConfigId?: string;
-  preloadedAuthConfigs?: AuthConfig[];
-  preloadedAppClients?: Record<string, AppClient[]>;
-  preloadedProviders?: Record<string, AuthConfigSocialProvider[]>;
-  loadingAuthData?: boolean;
+  teamId?: string;
 }) {
+  const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
+  const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
+  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
+  const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
+  const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
   // Save config changes immediately to backend (without redeployment)
   const saveConfigImmediately = async (updates: Partial<ProjectConfig>) => {
     if (!project) return; // Only save if we're in edit mode with an existing project
@@ -161,65 +160,40 @@ function EditModeManagementUI({
   };
 
   // Get initial values from project config in edit mode - memoized to prevent recalculation
+  const authConfigs = getAuthConfigs();
   const authConfigId = useMemo(() => {
-    if (initialAuthConfigId) {
-      return initialAuthConfigId;
-    }
-    if (config.authConfigId) {
-      return config.authConfigId;
-    }
+    if (initialAuthConfigId) return initialAuthConfigId;
+    if (config.authConfigId) return config.authConfigId;
     if (project?.config) {
       const projectConfig = project.config as Record<string, unknown>;
       const id = projectConfig.auth_config_id as string | undefined;
-      if (id) {
-        return id;
-      }
+      if (id) return id;
     }
-    // If no authConfigId in project, but we have exactly one preloaded auth config, use it
-    if (preloadedAuthConfigs && preloadedAuthConfigs.length === 1) {
-      return preloadedAuthConfigs[0].id;
-    }
-    // Check if we have preloaded app clients - use the first key
-    if (preloadedAppClients && Object.keys(preloadedAppClients).length === 1) {
-      return Object.keys(preloadedAppClients)[0];
-    }
+    if (authConfigs.length === 1) return authConfigs[0].id;
     return undefined;
-  }, [initialAuthConfigId, config.authConfigId, project?.config, preloadedAuthConfigs, preloadedAppClients]);
+  }, [initialAuthConfigId, config.authConfigId, project?.config, authConfigs]);
 
-  // State
-  const [authConfigs, setAuthConfigs] = useState<AuthConfig[]>(preloadedAuthConfigs || []);
-  const [loadingAuthConfigs, setLoadingAuthConfigs] = useState(false);
   const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(authConfigId);
-  
-  // Memoize initial app clients and providers
-  const initialAppClients = useMemo(() => {
-    if (authConfigId && preloadedAppClients?.[authConfigId]) {
-      return preloadedAppClients[authConfigId];
-    }
-    return [];
-  }, [authConfigId, preloadedAppClients]);
+  const currentAuthConfigId = authConfigId || selectedAuthConfigId;
+  const appClients = currentAuthConfigId ? getAppClients(currentAuthConfigId) : [];
+  const loadingAppClients = isBootstrapping && !!currentAuthConfigId;
 
-  const initialProviders = useMemo(() => {
+  const providers = useMemo(() => {
     const result: Record<string, SocialProviderResponse[]> = {};
-    if (authConfigId && preloadedAppClients?.[authConfigId]) {
-      preloadedAppClients[authConfigId].forEach((client) => {
-        const key = `${authConfigId}-${client.id}`;
-        if (preloadedProviders?.[key]) {
-          result[client.id] = preloadedProviders[key] as SocialProviderResponse[];
-        }
-      });
+    if (!currentAuthConfigId) return result;
+    for (const client of appClients) {
+      const list = getProviders(currentAuthConfigId, client.id);
+      if (list.length) result[client.id] = list as SocialProviderResponse[];
     }
     return result;
-  }, [authConfigId, preloadedAppClients, preloadedProviders]);
-  
-  // Update selectedAuthConfigId when authConfigId changes (e.g., when preloaded data arrives)
+  }, [currentAuthConfigId, appClients, getProviders]);
+
   useEffect(() => {
     if (authConfigId && authConfigId !== selectedAuthConfigId) {
       setSelectedAuthConfigId(authConfigId);
     }
   }, [authConfigId, selectedAuthConfigId]);
-  const [appClients, setAppClients] = useState<AppClient[]>(initialAppClients);
-  const [loadingAppClients, setLoadingAppClients] = useState(false);
+
   const [appClientDetails, setAppClientDetails] = useState<Record<string, AppClientResponse>>({});
   const [loadingAppClientDetails, setLoadingAppClientDetails] = useState<Record<string, boolean>>({});
   const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
@@ -232,8 +206,6 @@ function EditModeManagementUI({
     return [`https://${projectName}.portal.apiblaze.com/${apiVersion}`];
   });
   const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
-  const [providers, setProviders] = useState<Record<string, SocialProviderResponse[]>>(initialProviders);
-  const [loadingProviders, setLoadingProviders] = useState<Record<string, boolean>>({});
   const [showAddProvider, setShowAddProvider] = useState<Record<string, boolean>>({});
   const [newProvider, setNewProvider] = useState<Record<string, {
     type: SocialProvider;
@@ -250,6 +222,22 @@ function EditModeManagementUI({
     idTokenExpiry: number;
   }>>({});
 
+  // Sync config from auth config when we have a single one
+  useEffect(() => {
+    if (!currentAuthConfigId) return;
+    const ac = getAuthConfig(currentAuthConfigId);
+    if (ac) {
+      updateConfig({ 
+        authConfigId: currentAuthConfigId, 
+        useAuthConfig: true,
+        userGroupName: ac.name,
+        enableSocialAuth: ac.enableSocialAuth ?? false,
+        enableApiKey: ac.enableApiKeyAuth ?? false,
+        bringOwnProvider: ac.bringMyOwnOAuth ?? false,
+      });
+    }
+  }, [currentAuthConfigId, getAuthConfig, updateConfig]);
+
   // Helper functions
   const secondsToDaysAndMinutes = (seconds: number) => {
     const days = Math.floor(seconds / 86400);
@@ -262,165 +250,26 @@ function EditModeManagementUI({
     return (days * 86400) + (minutes * 60);
   };
 
-  const loadAuthConfigs = async () => {
-    setLoadingAuthConfigs(true);
-    try {
-      const pools = await api.listAuthConfigs();
-      setAuthConfigs(Array.isArray(pools) ? pools : []);
-    } catch (error) {
-      console.error('Error loading auth configs:', error);
-      setAuthConfigs([]);
-    } finally {
-      setLoadingAuthConfigs(false);
-    }
-  };
-
-  const loadAppClientDetails = async (authConfigId: string, clientId: string) => {
-    setLoadingAppClientDetails(prev => ({ ...prev, [clientId]: true }));
-    try {
-      const client = await api.getAppClient(authConfigId, clientId);
-      setAppClientDetails(prev => ({
-        ...prev,
-        [clientId]: client
-      }));
-      if (client.clientSecret) {
-        setRevealedSecrets(prev => ({
-          ...prev,
-          [clientId]: client.clientSecret || ''
-        }));
-      }
-      setExpiryValues(prev => ({
-        ...prev,
-        [clientId]: {
-          accessTokenExpiry: client.accessTokenExpiry || 3600,
-          refreshTokenExpiry: client.refreshTokenExpiry || 2592000,
-          idTokenExpiry: client.idTokenExpiry || 3600,
-        }
-      }));
-    } catch (error) {
-      console.error('Error loading app client details:', error);
-    } finally {
-      setLoadingAppClientDetails(prev => ({ ...prev, [clientId]: false }));
-    }
-  };
-
-  const loadProviders = async (authConfigId: string, clientId: string, showLoading = true) => {
-    const preloadKey = `${authConfigId}-${clientId}`;
-    if (preloadedProviders?.[preloadKey] && preloadedProviders[preloadKey].length > 0) {
-      setProviders(prev => ({
-        ...prev,
-        [clientId]: preloadedProviders[preloadKey] as SocialProviderResponse[]
-      }));
-      return;
-    }
-    
-    if (showLoading) {
-      setLoadingProviders(prev => ({ ...prev, [clientId]: true }));
-    }
-    try {
-      const providerList = await api.listProviders(authConfigId, clientId);
-      setProviders(prev => ({
-        ...prev,
-        [clientId]: Array.isArray(providerList) ? providerList : []
-      }));
-    } catch (error) {
-      console.error('Error loading providers:', error);
-      setProviders(prev => ({
-        ...prev,
-        [clientId]: []
-      }));
-    } finally {
-      if (showLoading) {
-        setLoadingProviders(prev => ({ ...prev, [clientId]: false }));
-      }
-    }
-  };
-
-  // ONE simple useEffect to load everything
+  // Sync app client details from cache for display (expiry, etc.)
   useEffect(() => {
-    const currentAuthConfigId = authConfigId || selectedAuthConfigId;
-    
-    if (!currentAuthConfigId) {
-      return;
-    }
-
-    // Set selectedAuthConfigId if not set
-    if (!selectedAuthConfigId && currentAuthConfigId) {
-      setSelectedAuthConfigId(currentAuthConfigId);
-    }
-
-    // Use preloaded data if available
-    const preloadedClients = preloadedAppClients?.[currentAuthConfigId];
-    if (preloadedClients && preloadedClients.length > 0) {
-      console.log('[AuthSection] ✅ Using preloaded data for authConfigId:', currentAuthConfigId);
-      setAppClients(preloadedClients);
-      
-      // Set providers from preloaded data
-      const providersMap: Record<string, SocialProviderResponse[]> = {};
-      preloadedClients.forEach((client) => {
-        const key = `${currentAuthConfigId}-${client.id}`;
-        if (preloadedProviders?.[key]) {
-          providersMap[client.id] = preloadedProviders[key] as SocialProviderResponse[];
-        }
-      });
-      setProviders(providersMap);
-      
-      // Load app client details for display
-      preloadedClients.forEach((client) => {
-        loadAppClientDetails(currentAuthConfigId, client.id);
-      });
-      
-      // Sync config from preloaded auth config
-      const preloadedAuthConfig = preloadedAuthConfigs?.find(ac => ac.id === currentAuthConfigId);
-      if (preloadedAuthConfig) {
-        updateConfig({ 
-          authConfigId: currentAuthConfigId, 
-          useAuthConfig: true,
-          userGroupName: preloadedAuthConfig.name, // Set the auth config name
-          enableSocialAuth: preloadedAuthConfig.enableSocialAuth || false,
-          enableApiKey: preloadedAuthConfig.enableApiKeyAuth || false,
-          bringOwnProvider: preloadedAuthConfig.bringMyOwnOAuth || false,
-        });
+    if (!currentAuthConfigId) return;
+    const next: Record<string, AppClientResponse> = {};
+    const nextExpiry: Record<string, { accessTokenExpiry: number; refreshTokenExpiry: number; idTokenExpiry: number }> = {};
+    for (const client of appClients) {
+      const detail = getAppClient(currentAuthConfigId, client.id);
+      if (detail) {
+        const c = detail as AppClientResponse;
+        next[client.id] = c;
+        nextExpiry[client.id] = {
+          accessTokenExpiry: c.accessTokenExpiry ?? 3600,
+          refreshTokenExpiry: c.refreshTokenExpiry ?? 2592000,
+          idTokenExpiry: c.idTokenExpiry ?? 3600,
+        };
       }
-      return;
     }
-
-    // No preloaded data - load from API
-    if (appClients.length === 0 && !loadingAppClients) {
-      console.log('[AuthSection] 📡 Loading from API for authConfigId:', currentAuthConfigId);
-      setLoadingAppClients(true);
-      api.listAppClients(currentAuthConfigId)
-        .then(clients => {
-          const clientsArray = Array.isArray(clients) ? clients : [];
-          setAppClients(clientsArray);
-          
-          // Load providers and details for all clients
-          clientsArray.forEach((client) => {
-            loadProviders(currentAuthConfigId, client.id, false);
-            loadAppClientDetails(currentAuthConfigId, client.id);
-          });
-        })
-        .catch(error => {
-          console.error('[AuthSection] ❌ Error loading app clients:', error);
-          setAppClients([]);
-        })
-        .finally(() => {
-          setLoadingAppClients(false);
-        });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authConfigId, selectedAuthConfigId]);
-
-  // Load auth configs if not preloaded
-  useEffect(() => {
-    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
-      setAuthConfigs(preloadedAuthConfigs);
-    } else if (authConfigs.length === 0) {
-      loadAuthConfigs();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preloadedAuthConfigs]);
-
+    setAppClientDetails(next);
+    setExpiryValues(prev => ({ ...prev, ...nextExpiry }));
+  }, [currentAuthConfigId, appClients, getAppClient]);
 
   const revealClientSecret = async (authConfigId: string, clientId: string) => {
     setLoadingSecret(clientId);
@@ -518,36 +367,12 @@ function EditModeManagementUI({
       // Add the new client to the state immediately so it appears right away
       // The API should return a full AppClient object
       const clientToAdd = newClient as AppClient;
-      const updatedClients = [...appClients, clientToAdd];
-      setAppClients(updatedClients);
-      
-      // Load details and providers for the new client
       const clientId = clientToAdd.id;
-      loadAppClientDetails(selectedAuthConfigId, clientId);
-      loadProviders(selectedAuthConfigId, clientId, false);
-      
-      // If this is the only app client (or no default is set), make it the default
-      if (updatedClients.length === 1 || !config.defaultAppClient) {
+      await invalidateAndRefetch(teamId);
+      if (appClients.length === 0 || !config.defaultAppClient) {
         updateConfig({ defaultAppClient: clientId });
         await saveConfigImmediately({ defaultAppClient: clientId });
       }
-      
-      // Refresh the list by reloading from API
-      setLoadingAppClients(true);
-      try {
-        const clients = await api.listAppClients(selectedAuthConfigId);
-        const clientsArray = Array.isArray(clients) ? clients : [];
-        setAppClients(clientsArray);
-        clientsArray.forEach((client) => {
-          loadProviders(selectedAuthConfigId, client.id, false);
-          loadAppClientDetails(selectedAuthConfigId, client.id);
-        });
-      } catch (error) {
-        console.error('Error refreshing app clients:', error);
-      } finally {
-        setLoadingAppClients(false);
-      }
-      
       setNewAppClientName('');
       setAuthorizedCallbackUrls([]);
       setNewAuthorizedCallbackUrl('');
@@ -572,8 +397,7 @@ function EditModeManagementUI({
         idTokenExpiry: expiries.idTokenExpiry,
       });
       
-      // Reload app client details to reflect the update
-      await loadAppClientDetails(selectedAuthConfigId, clientId);
+      await invalidateAndRefetch(teamId);
     } catch (error) {
       console.error('Error updating app client expiries:', error);
       alert('Failed to update token expiries');
@@ -585,42 +409,18 @@ function EditModeManagementUI({
     if (!confirm('Are you sure you want to delete this AppClient? This action cannot be undone.')) return;
     
     try {
-      await api.deleteAppClient(selectedAuthConfigId, clientId);
-      
-      // Check if the deleted client was the default
       const wasDefault = config.defaultAppClient === clientId;
-      
-      // Remove from state
-      const remainingClients = appClients.filter(c => c.id !== clientId);
-      setAppClients(remainingClients);
-      setAppClientDetails(prev => {
-        const next = { ...prev };
-        delete next[clientId];
-        return next;
-      });
-      setProviders(prev => {
-        const next = { ...prev };
-        delete next[clientId];
-        return next;
-      });
-      
-      // Handle default app client reassignment
-      // One app client must always be the default
-      if (wasDefault) {
-        if (remainingClients.length > 0) {
-          // Set the first remaining app client as default
-          const newDefault = remainingClients[0].id;
-          updateConfig({ defaultAppClient: newDefault });
-          // Save immediately if in edit mode
-          await saveConfigImmediately({ defaultAppClient: newDefault });
-        } else {
-          // No app clients left - this shouldn't happen in practice, but clear default if it does
-          updateConfig({ defaultAppClient: undefined });
-          // Save immediately if in edit mode
-          await saveConfigImmediately({ defaultAppClient: undefined });
-        }
+      await api.deleteAppClient(selectedAuthConfigId, clientId);
+      await invalidateAndRefetch(teamId);
+      const remainingClients = currentAuthConfigId ? getAppClients(currentAuthConfigId) : [];
+      if (wasDefault && remainingClients.length > 0) {
+        const newDefault = remainingClients[0].id;
+        updateConfig({ defaultAppClient: newDefault });
+        await saveConfigImmediately({ defaultAppClient: newDefault });
+      } else if (wasDefault && remainingClients.length === 0) {
+        updateConfig({ defaultAppClient: undefined });
+        await saveConfigImmediately({ defaultAppClient: undefined });
       } else if (remainingClients.length === 1 && !config.defaultAppClient) {
-        // If there's only one app client left and no default is set, make it the default
         const newDefault = remainingClients[0].id;
         updateConfig({ defaultAppClient: newDefault });
         await saveConfigImmediately({ defaultAppClient: newDefault });
@@ -648,7 +448,7 @@ function EditModeManagementUI({
         tokenType: provider.tokenType || 'thirdParty',
       });
       
-      await loadProviders(selectedAuthConfigId, clientId);
+      await invalidateAndRefetch(teamId);
       setNewProvider(prev => {
         const next = { ...prev };
         delete next[clientId];
@@ -667,7 +467,7 @@ function EditModeManagementUI({
     
     try {
       await api.removeProvider(selectedAuthConfigId, clientId, providerId);
-      await loadProviders(selectedAuthConfigId, clientId);
+      await invalidateAndRefetch(teamId);
     } catch (error) {
       console.error('Error deleting provider:', error);
       alert('Failed to delete provider');
@@ -744,13 +544,8 @@ function EditModeManagementUI({
     }
   };
 
-  // Determine if we're still loading initial data  
   const currentAuthConfigIdForLoading = authConfigId || selectedAuthConfigId;
-  const isLoadingInitialData = loadingAuthData || 
-    (currentAuthConfigIdForLoading && 
-     (!preloadedAppClients?.[currentAuthConfigIdForLoading] || 
-      preloadedAppClients[currentAuthConfigIdForLoading].length === 0) &&
-     appClients.length === 0 && !loadingAppClients);
+  const isLoadingInitialData = isBootstrapping && !!currentAuthConfigIdForLoading && appClients.length === 0;
 
   return (
     <div className="space-y-6">
@@ -882,7 +677,7 @@ function EditModeManagementUI({
               {appClients.map((client) => {
                 const clientDetails = appClientDetails[client.id];
                 const clientProviders = providers[client.id] || [];
-                const isLoadingProviders = loadingProviders[client.id];
+                const isLoadingProviders = false;
                 const isShowingAddProvider = showAddProvider[client.id];
                 return (
                   <div key={client.id} className="space-y-4">
@@ -1613,8 +1408,15 @@ function EditModeManagementUI({
   );
 }
 
-export function AuthenticationSection({ config, updateConfig, isEditMode = false, project, onProjectUpdate, preloadedAuthConfigs, preloadedAppClients, preloadedProviders, loadingAuthData }: AuthenticationSectionProps) {
-  
+export function AuthenticationSection({ config, updateConfig, isEditMode = false, project, onProjectUpdate, teamId }: AuthenticationSectionProps) {
+  const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
+  const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
+  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
+  const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
+  const existingAuthConfigs = getAuthConfigs();
+  const loadingAuthConfigs = isBootstrapping;
+
   const [newScope, setNewScope] = useState('');
   // Helper to get default callback URL based on current project name
   const getDefaultCallbackUrl = () => {
@@ -1669,8 +1471,6 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   };
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [selectedAppClient, setSelectedAppClient] = useState<AppClient & { authConfigId: string } | null>(null);
-  const [existingAuthConfigs, setExistingAuthConfigs] = useState<AuthConfig[]>(preloadedAuthConfigs || []);
-  const [loadingAuthConfigs, setLoadingAuthConfigs] = useState(false);
   // State for edit mode functions (used internally by loadAppClientDetails and loadThirdPartyProvider)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [appClientDetails, setAppClientDetails] = useState<AppClientResponse | null>(null);
@@ -1685,29 +1485,6 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   const [authConfigSelectModalOpen, setAuthConfigSelectModalOpen] = useState(false);
 
   // Track if we've already loaded auth configs to prevent repeated API calls
-  const hasLoadedAuthConfigsRef = useRef(false);
-
-  // Load existing AuthConfigs when social auth is enabled (only once or when enabled changes)
-  // Skip if we have preloaded data - create-project-dialog already handles loading
-  useEffect(() => {
-    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
-      if (existingAuthConfigs.length === 0) {
-        setExistingAuthConfigs(preloadedAuthConfigs);
-        hasLoadedAuthConfigsRef.current = true;
-      }
-      return;
-    }
-    
-    // Only load if no preloaded data and social auth is enabled
-    if (config.enableSocialAuth && !hasLoadedAuthConfigsRef.current && existingAuthConfigs.length === 0) {
-      loadAuthConfigs(true);
-      hasLoadedAuthConfigsRef.current = true;
-    } else if (!config.enableSocialAuth) {
-      hasLoadedAuthConfigsRef.current = false;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.enableSocialAuth, preloadedAuthConfigs]);
-
   // Track initial enableSocialAuth, enableApiKey, and bringOwnProvider to avoid updating on mount
   // These refs are used to prevent triggering update useEffects when syncing from authConfig
   const previousEnableSocialAuthRef = useRef<boolean | undefined>(config.enableSocialAuth);
@@ -1840,22 +1617,6 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.bringOwnProvider, config.authConfigId, isEditMode, project]);
 
-  // Initialize with preloaded auth configs if provided
-  useEffect(() => {
-    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
-      setExistingAuthConfigs(preloadedAuthConfigs);
-    }
-  }, [preloadedAuthConfigs]);
-
-  // Initialize with preloaded auth configs - no need to load if already preloaded
-  useEffect(() => {
-    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
-      setExistingAuthConfigs(preloadedAuthConfigs);
-    }
-    // Don't load from API here - create-project-dialog already handles it
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preloadedAuthConfigs]);
-
   // Track selected authConfigId - only set if we're in edit mode with an existing config
   const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(
     isEditMode && project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : undefined
@@ -1881,12 +1642,9 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     
     if (projectAuthConfigId) return projectAuthConfigId;
     if (config.authConfigId) return config.authConfigId;
-    if (preloadedAuthConfigs && preloadedAuthConfigs.length === 1) return preloadedAuthConfigs[0].id;
-    if (preloadedAppClients && Object.keys(preloadedAppClients).length === 1) {
-      return Object.keys(preloadedAppClients)[0];
-    }
+    if (existingAuthConfigs.length === 1) return existingAuthConfigs[0].id;
     return undefined;
-  }, [isEditMode, project, config.authConfigId, preloadedAuthConfigs, preloadedAppClients]);
+  }, [isEditMode, project, config.authConfigId, existingAuthConfigs]);
 
   // In edit mode, populate userGroupName from project's auth config or from determined authConfigId
   useEffect(() => {
@@ -1894,32 +1652,12 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
       return;
     }
     
-    // Find the auth config name from preloaded or existing configs
-    // Priority: preloadedAuthConfigs > existingAuthConfigs
-    const allPools = preloadedAuthConfigs && preloadedAuthConfigs.length > 0 
-      ? preloadedAuthConfigs 
-      : existingAuthConfigs;
-    
-    const authConfig = allPools.find(pool => pool.id === determinedAuthConfigId);
-    if (authConfig) {
-      // Always set userGroupName if we found the auth config and it's different or empty
-      if (!config.userGroupName || config.userGroupName !== authConfig.name) {
-        console.log('[AuthSection] Setting userGroupName:', authConfig.name, 'for authConfigId:', determinedAuthConfigId);
-        updateConfig({ 
-          userGroupName: authConfig.name,
-          authConfigId: determinedAuthConfigId, // Also ensure authConfigId is set
-        });
-      }
-    } else {
-      console.log('[AuthSection] Auth config not found:', {
-        determinedAuthConfigId,
-        preloadedCount: preloadedAuthConfigs?.length || 0,
-        existingCount: existingAuthConfigs.length,
-        allPoolsCount: allPools.length,
-      });
+    const authConfig = existingAuthConfigs.find(pool => pool.id === determinedAuthConfigId);
+    if (authConfig && (!config.userGroupName || config.userGroupName !== authConfig.name)) {
+      updateConfig({ userGroupName: authConfig.name, authConfigId: determinedAuthConfigId });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditMode, project, determinedAuthConfigId, config.userGroupName, preloadedAuthConfigs, existingAuthConfigs]);
+  }, [isEditMode, project, determinedAuthConfigId, config.userGroupName, existingAuthConfigs]);
 
   // Track which authConfigId we've already loaded data for to prevent duplicate loads
   const loadedAuthConfigIdRef = useRef<string | undefined>(undefined);
@@ -1944,185 +1682,45 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     // Mark as loading
     loadedAuthConfigIdRef.current = selectedAuthConfigId;
     
-    // Load authConfig details to sync toggles - check preloaded first
-    const preloadedAuthConfig = preloadedAuthConfigs?.find(ac => ac.id === selectedAuthConfigId);
-    if (preloadedAuthConfig) {
-      console.log('[AuthSection] ✅ Using preloaded auth config for toggles (create mode)');
-      updateConfig({ 
-        authConfigId: selectedAuthConfigId, 
+    const ac = getAuthConfig(selectedAuthConfigId);
+    if (ac) {
+      updateConfig({
+        authConfigId: selectedAuthConfigId,
         useAuthConfig: true,
-        enableSocialAuth: preloadedAuthConfig.enableSocialAuth || false,
-        enableApiKey: preloadedAuthConfig.enableApiKeyAuth || false,
-        bringOwnProvider: preloadedAuthConfig.bringMyOwnOAuth || false,
+        enableSocialAuth: ac.enableSocialAuth ?? false,
+        enableApiKey: ac.enableApiKeyAuth ?? false,
+        bringOwnProvider: ac.bringMyOwnOAuth ?? false,
       });
     } else {
-      console.log('[AuthSection] 📡 Loading auth config from API for toggles (create mode)');
-      api.getAuthConfig(selectedAuthConfigId).then(authConfig => {
-        updateConfig({ 
-          authConfigId: selectedAuthConfigId, 
-          useAuthConfig: true,
-          enableSocialAuth: authConfig.enableSocialAuth || false,
-          enableApiKey: authConfig.enableApiKeyAuth || false,
-          bringOwnProvider: authConfig.bringMyOwnOAuth || false,
-        });
-      }).catch(() => {
-        updateConfig({ authConfigId: selectedAuthConfigId, useAuthConfig: true });
+      updateConfig({ authConfigId: selectedAuthConfigId, useAuthConfig: true });
+    }
+    const clients = getAppClients(selectedAuthConfigId);
+    if (clients.length > 0 && !config.appClientId) {
+      const defaultClient = clients.find(c => c.id === config.defaultAppClient) || clients[0];
+      updateConfig({
+        appClientId: defaultClient.id,
+        defaultAppClient: config.defaultAppClient || defaultClient.id,
       });
     }
-    
-    // Load AppClients (use preloaded if available)
-    if (preloadedAppClients?.[selectedAuthConfigId]) {
-      console.log('[AuthSection] ✅ Using preloaded app clients (create mode)');
-      const clients = preloadedAppClients[selectedAuthConfigId];
-      if (clients.length > 0 && !config.appClientId) {
-        const defaultClient = clients.find(c => c.id === config.defaultAppClient) || clients[0];
-        updateConfig({ 
-          appClientId: defaultClient.id,
-          defaultAppClient: config.defaultAppClient || defaultClient.id,
-        });
-      }
-      // Load details and providers for all clients
-      clients.forEach(client => {
-        loadAppClientDetails(selectedAuthConfigId, client.id);
-        const providerKey = `${selectedAuthConfigId}-${client.id}`;
-        if (preloadedProviders?.[providerKey]) {
-          const providers = preloadedProviders[providerKey];
-          if (providers.length > 0 && (client.id === config.appClientId || (!config.appClientId && client === clients[0]))) {
-            const provider = providers[0] as SocialProviderResponse;
-            setThirdPartyProvider(provider);
-            updateConfig({
-              bringOwnProvider: true,
-              socialProvider: (provider.type || 'github') as 'github' | 'google' | 'microsoft' | 'facebook' | 'auth0' | 'other',
-              identityProviderDomain: provider.domain || '',
-              identityProviderClientId: provider.client_id || provider.clientId || '',
-            });
-          }
-        } else if (config.useAuthConfig && !config.bringOwnProvider) {
-          loadThirdPartyProvider(selectedAuthConfigId, client.id);
-        }
-      });
-    } else {
-      // Load from API
-      console.log('[AuthSection] 📡 Loading app clients from API (create mode)');
-      api.listAppClients(selectedAuthConfigId).then(response => {
-        const clients = Array.isArray(response) ? response : [];
-        if (clients.length > 0 && !config.appClientId) {
-          const defaultClient = clients.find(c => c.id === config.defaultAppClient) || clients[0];
-          updateConfig({ 
-            appClientId: defaultClient.id,
-            defaultAppClient: config.defaultAppClient || defaultClient.id,
-          });
-        }
-        // Load details and providers for all clients
-        clients.forEach(client => {
-          loadAppClientDetails(selectedAuthConfigId, client.id);
-          const providerKey = `${selectedAuthConfigId}-${client.id}`;
-          if (preloadedProviders?.[providerKey]) {
-            const providers = preloadedProviders[providerKey];
-            if (providers.length > 0 && (client.id === config.appClientId || (!config.appClientId && client === clients[0]))) {
-              const provider = providers[0] as SocialProviderResponse;
-              setThirdPartyProvider(provider);
-              updateConfig({
-                bringOwnProvider: true,
-                socialProvider: (provider.type || 'github') as 'github' | 'google' | 'microsoft' | 'facebook' | 'auth0' | 'other',
-                identityProviderDomain: provider.domain || '',
-                identityProviderClientId: provider.client_id || provider.clientId || '',
-              });
-            }
-          } else if (config.useAuthConfig && !config.bringOwnProvider) {
-            loadThirdPartyProvider(selectedAuthConfigId, client.id);
-          }
-        });
-      }).catch(error => {
-        console.error('[AuthSection] ❌ Error loading app clients:', error);
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAuthConfigId, isEditMode, project]);
-
-  const loadAuthConfigs = async (showLoading = false) => {
-    // Only show loading state if explicitly requested (e.g., first load)
-    // For background refreshes, don't show loading to keep UI responsive
-    if (showLoading) {
-      setLoadingAuthConfigs(true);
-    }
-    try {
-      console.log('[AuthSection] 📥 Fetching auth configs from API...');
-      const pools = await api.listAuthConfigs();
-      const poolsArray = Array.isArray(pools) ? pools : [];
-      console.log('[AuthSection] ✅ Auth configs loaded:', {
-        count: poolsArray.length,
-        names: poolsArray.map(p => p.name),
-      });
-      setExistingAuthConfigs(poolsArray);
-    } catch (error) {
-      console.error('[AuthSection] ❌ Error loading auth configs:', error);
-      // Only clear pools if this was the initial load
-      if (showLoading) {
-        setExistingAuthConfigs([]);
-      }
-    } finally {
-      if (showLoading) {
-        setLoadingAuthConfigs(false);
-      }
-    }
-  };
-
-  const loadAppClientDetails = async (authConfigId?: string, appClientId?: string) => {
-    const authConfigIdToUse = authConfigId || config.authConfigId;
-    const clientId = appClientId || config.appClientId;
-    
-    if (!authConfigIdToUse || !clientId) return;
-    
-    setLoadingAppClient(true);
-    try {
-      const client = await api.getAppClient(authConfigIdToUse, clientId);
-      setAppClientDetails(client);
-    } catch (error) {
-      console.error('Error loading app client details:', error);
-      setAppClientDetails(null);
-    } finally {
-      setLoadingAppClient(false);
-    }
-  };
-
-  const loadThirdPartyProvider = async (authConfigId?: string, appClientId?: string) => {
-    const authConfigIdToUse = authConfigId || config.authConfigId;
-    const clientId = appClientId || config.appClientId;
-    
-    if (!authConfigIdToUse || !clientId) return;
-    
-    setLoadingProvider(true);
-    try {
-      const providers = await api.listProviders(authConfigIdToUse, clientId);
-      // Get the first provider (usually there's one per app client)
-      if (providers && providers.length > 0) {
-        const provider = providers[0];
+    const first = clients[0];
+    if (first && config.useAuthConfig && !config.bringOwnProvider) {
+      const provList = getProviders(selectedAuthConfigId, first.id);
+      if (provList.length > 0) {
+        const provider = provList[0] as SocialProviderResponse;
         setThirdPartyProvider(provider);
-        // Update config with provider info
-        // Update config with third-party provider details
-        // This ensures the "Bring My Own OAuth Provider" section is shown
         updateConfig({
           bringOwnProvider: true,
           socialProvider: (provider.type || 'github') as 'github' | 'google' | 'microsoft' | 'facebook' | 'auth0' | 'other',
           identityProviderDomain: provider.domain || '',
-          identityProviderClientId: provider.client_id || provider.clientId || '',
-          // Note: client secret is not returned for security reasons
+          identityProviderClientId: (provider as { client_id?: string }).client_id || provider.clientId || '',
         });
       } else {
         setThirdPartyProvider(null);
-        // No provider configured - using default APIBlaze GitHub
-        updateConfig({
-          bringOwnProvider: false,
-        });
+        updateConfig({ bringOwnProvider: false });
       }
-    } catch (error) {
-      console.error('Error loading third-party provider:', error);
-      setThirdPartyProvider(null);
-    } finally {
-      setLoadingProvider(false);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAuthConfigId, isEditMode, project]);
 
   const handleProviderChange = (provider: SocialProvider) => {
     updateConfig({
@@ -2176,16 +1774,14 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           <Input
             id="userGroupName"
             placeholder={
-              loadingAuthConfigs || (loadingAuthData && !config.userGroupName)
-                ? "Loading..."
-                : "Enter a unique name (e.g., my-api-users)"
+              loadingAuthConfigs ? "Loading..." : "Enter a unique name (e.g., my-api-users)"
             }
             value={config.userGroupName}
             onChange={(e) => updateConfig({ userGroupName: e.target.value })}
             className="pr-10"
-            disabled={loadingAuthData && !config.userGroupName}
+            disabled={loadingAuthConfigs}
           />
-          {loadingAuthConfigs || (loadingAuthData && !config.userGroupName) ? (
+          {loadingAuthConfigs ? (
             <div className="absolute right-10 top-1/2 -translate-y-1/2">
               <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
             </div>
@@ -2287,10 +1883,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                 project={project}
                 onProjectUpdate={onProjectUpdate}
                 initialAuthConfigId={project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : config.authConfigId}
-                preloadedAuthConfigs={preloadedAuthConfigs}
-                preloadedAppClients={preloadedAppClients}
-                preloadedProviders={preloadedProviders}
-                loadingAuthData={loadingAuthData}
+                teamId={teamId}
               />
             ) : (
               /* Create Mode: Show AuthConfig data if selected AND social auth enabled, otherwise show third-party provider config */
@@ -2302,10 +1895,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                     updateConfig={updateConfig}
                     project={project}
                     onProjectUpdate={onProjectUpdate}
-                    preloadedAuthConfigs={preloadedAuthConfigs}
-                    preloadedAppClients={preloadedAppClients}
-                    preloadedProviders={preloadedProviders}
-                    loadingAuthData={loadingAuthData}
+                    teamId={teamId}
                   />
                 ) : (
                   <>

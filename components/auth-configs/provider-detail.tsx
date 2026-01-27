@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, ArrowLeft, Settings, Trash2, Copy, Check } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { SocialProvider } from '@/types/auth-config';
 import { ProviderFormDialog } from './provider-form-dialog';
 import {
@@ -38,42 +39,15 @@ const PROVIDER_TYPE_LABELS: Record<SocialProvider['type'], string> = {
 export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: ProviderDetailProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const [provider, setProvider] = useState<SocialProvider | null>(null);
-  const [loading, setLoading] = useState(true);
+  const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
+  const providers = getProviders(authConfigId, clientId);
+  const provider = providers.find((p) => p.id === providerId) ?? null;
+  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    fetchProvider();
-  }, [authConfigId, clientId, providerId]);
-
-  const fetchProvider = async () => {
-    try {
-      setLoading(true);
-      const providers = await api.listProviders(authConfigId, clientId);
-      const found = providers.find((p) => p.id === providerId);
-      if (found) {
-        setProvider(found);
-      } else {
-        toast({
-          title: 'Error',
-          description: 'Provider not found',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching provider:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load provider',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleCopy = async (text: string) => {
     try {
@@ -100,6 +74,7 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
     try {
       setDeleting(true);
       await api.removeProvider(authConfigId, clientId, provider.id);
+      await invalidateAndRefetch();
       toast({
         title: 'Success',
         description: 'Provider deleted successfully',
@@ -118,9 +93,9 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
     }
   };
 
-  const handleSuccess = () => {
+  const handleSuccess = async () => {
     setEditDialogOpen(false);
-    fetchProvider();
+    await invalidateAndRefetch();
   };
 
   if (loading) {

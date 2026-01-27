@@ -26,7 +26,7 @@ import { useToast } from '@/hooks/use-toast';
 import { fetchGitHubAPI } from '@/lib/github-api';
 import { deleteProject } from '@/lib/api/projects';
 import type { Project } from '@/types/project';
-import type { AuthConfig, AppClient, SocialProvider as AuthConfigSocialProvider } from '@/types/auth-config';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 
 type ProjectCreationSuggestions = string[];
 
@@ -101,11 +101,8 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
   const [isDeploying, setIsDeploying] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(project || null);
   const isDeployingRef = useRef(false); // Track deployment state to prevent config reset
-  const [preloadedAuthConfigs, setPreloadedAuthConfigs] = useState<AuthConfig[]>([]);
   const [preloadedGitHubRepos, setPreloadedGitHubRepos] = useState<Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>>([]);
-  const [preloadedAppClients, setPreloadedAppClients] = useState<Record<string, AppClient[]>>({}); // keyed by authConfigId
-  const [preloadedProviders, setPreloadedProviders] = useState<Record<string, AuthConfigSocialProvider[]>>({}); // keyed by `${authConfigId}-${appClientId}`
-  const [loadingAuthData, setLoadingAuthData] = useState(false); // Track loading state for auth data
+  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
 
   // Initialize config from project if in edit mode
   const getInitialConfig = (): ProjectConfig => {
@@ -266,99 +263,6 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     }
   }, [open, currentProject, project]);
 
-  // Track if we're currently loading to prevent duplicate loads
-  const isLoadingAuthDataRef = useRef(false);
-  const hasLoadedAuthConfigsRef = useRef(false);
-
-  // Preload auth data when project is selected OR when dialog opens
-  // This ensures data is ready when user switches to auth tab
-  useEffect(() => {
-    const projectForEdit = currentProject || project;
-    
-    // Only load if dialog is open or we have a project
-    if (!open && !projectForEdit) {
-      return;
-    }
-
-    // Skip if already loading or already loaded
-    if (isLoadingAuthDataRef.current || (hasLoadedAuthConfigsRef.current && preloadedAuthConfigs.length > 0)) {
-      return;
-    }
-
-    const loadAuthData = async () => {
-      isLoadingAuthDataRef.current = true;
-      setLoadingAuthData(true);
-      try {
-        const projectConfig = projectForEdit?.config as Record<string, unknown> | undefined;
-        let authConfigId = (projectConfig?.auth_config_id || projectConfig?.user_pool_id) as string | undefined;
-        
-        // Load auth configs first (if not already loaded)
-        if (preloadedAuthConfigs.length === 0 && !hasLoadedAuthConfigsRef.current) {
-          try {
-            const pools = await api.listAuthConfigs();
-            const poolsArray = Array.isArray(pools) ? pools : [];
-            setPreloadedAuthConfigs(poolsArray);
-            hasLoadedAuthConfigsRef.current = true;
-            
-            // If no authConfigId in project config but we have exactly one auth config, use it
-            if (!authConfigId && poolsArray.length === 1) {
-              authConfigId = poolsArray[0].id;
-            }
-          } catch (error) {
-            console.error('Error preloading auth configs:', error);
-          }
-        } else {
-          // Auth configs already loaded - check if we should use the first one
-          if (!authConfigId && preloadedAuthConfigs.length === 1) {
-            authConfigId = preloadedAuthConfigs[0].id;
-          }
-        }
-        
-        if (authConfigId) {
-          // Preload ALL AppClients for this authConfig
-          try {
-            const clients = await api.listAppClients(authConfigId);
-            const clientsArray = Array.isArray(clients) ? clients : [];
-            setPreloadedAppClients(prev => ({
-              ...prev,
-              [authConfigId]: clientsArray,
-            }));
-            
-            // Preload providers for ALL app clients
-            const providerPromises = clientsArray.map(async (client) => {
-              try {
-                const providers = await api.listProviders(authConfigId, client.id);
-                const providersArray = Array.isArray(providers) ? providers : [];
-                setPreloadedProviders(prev => ({
-                  ...prev,
-                  [`${authConfigId}-${client.id}`]: providersArray,
-                }));
-              } catch (error) {
-                console.error(`Error preloading providers for app client ${client.id}:`, error);
-                setPreloadedProviders(prev => ({
-                  ...prev,
-                  [`${authConfigId}-${client.id}`]: [],
-                }));
-              }
-            });
-            
-            await Promise.all(providerPromises);
-          } catch (error) {
-            console.error('Error preloading app clients:', error);
-          }
-        }
-      } catch (error) {
-        console.error('Error preloading auth data:', error);
-      } finally {
-        setLoadingAuthData(false);
-        isLoadingAuthDataRef.current = false;
-      }
-    };
-
-    void loadAuthData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, currentProject, project]); // Run when dialog opens OR project changes
-
   // Preload GitHub repos when dialog opens
   useEffect(() => {
     if (!open) {
@@ -389,22 +293,16 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     void loadGitHubRepos();
   }, [open]);
 
-  // Clear preloaded data when dialog closes
+  // Clear preloaded GitHub repos when dialog closes
   useEffect(() => {
     if (!open) {
-      setPreloadedAuthConfigs([]);
       setPreloadedGitHubRepos([]);
-      setPreloadedAppClients({});
-      setPreloadedProviders({});
-      setLoadingAuthData(false);
-      isLoadingAuthDataRef.current = false;
-      hasLoadedAuthConfigsRef.current = false;
     }
   }, [open]);
 
-  const updateConfig = (updates: Partial<ProjectConfig>) => {
+  const updateConfig = useCallback((updates: Partial<ProjectConfig>) => {
     setConfig(prev => ({ ...prev, ...updates }));
-  };
+  }, []);
 
   // Validate if a valid source is configured
   const isSourceConfigured = () => {
@@ -608,44 +506,27 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
           // Use appClientId from config, or defaultAppClient if set
           let selectedAppClientId = config.appClientId || config.defaultAppClient;
           
-          // If no app client is selected, automatically pick the first one from the auth config
+          // If no app client is selected, automatically pick the first one from the auth config (cache)
           if (!selectedAppClientId && selectedAuthConfigId) {
-            try {
-              const appClients = await api.listAppClients(selectedAuthConfigId);
-              const clientsArray = Array.isArray(appClients) ? appClients : [];
-              
-              if (clientsArray.length === 0) {
-                toast({
-                  title: 'Configuration Error',
-                  description: 'The selected auth config has no app clients. Please create an app client first.',
-                  variant: 'destructive',
-                });
-                setActiveTab('auth');
-                setIsDeploying(false);
-                return;
-              }
-              
-              // Use the first app client as default
-              selectedAppClientId = clientsArray[0].id;
-              defaultAppClientId = selectedAppClientId;
-              updateConfig({ defaultAppClient: defaultAppClientId });
-              
-              console.log('[CreateProject] Auto-selected first app client as default:', {
-                authConfigId: selectedAuthConfigId,
-                appClientId: selectedAppClientId,
-                totalClients: clientsArray.length,
-              });
-            } catch (error) {
-              console.error('Error fetching app clients for auth config:', error);
+            const clientsArray = getAppClients(selectedAuthConfigId);
+            if (clientsArray.length === 0) {
               toast({
                 title: 'Configuration Error',
-                description: 'Failed to fetch app clients for the selected auth config. Please try again.',
+                description: 'The selected auth config has no app clients. Please create an app client first.',
                 variant: 'destructive',
               });
               setActiveTab('auth');
               setIsDeploying(false);
               return;
             }
+            selectedAppClientId = clientsArray[0].id;
+            defaultAppClientId = clientsArray[0].id;
+            updateConfig({ defaultAppClient: defaultAppClientId });
+            console.log('[CreateProject] Auto-selected first app client as default:', {
+              authConfigId: selectedAuthConfigId,
+              appClientId: selectedAppClientId,
+              totalClients: clientsArray.length,
+            });
           } else {
             // Use the selected app client as default if not already set
             if (!config.defaultAppClient) {
@@ -1058,10 +939,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                   setCurrentProject(updatedProject);
                   onProjectUpdate?.(updatedProject);
                 }}
-                preloadedAuthConfigs={preloadedAuthConfigs}
-                preloadedAppClients={preloadedAppClients}
-                preloadedProviders={preloadedProviders}
-                loadingAuthData={loadingAuthData}
+                teamId={session?.user?.githubHandle ? `team_${(session.user as { githubHandle?: string }).githubHandle}` : undefined}
               />
             </TabsContent>
 

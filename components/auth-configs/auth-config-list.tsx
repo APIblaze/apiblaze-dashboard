@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,40 +23,21 @@ import {
 } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AuthConfig } from '@/types/auth-config';
 import { AuthConfigFormDialog } from './auth-config-form-dialog';
 
 export function AuthConfigList() {
   const router = useRouter();
   const { toast } = useToast();
-  const [authConfigs, setAuthConfigs] = useState<AuthConfig[]>([]);
-  const [loading, setLoading] = useState(true);
+  const authConfigs = useDashboardCacheStore((s) => s.getAuthConfigs());
+  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedConfig, setSelectedConfig] = useState<AuthConfig | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  const fetchAuthConfigs = useCallback(async () => {
-    try {
-      setLoading(true);
-      const configs = await api.listAuthConfigs();
-      setAuthConfigs(configs);
-    } catch (error) {
-      console.error('Error fetching auth configs:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load auth configs',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
-
-  useEffect(() => {
-    fetchAuthConfigs();
-  }, [fetchAuthConfigs]);
 
   const handleCreate = () => {
     setSelectedConfig(null);
@@ -85,7 +66,7 @@ export function AuthConfigList() {
       });
       setDeleteDialogOpen(false);
       setSelectedConfig(null);
-      fetchAuthConfigs();
+      await invalidateAndRefetch();
     } catch (error) {
       console.error('Error deleting auth config:', error);
       toast({
@@ -102,11 +83,11 @@ export function AuthConfigList() {
     router.push(`/dashboard/auth-configs?authConfig=${config.id}`);
   };
 
-  const handleSuccess = () => {
+  const handleSuccess = async () => {
     setCreateDialogOpen(false);
     setEditDialogOpen(false);
     setSelectedConfig(null);
-    fetchAuthConfigs();
+    await invalidateAndRefetch();
   };
 
   if (loading) {

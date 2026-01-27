@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AppClient, AuthConfig } from '@/types/auth-config';
 import { AppClientFormDialog } from './app-client-form-dialog';
 
@@ -34,38 +35,17 @@ interface AppClientListProps {
 export function AppClientList({ authConfigId, onRefresh }: AppClientListProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const [appClients, setAppClients] = useState<AppClient[]>([]);
-  const [loading, setLoading] = useState(true);
+  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
+  const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
+  const appClients = getAppClients(authConfigId);
+  const authConfig = getAuthConfig(authConfigId) ?? null;
+  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedClient, setSelectedClient] = useState<AppClient | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
-
-  const fetchAppClients = useCallback(async () => {
-    try {
-      setLoading(true);
-      const clients = await api.listAppClients(authConfigId);
-      setAppClients(clients);
-      // Fetch auth config for general info (default app client is now stored in project config, not auth config)
-      const pool = await api.getAuthConfig(authConfigId);
-      setAuthConfig(pool);
-    } catch (error) {
-      console.error('Error fetching app clients:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load app clients',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [authConfigId, toast]);
-
-  useEffect(() => {
-    fetchAppClients();
-  }, [fetchAppClients]);
 
   const handleCreate = () => {
     setSelectedClient(null);
@@ -94,7 +74,7 @@ export function AppClientList({ authConfigId, onRefresh }: AppClientListProps) {
       });
       setDeleteDialogOpen(false);
       setSelectedClient(null);
-      fetchAppClients();
+      await invalidateAndRefetch();
       onRefresh?.();
     } catch (error) {
       console.error('Error deleting app client:', error);
@@ -112,11 +92,11 @@ export function AppClientList({ authConfigId, onRefresh }: AppClientListProps) {
     router.push(`/dashboard/auth-configs?authConfig=${authConfigId}&client=${client.id}`);
   };
 
-  const handleSuccess = () => {
+  const handleSuccess = async () => {
     setCreateDialogOpen(false);
     setEditDialogOpen(false);
     setSelectedClient(null);
-    fetchAppClients();
+    await invalidateAndRefetch();
     onRefresh?.();
   };
 

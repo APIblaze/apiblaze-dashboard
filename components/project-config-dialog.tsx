@@ -1,13 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { Project } from '@/types/project';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Loader2, ExternalLink, Users, Key, Globe, Settings } from 'lucide-react';
-import { api } from '@/lib/api';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AuthConfig, AppClient, SocialProvider } from '@/types/auth-config';
 
 // API response may have snake_case fields from the database
@@ -28,69 +27,29 @@ interface ProjectConfigDialogProps {
 }
 
 export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConfigDialogProps) {
-  const [loading, setLoading] = useState(false);
-  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
-  const [appClient, setAppClient] = useState<AppClientResponse | null>(null);
-  const [providers, setProviders] = useState<SocialProviderResponse[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
+  const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
+  const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
 
-  useEffect(() => {
-    if (!open || !project) {
-      setAuthConfig(null);
-      setAppClient(null);
-      setProviders([]);
-      setError(null);
-      return;
-    }
+  const config = project?.config as Record<string, unknown> | undefined;
+  const authConfigId = config?.auth_config_id as string | undefined;
+  const defaultAppClientId = (config?.default_app_client_id || config?.defaultAppClient) as string | undefined;
+  const appClientId = defaultAppClientId || (config?.app_client_id as string | undefined);
 
-    // Extract auth_config_id and default_app_client_id from project config
-    const config = project.config as Record<string, unknown> | undefined;
-    const authConfigId = config?.auth_config_id as string | undefined;
-    const defaultAppClientId = (config?.default_app_client_id || config?.defaultAppClient) as string | undefined;
-    const appClientId = defaultAppClientId || (config?.app_client_id as string | undefined);
-
-    if (!authConfigId || !appClientId) {
-      // No user pool configured for this project
-      return;
-    }
-
-    // Fetch user pool, app client, and providers
-    const fetchAuthConfigDetails = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // Fetch AuthConfig
-        const pool = await api.getAuthConfig(authConfigId);
-        setAuthConfig(pool);
-
-        // Fetch AppClient
-        const client = await api.getAppClient(authConfigId, appClientId);
-        setAppClient(client);
-
-        // Fetch Providers
-        const providerList = await api.listProviders(authConfigId, appClientId);
-        setProviders(providerList);
-      } catch (err) {
-        console.error('Error fetching user pool details:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load user pool details');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAuthConfigDetails();
-  }, [open, project]);
+  const hasAuthConfigIds = !!(open && project && authConfigId && appClientId);
+  const authConfig = hasAuthConfigIds ? (getAuthConfig(authConfigId!) ?? null) : null;
+  const appClient = hasAuthConfigIds ? (getAppClient(authConfigId!, appClientId!) as AppClientResponse | undefined ?? null) : null;
+  const providers = hasAuthConfigIds ? (getProviders(authConfigId!, appClientId!) as SocialProviderResponse[]) : [];
+  const loading = isBootstrapping && hasAuthConfigIds;
+  const error: string | null = null;
 
   if (!project) {
     return null;
   }
 
-  const config = project.config as Record<string, unknown> | undefined;
-  const authConfigId = config?.auth_config_id as string | undefined;
-  const defaultAppClientId = (config?.default_app_client_id || config?.defaultAppClient) as string | undefined;
-  const appClientId = defaultAppClientId || (config?.app_client_id as string | undefined);
   const hasAuthConfig = !!authConfigId && !!appClientId;
-  
+
   // Build portal URL with clientId if available
   const getPortalUrl = () => {
     const portalUrl = project.urls.portal;

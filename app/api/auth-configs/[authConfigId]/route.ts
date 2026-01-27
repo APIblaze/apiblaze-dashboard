@@ -46,7 +46,21 @@ export async function PATCH(
   try {
     const userClaims = await getUserClaims();
     const { authConfigId } = await params;
-    const body = (await request.json()) as { name?: string; default_app_client_id?: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean };
+    
+    // Safely parse request body - handle empty bodies gracefully
+    let body: { name?: string; default_app_client_id?: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean } = {};
+    try {
+      const text = await request.text();
+      if (text && text.trim().length > 0) {
+        body = JSON.parse(text);
+      }
+    } catch (parseError) {
+      // If JSON parsing fails, return error
+      return NextResponse.json(
+        { error: 'Invalid JSON in request body', details: parseError instanceof Error ? parseError.message : 'Unknown error' },
+        { status: 400 }
+      );
+    }
     
     const client = createAPIBlazeClient({
       apiKey: INTERNAL_API_KEY,

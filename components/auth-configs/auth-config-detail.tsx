@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, ArrowLeft, Settings, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AuthConfig } from '@/types/auth-config';
 import { AppClientList } from './app-client-list';
 import { UsersList } from './users-list';
@@ -30,33 +31,14 @@ interface AuthConfigDetailProps {
 export function AuthConfigDetail({ authConfigId, onBack }: AuthConfigDetailProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
-  const [loading, setLoading] = useState(true);
+  const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
+  const authConfig = getAuthConfig(authConfigId) ?? null;
+  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState('app-clients');
-
-  useEffect(() => {
-    fetchAuthConfig();
-  }, [authConfigId]);
-
-  const fetchAuthConfig = async () => {
-    try {
-      setLoading(true);
-      const config = await api.getAuthConfig(authConfigId);
-      setAuthConfig(config);
-    } catch (error) {
-      console.error('Error fetching auth config:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load auth config',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleDeleteConfirm = async () => {
     if (!authConfig) return;
@@ -64,6 +46,7 @@ export function AuthConfigDetail({ authConfigId, onBack }: AuthConfigDetailProps
     try {
       setDeleting(true);
       await api.deleteAuthConfig(authConfig.id);
+      await invalidateAndRefetch();
       toast({
         title: 'Success',
         description: 'Auth config deleted successfully',
@@ -82,9 +65,9 @@ export function AuthConfigDetail({ authConfigId, onBack }: AuthConfigDetailProps
     }
   };
 
-  const handleSuccess = () => {
+  const handleSuccess = async () => {
     setEditDialogOpen(false);
-    fetchAuthConfig();
+    await invalidateAndRefetch();
   };
 
   if (loading) {
@@ -166,13 +149,13 @@ export function AuthConfigDetail({ authConfigId, onBack }: AuthConfigDetailProps
             <TabsTrigger value="groups">Groups</TabsTrigger>
           </TabsList>
           <TabsContent value="app-clients" className="mt-6">
-            <AppClientList authConfigId={authConfigId} onRefresh={fetchAuthConfig} />
+            <AppClientList authConfigId={authConfigId} onRefresh={() => invalidateAndRefetch()} />
           </TabsContent>
           <TabsContent value="users" className="mt-6">
-            <UsersList authConfigId={authConfigId} onRefresh={fetchAuthConfig} />
+            <UsersList authConfigId={authConfigId} onRefresh={() => invalidateAndRefetch()} />
           </TabsContent>
           <TabsContent value="groups" className="mt-6">
-            <GroupsList authConfigId={authConfigId} onRefresh={fetchAuthConfig} />
+            <GroupsList authConfigId={authConfigId} onRefresh={() => invalidateAndRefetch()} />
           </TabsContent>
         </Tabs>
       </div>
