@@ -1,6 +1,7 @@
 'use client';
 
 import { signOut } from 'next-auth/react';
+import { clearGitHubReposCache } from './github-repos-cache';
 
 /**
  * Wrapper for fetch that automatically logs out the user when GitHub credentials have expired (401).
@@ -39,6 +40,9 @@ export async function fetchGitHubAPI(
       url.includes('/api/openapi/parse')
     ) {
       console.warn('[GitHub API] Credentials expired, logging out user:', errorMessage);
+      
+      // Clear GitHub repos cache before logging out
+      clearGitHubReposCache();
       
       // Sign out and redirect to login
       await signOut({ 

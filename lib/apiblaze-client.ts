@@ -32,7 +32,15 @@ export interface CreateProxyPayload {
     client_secret: string;
     scopes?: string;
   };
+  auth_config_id?: string;
+  app_client_id?: string;
+  default_app_client_id?: string;
   environments?: Record<string, { target: string; description?: string }>;
+  throttling?: {
+    userRateLimit: number;
+    proxyDailyQuota: number;
+    accountMonthlyQuota: number;
+  };
 }
 
 interface APIBlazeClientOptions {
@@ -93,19 +101,76 @@ export class APIBlazeClient {
     headers.set('X-User-Assertion', userAssertion);
     
     // Make request
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const fullUrl = `${this.baseUrl}${path}`;
+    console.log('APIBlaze request:', {
+      method: fetchOptions.method || 'GET',
+      url: fullUrl,
+      hasBody: !!fetchOptions.body,
+    });
+    
+    const response = await fetch(fullUrl, {
       ...fetchOptions,
       headers,
     });
+    
+    // Handle 204 No Content responses first (before checking response.ok)
+    // These responses have no body and should be treated as success
+    if (response.status === 204 || response.status === 205 || response.status === 304) {
+      return undefined as T;
+    }
     
     if (!response.ok) {
       let errorBody: APIErrorBody = { error: 'Unknown error' };
       try {
         errorBody = (await response.json()) as APIErrorBody;
       } catch (jsonError) {
-        console.error('Failed to parse error body from APIBlaze response:', jsonError);
+        // If JSON parsing fails, try to get the response text
+        try {
+          const responseText = await response.text();
+          console.error('Failed to parse error body from APIBlaze response:', {
+            status: response.status,
+            statusText: response.statusText,
+            url: `${this.baseUrl}${path}`,
+            responseText: responseText.substring(0, 500), // Limit to first 500 chars
+            jsonError,
+          });
+          errorBody = { 
+            error: `HTTP ${response.status}: ${response.statusText}`,
+            details: responseText.substring(0, 500),
+          };
+        } catch (textError) {
+          console.error('Failed to parse error body from APIBlaze response:', {
+            status: response.status,
+            statusText: response.statusText,
+            url: `${this.baseUrl}${path}`,
+            jsonError,
+            textError,
+          });
+          errorBody = { 
+            error: `HTTP ${response.status}: ${response.statusText}`,
+          };
+        }
       }
+      
+      // Special handling: If DELETE operation returns 500 with "204 response cannot have body" error,
+      // treat it as success since the deletion actually succeeded (backend bug)
+      const method = fetchOptions.method || 'GET';
+      if (method === 'DELETE' && 
+          response.status === 500 && 
+          (errorBody.details?.toString().includes('204') || 
+           errorBody.details?.toString().includes('null body status'))) {
+        console.warn('Backend returned 500 for DELETE but operation succeeded (204 body error), treating as success');
+        return undefined as T;
+      }
+      
       throw new APIBlazeError(response.status, errorBody);
+    }
+    
+    // Check if response has content
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      // If no JSON content type, return empty object or undefined
+      return undefined as T;
     }
     
     const responseBody = (await response.json()) as T;
@@ -129,6 +194,18 @@ export class APIBlazeClient {
   /**
    * List proxies
    */
+  async checkProjectExists(userClaims: UserAssertionClaims, name?: string, subdomain?: string, apiVersion?: string): Promise<{ exists: boolean; project_id?: string; api_version?: string }> {
+    const queryParams = new URLSearchParams();
+    if (name) queryParams.append('name', name);
+    if (subdomain) queryParams.append('subdomain', subdomain);
+    if (apiVersion) queryParams.append('api_version', apiVersion);
+    
+    return this.request(`/projects/check?${queryParams.toString()}`, {
+      method: 'GET',
+      userClaims,
+    });
+  }
+
   async listProxies(userClaims: UserAssertionClaims, params?: {
     page?: number;
     limit?: number;
@@ -175,47 +252,63 @@ export class APIBlazeClient {
   }
 
   /**
-   * UserPool methods
+   * Update project config (without redeployment)
    */
-  async createUserPool(
+  async updateProxyConfig(
     userClaims: UserAssertionClaims,
-    data: { name: string }
+    projectId: string,
+    version: string,
+    config: Record<string, unknown>
   ) {
-    return this.request('/user-pools', {
+    return this.request(`/${projectId}/${version}/config`, {
+      method: 'PATCH',
+      body: JSON.stringify(config),
+      userClaims,
+    });
+  }
+
+  /**
+   * AuthConfig methods
+   */
+  async createAuthConfig(
+    userClaims: UserAssertionClaims,
+    data: { name: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean }
+  ) {
+    return this.request('/auth-configs', {
       method: 'POST',
       body: JSON.stringify(data),
       userClaims,
     });
   }
 
-  async listUserPools(userClaims: UserAssertionClaims) {
-    return this.request('/user-pools', {
+  async listAuthConfigs(userClaims: UserAssertionClaims) {
+    return this.request('/auth-configs', {
       method: 'GET',
       userClaims,
     });
   }
 
-  async getUserPool(userClaims: UserAssertionClaims, poolId: string) {
-    return this.request(`/user-pools/${poolId}`, {
+  async getAuthConfig(userClaims: UserAssertionClaims, authConfigId: string) {
+    return this.request(`/auth-configs/${authConfigId}`, {
       method: 'GET',
       userClaims,
     });
   }
 
-  async updateUserPool(
+  async updateAuthConfig(
     userClaims: UserAssertionClaims,
-    poolId: string,
-    data: { name?: string }
+    authConfigId: string,
+    data: { name?: string; default_app_client_id?: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean }
   ) {
-    return this.request(`/user-pools/${poolId}`, {
+    return this.request(`/auth-configs/${authConfigId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
       userClaims,
     });
   }
 
-  async deleteUserPool(userClaims: UserAssertionClaims, poolId: string) {
-    return this.request(`/user-pools/${poolId}`, {
+  async deleteAuthConfig(userClaims: UserAssertionClaims, authConfigId: string) {
+    return this.request(`/auth-configs/${authConfigId}`, {
       method: 'DELETE',
       userClaims,
     });
@@ -226,26 +319,26 @@ export class APIBlazeClient {
    */
   async createAppClient(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     data: {
       name: string;
       refreshTokenExpiry?: number;
       idTokenExpiry?: number;
       accessTokenExpiry?: number;
-      redirectUris?: string[];
+      authorizedCallbackUrls?: string[];
       signoutUris?: string[];
       scopes?: string[];
     }
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients`, {
       method: 'POST',
       body: JSON.stringify(data),
       userClaims,
     });
   }
 
-  async listAppClients(userClaims: UserAssertionClaims, poolId: string) {
-    return this.request(`/user-pools/${poolId}/app-clients`, {
+  async listAppClients(userClaims: UserAssertionClaims, authConfigId: string) {
+    return this.request(`/auth-configs/${authConfigId}/app-clients`, {
       method: 'GET',
       userClaims,
     });
@@ -253,10 +346,10 @@ export class APIBlazeClient {
 
   async getAppClient(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
       method: 'GET',
       userClaims,
     });
@@ -264,19 +357,19 @@ export class APIBlazeClient {
 
   async updateAppClient(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string,
     data: {
       name?: string;
       refreshTokenExpiry?: number;
       idTokenExpiry?: number;
       accessTokenExpiry?: number;
-      redirectUris?: string[];
+      authorizedCallbackUrls?: string[];
       signoutUris?: string[];
       scopes?: string[];
     }
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
       userClaims,
@@ -285,10 +378,10 @@ export class APIBlazeClient {
 
   async deleteAppClient(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
       method: 'DELETE',
       userClaims,
     });
@@ -299,7 +392,7 @@ export class APIBlazeClient {
    */
   async addProvider(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string,
     data: {
       type: string;
@@ -308,7 +401,7 @@ export class APIBlazeClient {
       domain?: string;
     }
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}/providers`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`, {
       method: 'POST',
       body: JSON.stringify(data),
       userClaims,
@@ -317,10 +410,10 @@ export class APIBlazeClient {
 
   async listProviders(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}/providers`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`, {
       method: 'GET',
       userClaims,
     });
@@ -328,11 +421,11 @@ export class APIBlazeClient {
 
   async removeProvider(
     userClaims: UserAssertionClaims,
-    poolId: string,
+    authConfigId: string,
     clientId: string,
     providerId: string
   ) {
-    return this.request(`/user-pools/${poolId}/app-clients/${clientId}/providers/${providerId}`, {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}`, {
       method: 'DELETE',
       userClaims,
     });

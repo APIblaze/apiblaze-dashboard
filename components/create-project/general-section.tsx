@@ -17,9 +17,10 @@ interface GeneralSectionProps {
   config: ProjectConfig;
   updateConfig: (updates: Partial<ProjectConfig>) => void;
   validationError?: 'project-name' | 'github-source' | 'target-url' | 'upload-file' | null;
+  preloadedGitHubRepos?: Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>;
 }
 
-export function GeneralSection({ config, updateConfig, validationError }: GeneralSectionProps) {
+export function GeneralSection({ config, updateConfig, validationError, preloadedGitHubRepos }: GeneralSectionProps) {
   const [checkingName, setCheckingName] = useState(false);
   const [nameAvailable, setNameAvailable] = useState<boolean | null>(null);
   const [repoSelectorOpen, setRepoSelectorOpen] = useState(false);
@@ -88,20 +89,17 @@ export function GeneralSection({ config, updateConfig, validationError }: Genera
         }
         
         setGithubAppInstalled(isInstalled);
-        setAuthError(false); // Clear any previous auth errors
       } else if (response.status === 401) {
         // 401 = Not authenticated or token invalid
         // fetchGitHubAPI will automatically log out the user, so we just need to clean up local state
         console.warn('[GitHub] 401 Unauthorized - User will be logged out');
         localStorage.removeItem('github_app_installed');
         setGithubAppInstalled(false);
-        setAuthError(false); // Don't show error message since user is being logged out
       } else {
         // Other errors - assume not installed
         console.error('[GitHub] API check failed with status:', response.status);
         localStorage.removeItem('github_app_installed');
         setGithubAppInstalled(false);
-        setAuthError(false);
       }
     } catch (error) {
       console.error('[GitHub] Error checking installation:', error);
@@ -114,10 +112,20 @@ export function GeneralSection({ config, updateConfig, validationError }: Genera
     }
   };
 
-  const handleBrowseGitHub = async () => {
-    // Re-check installation status before opening (using NextAuth session)
+  const handleBrowseGitHub = () => {
+    // Always open modal immediately - don't wait for preload or installation check
+    // The modal will handle loading states internally (using cache or API)
+    setRepoSelectorOpen(true);
+    
+    // Check installation in background (non-blocking)
+    // This will update the state but won't block the modal from opening
+    void checkInstallationInBackground();
+  };
+
+  const checkInstallationInBackground = async () => {
+    // Re-check installation status in background (using NextAuth session)
     try {
-      console.log('[GitHub] handleBrowseGitHub - checking installation');
+      console.log('[GitHub] handleBrowseGitHub - checking installation in background');
       const response = await fetchGitHubAPI('/api/github/installation-status', {
         cache: 'no-store',
       });
@@ -128,34 +136,46 @@ export function GeneralSection({ config, updateConfig, validationError }: Genera
         
         console.log('Installation check result:', data);
         
-        // Update localStorage
+        // Update localStorage and state
         if (isInstalled) {
           localStorage.setItem('github_app_installed', 'true');
           setGithubAppInstalled(true);
-          setRepoSelectorOpen(true);
+          // If modal is open and we thought it wasn't installed, it's fine now
         } else {
           localStorage.removeItem('github_app_installed');
           setGithubAppInstalled(false);
-          setInstallModalOpen(true);
+          // Only show install modal if repo selector is not open (user hasn't seen repos)
+          if (!repoSelectorOpen) {
+            setInstallModalOpen(true);
+          }
         }
       } else if (response.status === 401) {
         // 401 = Credentials expired, fetchGitHubAPI will log out the user
         console.warn('[GitHub] 401 Unauthorized - User will be logged out');
         localStorage.removeItem('github_app_installed');
         setGithubAppInstalled(false);
-        // User will be redirected to login, so we don't need to show install modal
+        // Close repo selector if open, user will be redirected to login
+        if (repoSelectorOpen) {
+          setRepoSelectorOpen(false);
+        }
       } else {
-        // On error, show install modal
+        // On error, update state but don't block
         localStorage.removeItem('github_app_installed');
         setGithubAppInstalled(false);
-        setInstallModalOpen(true);
+        // Only show install modal if repo selector is not open
+        if (!repoSelectorOpen) {
+          setInstallModalOpen(true);
+        }
       }
     } catch (error) {
       console.error('Error checking installation:', error);
-      // On error, show install modal
+      // On error, update state but don't block
       localStorage.removeItem('github_app_installed');
       setGithubAppInstalled(false);
-      setInstallModalOpen(true);
+      // Only show install modal if repo selector is not open
+      if (!repoSelectorOpen) {
+        setInstallModalOpen(true);
+      }
     }
   };
 
@@ -371,18 +391,9 @@ export function GeneralSection({ config, updateConfig, validationError }: Genera
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <Button onClick={handleBrowseGitHub} className="w-full" disabled={checkingInstallation}>
-                    {checkingInstallation ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Checking...
-                      </>
-                    ) : (
-                      <>
-                        <Github className="mr-2 h-4 w-4" />
-                        {githubAppInstalled ? 'Browse Repositories' : 'Import from GitHub'}
-                      </>
-                    )}
+                  <Button onClick={handleBrowseGitHub} className="w-full">
+                    <Github className="mr-2 h-4 w-4" />
+                    {githubAppInstalled ? 'Browse Repositories' : 'Import from GitHub'}
                   </Button>
                 </CardContent>
               </Card>
@@ -394,6 +405,7 @@ export function GeneralSection({ config, updateConfig, validationError }: Genera
               onOpenChange={setRepoSelectorOpen}
               config={config}
               updateConfig={updateConfig}
+              preloadedRepos={preloadedGitHubRepos}
             />
             
             <GitHubAppInstallModal

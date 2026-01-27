@@ -98,6 +98,27 @@ export async function deleteProject(projectId: string, apiVersion: string = '1.0
   }
 }
 
+export async function updateProjectConfig(
+  projectId: string,
+  apiVersion: string,
+  config: Record<string, unknown>
+): Promise<void> {
+  const url = `/api/projects/${projectId}/${apiVersion}`;
+  
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(config),
+  });
+
+  if (!response.ok) {
+    const error = await parseErrorResponse(response);
+    throw new Error(error.error || `Failed to update project config: ${response.status}`);
+  }
+}
+
 export async function createProject(data: CreateProxyPayload): Promise<unknown> {
   const url = `/api/projects`;
   

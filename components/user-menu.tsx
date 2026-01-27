@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
 import { LogOut, User, Settings } from 'lucide-react';
+import { clearGitHubReposCache } from '@/lib/github-repos-cache';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +20,8 @@ export function UserMenu() {
   const { data: session } = useSession();
   
   const handleLogout = () => {
+    // Clear GitHub repos cache on logout
+    clearGitHubReposCache();
     signOut({ callbackUrl: '/auth/login' });
   };
   

@@ -1,16 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { Zap, Plus, GitBranch, Globe, Users, Rocket, Bot } from 'lucide-react';
+import { Zap, Plus, GitBranch, Globe, Users, Rocket, Bot, UserCog, Shield } from 'lucide-react';
 import { UserMenu } from '@/components/user-menu';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CreateProjectDialog } from '@/components/create-project-dialog';
-import { ProjectList } from '@/components/project-list';
+import { ProjectList, ProjectListRef } from '@/components/project-list';
 import { listProjects } from '@/lib/api/projects';
-import { UserPoolModal } from '@/components/user-pool/user-pool-modal';
 import { ProjectConfigDialog } from '@/components/project-config-dialog';
 import { Project } from '@/types/project';
 
@@ -18,11 +17,11 @@ export default function DashboardPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [userPoolModalOpen, setUserPoolModalOpen] = useState(false);
   const [hasProjects, setHasProjects] = useState<boolean | null>(null);
   const [checkingProjects, setCheckingProjects] = useState(true);
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const projectListRef = useRef<ProjectListRef>(null);
   
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -69,7 +68,9 @@ export default function DashboardPage() {
         limit: 1, // Just check if any exist
       });
       
-      setHasProjects(response.pagination.total > 0);
+      // Check if there are actually projects in the array, not just pagination total
+      // This handles cases where pagination.total > 0 but projects array is empty
+      setHasProjects(response.projects.length > 0 && response.pagination.total > 0);
     } catch (error) {
       console.error('Error loading projects:', error);
       setHasProjects(false);
@@ -84,9 +85,13 @@ export default function DashboardPage() {
     }
   }, [status, loadProjects]);
 
-  const handleProjectCreated = () => {
+  const handleProjectCreated = async () => {
     setCreateDialogOpen(false);
     setHasProjects(true);
+    // Refresh the project list to show the newly created/updated project
+    if (projectListRef.current) {
+      await projectListRef.current.refresh();
+    }
   };
   
   if (status === 'loading' || status === 'unauthenticated' || checkingProjects) {
@@ -98,6 +103,7 @@ export default function DashboardPage() {
   // Show zero state if no projects
   if (hasProjects === false) {
     return (
+      <>
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
         {/* Header */}
         <header className="border-b bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm sticky top-0 z-50">
@@ -113,6 +119,10 @@ export default function DashboardPage() {
             </div>
           
             <div className="flex items-center gap-3">
+              <Button variant="outline" onClick={() => router.push('/dashboard/auth-configs')}>
+                <UserCog className="mr-2 h-4 w-4" />
+                User Pools
+              </Button>
               <Button variant="outline" onClick={() => router.push('/dashboard/llm')}>
                 <Bot className="mr-2 h-4 w-4" />
                 Enable your API on LLMs
@@ -127,7 +137,7 @@ export default function DashboardPage() {
           {/* Welcome Section */}
           <div className="mb-8">
             <h2 className="text-3xl font-bold mb-2">
-              Welcome back, {user?.name || user?.githubHandle}! 👋
+              Welcome, {user?.name || user?.githubHandle}! 👋
             </h2>
             <p className="text-muted-foreground">
               You haven&apos;t created any API proxies yet. Let&apos;s get started!
@@ -146,16 +156,10 @@ export default function DashboardPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col sm:flex-row items-center justify-center gap-3 pb-6">
-              <Button
-                size="lg"
-                variant="outline"
-                className="h-12 px-8"
-                onClick={() => setUserPoolModalOpen(true)}
-              >
-                <Plus className="mr-2 h-5 w-5" />
-                Add a User Pool
-              </Button>
-              <Button size="lg" className="h-12 px-8" onClick={() => setCreateDialogOpen(true)}>
+              <Button size="lg" className="h-12 px-8" onClick={() => {
+                setSelectedProject(null);
+                setCreateDialogOpen(true);
+              }}>
                 <Plus className="mr-2 h-5 w-5" />
                 Create Project
               </Button>
@@ -199,12 +203,12 @@ export default function DashboardPage() {
             
             <Card>
               <CardHeader>
-                <Users className="w-8 h-8 text-green-600 mb-2" />
-                <CardTitle className="text-lg">Team Collaboration</CardTitle>
+                <Shield className="w-8 h-8 text-green-600 mb-2" />
+                <CardTitle className="text-lg">Fine-Grained Policies</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Invite team members and manage API projects together with role-based access.
+                  Easily enforce policies allowing fine-grained authorization. For example: POST book/id/123 with &lbrace;&quot;user&quot;:&quot;John&quot;&rbrace; allows John to book, but GET book/id/123 with &lbrace;&quot;user&quot;:&quot;Bob&quot;&rbrace; returns &quot;Sorry, only John or an admin can access book id 123&quot;.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -217,12 +221,8 @@ export default function DashboardPage() {
           onSuccess={handleProjectCreated}
           openToGitHub={typeof window !== 'undefined' && localStorage.getItem('github_app_just_installed') === 'true'}
         />
-        <UserPoolModal
-          open={userPoolModalOpen}
-          onOpenChange={setUserPoolModalOpen}
-          mode="manage"
-        />
       </div>
+      </>
     );
   }
 
@@ -243,15 +243,18 @@ export default function DashboardPage() {
           </div>
           
           <div className="flex items-center gap-3">
+            <Button variant="outline" onClick={() => router.push('/dashboard/auth-configs')}>
+              <UserCog className="mr-2 h-4 w-4" />
+              Auth Configs
+            </Button>
             <Button variant="outline" onClick={() => router.push('/dashboard/llm')}>
               <Bot className="mr-2 h-4 w-4" />
               Enable your API on LLMs
             </Button>
-            <Button variant="outline" onClick={() => setUserPoolModalOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add a User Pool
-            </Button>
-            <Button onClick={() => setCreateDialogOpen(true)}>
+            <Button onClick={() => {
+              setSelectedProject(null);
+              setCreateDialogOpen(true);
+            }}>
               <Plus className="mr-2 h-4 w-4" />
               Create Project
             </Button>
@@ -263,9 +266,10 @@ export default function DashboardPage() {
       {/* Main Content */}
       <main className="container mx-auto px-4 py-8">
         <ProjectList 
+          ref={projectListRef}
           teamId={user?.githubHandle ? `team_${user.githubHandle}` : undefined}
           onRefresh={loadProjects}
-          onUpdateConfig={(project) => {
+          onUpdateConfig={(project: Project) => {
             setSelectedProject(project);
             setCreateDialogOpen(true);
           }}
@@ -283,11 +287,10 @@ export default function DashboardPage() {
         onSuccess={handleProjectCreated}
         openToGitHub={typeof window !== 'undefined' && localStorage.getItem('github_app_just_installed') === 'true'}
         project={selectedProject}
-      />
-      <UserPoolModal
-        open={userPoolModalOpen}
-        onOpenChange={setUserPoolModalOpen}
-        mode="manage"
+        onProjectUpdate={(updatedProject) => {
+          // Update selectedProject so dialog reflects changes immediately
+          setSelectedProject(updatedProject);
+        }}
       />
     </div>
   );

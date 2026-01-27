@@ -24,17 +24,18 @@ function isContentFile(content: RepositoryContent): content is ContentFile {
   return !Array.isArray(content) && 'content' in content;
 }
 
-function getRouteParams(context: unknown): { owner: string; repo: string } {
+async function getRouteParams(context: unknown): Promise<{ owner: string; repo: string }> {
   if (
     typeof context === 'object' &&
     context !== null &&
-    'params' in context &&
-    typeof (context as { params?: unknown }).params === 'object' &&
-    (context as { params: unknown }).params !== null
+    'params' in context
   ) {
-    const { owner, repo } = (context as { params: Record<string, unknown> }).params;
-    if (typeof owner === 'string' && typeof repo === 'string') {
-      return { owner, repo };
+    const params = await (context as { params: Promise<Record<string, unknown>> }).params;
+    if (params && typeof params === 'object') {
+      const { owner, repo } = params;
+      if (typeof owner === 'string' && typeof repo === 'string') {
+        return { owner, repo };
+      }
     }
   }
 
@@ -53,7 +54,7 @@ export async function GET(
   context: unknown
 ) {
   try {
-    const { owner, repo } = getRouteParams(context);
+    const { owner, repo } = await getRouteParams(context);
     
     // Get and validate session (NextAuth)
     const session = await getServerSession(authOptions);

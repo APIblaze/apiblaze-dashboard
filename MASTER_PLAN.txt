@@ -11,6 +11,7 @@
 
 **"Make the complex simple, make the simple beautiful"**
 
+
 - **User-First**: Every decision prioritizes user experience
 - **Progressive Disclosure**: Show only what's needed, when it's needed
 - **Information Architecture**: Clear hierarchy and navigation
@@ -20,6 +21,8 @@
 ---
 
 ## 🏗️ Architecture Principles
+
+
 
 ### Backend 
 - **Hybrid Storage**: KV for speed, D1 for complex queries

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { 
   Dialog, 
@@ -23,7 +23,10 @@ import { DomainsSection } from './create-project/domains-section';
 import { ProjectConfig } from './create-project/types';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { fetchGitHubAPI } from '@/lib/github-api';
+import { deleteProject } from '@/lib/api/projects';
 import type { Project } from '@/types/project';
+import type { AuthConfig, AppClient, SocialProvider as AuthConfigSocialProvider } from '@/types/auth-config';
 
 type ProjectCreationSuggestions = string[];
 
@@ -88,77 +91,91 @@ interface CreateProjectDialogProps {
   onSuccess?: () => void;
   openToGitHub?: boolean;
   project?: Project | null; // If provided, opens in edit mode with pre-populated data
+  onProjectUpdate?: (updatedProject: Project) => void; // Callback to update project in parent
 }
 
-export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHub, project }: CreateProjectDialogProps) {
+export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHub, project, onProjectUpdate }: CreateProjectDialogProps) {
   const { data: session } = useSession();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('general');
   const [isDeploying, setIsDeploying] = useState(false);
+  const [currentProject, setCurrentProject] = useState<Project | null>(project || null);
+  const isDeployingRef = useRef(false); // Track deployment state to prevent config reset
+  const [preloadedAuthConfigs, setPreloadedAuthConfigs] = useState<AuthConfig[]>([]);
+  const [preloadedGitHubRepos, setPreloadedGitHubRepos] = useState<Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>>([]);
+  const [preloadedAppClients, setPreloadedAppClients] = useState<Record<string, AppClient[]>>({}); // keyed by authConfigId
+  const [preloadedProviders, setPreloadedProviders] = useState<Record<string, AuthConfigSocialProvider[]>>({}); // keyed by `${authConfigId}-${appClientId}`
+  const [loadingAuthData, setLoadingAuthData] = useState(false); // Track loading state for auth data
 
   // Initialize config from project if in edit mode
   const getInitialConfig = (): ProjectConfig => {
-    if (!project) {
+    const projectForConfig = currentProject || project;
+    if (!projectForConfig) {
       return {
-        // General
-        projectName: '',
-        apiVersion: '1.0.0',
-        sourceType: 'github',
-        githubUser: '',
-        githubRepo: '',
-        githubPath: '',
-        githubBranch: 'main',
-        targetUrl: '',
-        uploadedFile: null,
-        
-        // Authentication
-        userGroupName: '',
-        enableApiKey: true,
-        enableSocialAuth: false,
-        useUserPool: false,
-        userPoolId: undefined,
+    // General
+    projectName: '',
+    apiVersion: '1.0.0',
+    sourceType: 'github',
+    githubUser: '',
+    githubRepo: '',
+    githubPath: '',
+    githubBranch: 'main',
+    targetUrl: '',
+    uploadedFile: null,
+    
+    // Authentication
+    userGroupName: 'my-api-users',
+    enableApiKey: true,
+    enableSocialAuth: false,
+        useAuthConfig: false,
+        authConfigId: undefined,
         appClientId: undefined,
-        bringOwnProvider: false,
-        socialProvider: 'github',
-        identityProviderDomain: '',
-        identityProviderClientId: '',
-        identityProviderClientSecret: '',
-        authorizedScopes: ['email', 'openid', 'profile'],
-        
-        // Target Servers
-        targetServers: [
-          { stage: 'dev', targetUrl: '', config: [] },
-          { stage: 'test', targetUrl: '', config: [] },
-          { stage: 'prod', targetUrl: '', config: [] },
-        ],
-        
-        // Portal
-        createPortal: true,
-        portalLogoUrl: '',
-        
-        // Throttling
-        throttlingRate: 10,
-        throttlingBurst: 20,
-        quota: 1000,
-        quotaInterval: 'day',
-        
-        // Pre/Post Processing
-        preProcessingPath: '',
-        postProcessingPath: '',
-        
-        // Domains (placeholder)
-        customDomains: [],
+    bringOwnProvider: false,
+    socialProvider: 'github',
+    identityProviderDomain: '',
+    identityProviderClientId: '',
+    identityProviderClientSecret: '',
+    authorizedScopes: ['email', 'openid', 'profile'],
+    
+    // Target Servers
+    targetServers: [
+      { stage: 'dev', targetUrl: '', config: [] },
+      { stage: 'test', targetUrl: '', config: [] },
+      { stage: 'prod', targetUrl: '', config: [] },
+    ],
+    
+    // Portal
+    createPortal: true,
+    portalLogoUrl: '',
+    
+    // Throttling (new structure)
+    throttling: {
+      userRateLimit: 10,
+      proxyDailyQuota: 1000,
+      accountMonthlyQuota: 30000, // Free Tier default
+    },
+    
+    // Pre/Post Processing
+    preProcessingPath: '',
+    postProcessingPath: '',
+    
+    // Domains (placeholder)
+    customDomains: [],
       };
     }
 
-    // Populate from project
-    const projectConfig = project.config as Record<string, unknown> | undefined;
-    const specSource = project.spec_source;
+    // Populate from project (use currentProject state which may have been updated)
+    const projectConfig = projectForConfig?.config as Record<string, unknown> | undefined;
+    const specSource = projectForConfig?.spec_source;
+    if (!specSource) {
+      // Fallback if no project - this shouldn't happen but TypeScript needs it
+      return getInitialConfig();
+    }
     
     return {
       // General
-      projectName: project.display_name || '',
-      apiVersion: project.api_version || '1.0.0',
+      projectName: projectForConfig?.display_name || '',
+      apiVersion: projectForConfig?.api_version || '1.0.0',
       sourceType: specSource.type === 'github' ? 'github' : specSource.type === 'upload' ? 'upload' : 'targetUrl',
       githubUser: specSource.github?.owner || '',
       githubRepo: specSource.github?.repo || '',
@@ -170,10 +187,11 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       // Authentication - extract from config
       userGroupName: '',
       enableApiKey: (projectConfig?.auth_type as string) !== 'none',
-      enableSocialAuth: (projectConfig?.auth_type as string) === 'oauth' || !!(projectConfig?.user_pool_id as string),
-      useUserPool: !!(projectConfig?.user_pool_id as string),
-      userPoolId: projectConfig?.user_pool_id as string | undefined,
+      enableSocialAuth: (projectConfig?.auth_type as string) === 'oauth' || !!(projectConfig?.auth_config_id as string),
+      useAuthConfig: !!(projectConfig?.auth_config_id as string),
+      authConfigId: projectConfig?.auth_config_id as string | undefined,
       appClientId: undefined, // Not stored in config - selected at deployment time from database
+      defaultAppClient: (projectConfig?.default_app_client_id || projectConfig?.defaultAppClient) as string | undefined,
       bringOwnProvider: !!(projectConfig?.oauth_config as Record<string, unknown>),
       socialProvider: 'github',
       identityProviderDomain: (projectConfig?.oauth_config as Record<string, unknown>)?.domain as string || '',
@@ -192,11 +210,29 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       createPortal: true,
       portalLogoUrl: '',
       
-      // Throttling
-      throttlingRate: 10,
-      throttlingBurst: 20,
-      quota: 1000,
-      quotaInterval: 'day',
+      // Throttling - handle both new and legacy structures
+      throttling: (() => {
+        if (projectConfig?.throttling && typeof projectConfig.throttling === 'object') {
+          const throttling = projectConfig.throttling as {
+            userRateLimit?: number;
+            proxyDailyQuota?: number;
+            accountMonthlyQuota?: number;
+          };
+      
+          return {
+            userRateLimit: throttling.userRateLimit ?? 10,
+            proxyDailyQuota: throttling.proxyDailyQuota ?? 1000,
+            accountMonthlyQuota: throttling.accountMonthlyQuota ?? 30000,
+          };
+        }
+      
+        // Fallback for brand-new projects (no throttling stored yet)
+        return {
+          userRateLimit: 10,
+          proxyDailyQuota: 1000,
+          accountMonthlyQuota: 30000,
+        };
+      })(),
       
       // Pre/Post Processing
       preProcessingPath: '',
@@ -217,12 +253,154 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     }
   }, [open, openToGitHub]);
 
-  // Reset config when project changes or dialog opens/closes
+  // Update currentProject when project prop changes
   useEffect(() => {
-    if (open) {
+    setCurrentProject(project || null);
+  }, [project]);
+
+  // Reset config when project changes or dialog opens/closes
+  // BUT NOT during deployment (to preserve user's changes)
+  useEffect(() => {
+    if (open && !isDeployingRef.current) {
       setConfig(getInitialConfig());
     }
-  }, [open, project]);
+  }, [open, currentProject, project]);
+
+  // Track if we're currently loading to prevent duplicate loads
+  const isLoadingAuthDataRef = useRef(false);
+  const hasLoadedAuthConfigsRef = useRef(false);
+
+  // Preload auth data when project is selected OR when dialog opens
+  // This ensures data is ready when user switches to auth tab
+  useEffect(() => {
+    const projectForEdit = currentProject || project;
+    
+    // Only load if dialog is open or we have a project
+    if (!open && !projectForEdit) {
+      return;
+    }
+
+    // Skip if already loading or already loaded
+    if (isLoadingAuthDataRef.current || (hasLoadedAuthConfigsRef.current && preloadedAuthConfigs.length > 0)) {
+      return;
+    }
+
+    const loadAuthData = async () => {
+      isLoadingAuthDataRef.current = true;
+      setLoadingAuthData(true);
+      try {
+        const projectConfig = projectForEdit?.config as Record<string, unknown> | undefined;
+        let authConfigId = (projectConfig?.auth_config_id || projectConfig?.user_pool_id) as string | undefined;
+        
+        // Load auth configs first (if not already loaded)
+        if (preloadedAuthConfigs.length === 0 && !hasLoadedAuthConfigsRef.current) {
+          try {
+            const pools = await api.listAuthConfigs();
+            const poolsArray = Array.isArray(pools) ? pools : [];
+            setPreloadedAuthConfigs(poolsArray);
+            hasLoadedAuthConfigsRef.current = true;
+            
+            // If no authConfigId in project config but we have exactly one auth config, use it
+            if (!authConfigId && poolsArray.length === 1) {
+              authConfigId = poolsArray[0].id;
+            }
+          } catch (error) {
+            console.error('Error preloading auth configs:', error);
+          }
+        } else {
+          // Auth configs already loaded - check if we should use the first one
+          if (!authConfigId && preloadedAuthConfigs.length === 1) {
+            authConfigId = preloadedAuthConfigs[0].id;
+          }
+        }
+        
+        if (authConfigId) {
+          // Preload ALL AppClients for this authConfig
+          try {
+            const clients = await api.listAppClients(authConfigId);
+            const clientsArray = Array.isArray(clients) ? clients : [];
+            setPreloadedAppClients(prev => ({
+              ...prev,
+              [authConfigId]: clientsArray,
+            }));
+            
+            // Preload providers for ALL app clients
+            const providerPromises = clientsArray.map(async (client) => {
+              try {
+                const providers = await api.listProviders(authConfigId, client.id);
+                const providersArray = Array.isArray(providers) ? providers : [];
+                setPreloadedProviders(prev => ({
+                  ...prev,
+                  [`${authConfigId}-${client.id}`]: providersArray,
+                }));
+              } catch (error) {
+                console.error(`Error preloading providers for app client ${client.id}:`, error);
+                setPreloadedProviders(prev => ({
+                  ...prev,
+                  [`${authConfigId}-${client.id}`]: [],
+                }));
+              }
+            });
+            
+            await Promise.all(providerPromises);
+          } catch (error) {
+            console.error('Error preloading app clients:', error);
+          }
+        }
+      } catch (error) {
+        console.error('Error preloading auth data:', error);
+      } finally {
+        setLoadingAuthData(false);
+        isLoadingAuthDataRef.current = false;
+      }
+    };
+
+    void loadAuthData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentProject, project]); // Run when dialog opens OR project changes
+
+  // Preload GitHub repos when dialog opens
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const loadGitHubRepos = async () => {
+      try {
+        const statusResponse = await fetchGitHubAPI('/api/github/installation-status', {
+          cache: 'no-store',
+        });
+        
+        if (statusResponse.ok) {
+          const status = await statusResponse.json() as { installed?: boolean };
+          if (status.installed) {
+            const reposResponse = await fetchGitHubAPI('/api/github/repos');
+            if (reposResponse.ok) {
+              const repos = await reposResponse.json() as Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>;
+              setPreloadedGitHubRepos(Array.isArray(repos) ? repos : []);
+            }
+          }
+        }
+      } catch (error) {
+        // Silently fail - not critical
+      }
+    };
+
+    void loadGitHubRepos();
+  }, [open]);
+
+  // Clear preloaded data when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setPreloadedAuthConfigs([]);
+      setPreloadedGitHubRepos([]);
+      setPreloadedAppClients({});
+      setPreloadedProviders({});
+      setLoadingAuthData(false);
+      isLoadingAuthDataRef.current = false;
+      hasLoadedAuthConfigsRef.current = false;
+    }
+  }, [open]);
 
   const updateConfig = (updates: Partial<ProjectConfig>) => {
     setConfig(prev => ({ ...prev, ...updates }));
@@ -275,14 +453,29 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
 
   const handleDeploy = async () => {
     setIsDeploying(true);
-    console.log('[CreateProject] Starting deployment with config:', {
+    isDeployingRef.current = true; // Prevent config reset during deployment
+    
+    // CRITICAL: Log the config state BEFORE deployment starts
+    console.log('[CreateProject] 🚀 DEPLOYMENT STARTING - Config state snapshot:', {
       projectName: config.projectName,
       enableSocialAuth: config.enableSocialAuth,
-      useUserPool: config.useUserPool,
-      userPoolId: config.userPoolId,
+      useAuthConfig: config.useAuthConfig,
+      authConfigId: config.authConfigId,
       appClientId: config.appClientId,
       bringOwnProvider: config.bringOwnProvider,
+      currentProjectExists: !!currentProject,
+      currentProjectAuthConfigId: currentProject ? (currentProject.config as Record<string, unknown>)?.auth_config_id : undefined,
+      projectPropAuthConfigId: project ? (project.config as Record<string, unknown>)?.auth_config_id : undefined,
+      timestamp: new Date().toISOString(),
     });
+    
+    console.log('[CreateProject] 🔍 COMPARISON - authConfigId values:', {
+      'config.authConfigId (should be NEW)': config.authConfigId,
+      'currentProject.config.auth_config_id (OLD)': currentProject ? (currentProject.config as Record<string, unknown>)?.auth_config_id : 'N/A',
+      'project.config.auth_config_id (OLD)': project ? (project.config as Record<string, unknown>)?.auth_config_id : 'N/A',
+      'Are they different?': config.authConfigId !== (currentProject ? (currentProject.config as Record<string, unknown>)?.auth_config_id : undefined),
+    });
+
     try {
       // Validate required fields
       if (!config.projectName) {
@@ -295,6 +488,58 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         setIsDeploying(false);
         return;
       }
+
+      const subdomain = config.projectName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const apiVersion = config.apiVersion || '1.0.0';
+
+      // If editing an existing project, delete it first before recreating with new config
+      // This allows updating the authConfig and other settings
+      if (currentProject) {
+        try {
+          console.log('[CreateProject] Deleting existing project before recreating:', {
+            projectId: currentProject.project_id,
+            apiVersion: currentProject.api_version,
+          });
+          await deleteProject(currentProject.project_id, currentProject.api_version);
+          console.log('[CreateProject] Project deleted successfully');
+          // Don't clear currentProject during deployment - it would trigger config reset
+          // We'll clear it after successful deployment instead
+        } catch (deleteError) {
+          console.error('[CreateProject] Error deleting project:', deleteError);
+          toast({
+            title: 'Deployment Failed',
+            description: `Failed to delete existing project: ${deleteError instanceof Error ? deleteError.message : 'Unknown error'}`,
+            variant: 'destructive',
+          });
+          setIsDeploying(false);
+          return;
+        }
+      } else {
+        // Only check if project exists when creating a NEW project (not editing)
+        // This prevents creating authconfigs/app-clients/providers if project creation will fail
+        try {
+          const checkResult = await api.checkProjectExists(config.projectName, subdomain, apiVersion);
+          
+          if (checkResult.exists) {
+            toast({
+              title: 'Project Already Exists',
+              description: `A project with the name "${config.projectName}" and version "${apiVersion}" already exists. Please choose a different name or version.`,
+              variant: 'destructive',
+            });
+            setActiveTab('general');
+            setIsDeploying(false);
+            return;
+          }
+        } catch (checkError) {
+          console.warn('[CreateProject] Could not check for existing projects, proceeding anyway:', checkError);
+          // Continue - if project exists, backend will return 409 anyway
+        }
+      }
+
+      let authConfigId: string | undefined;
+      let appClientId: string | undefined;
+      let oauthConfig;
+      let defaultAppClientId: string | undefined = config.defaultAppClient; // Track default app client ID
 
       // Prepare GitHub source data if applicable
       const githubSource = config.sourceType === 'github' && config.githubUser && config.githubRepo && config.githubPath
@@ -316,47 +561,113 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
 
       // Prepare auth config
       const authType = config.enableSocialAuth ? 'oauth' : (config.enableApiKey ? 'api_key' : 'none');
-      
-      let userPoolId: string | undefined;
-      let appClientId: string | undefined;
-      let oauthConfig;
 
-      // Handle UserPool creation/selection
-      // Defensive check: if authType is oauth, we MUST have a UserPool
-      const needsUserPool = config.enableSocialAuth || authType === 'oauth';
-      console.warn('[CreateProject] ⚠️ CHECKING USERPOOL CREATION:', {
+      // Handle AuthConfig creation/selection
+      // Defensive check: if authType is oauth, we MUST have a AuthConfig
+      const needsAuthConfig = config.enableSocialAuth || authType === 'oauth';
+      console.warn('[CreateProject] ⚠️ CHECKING AUTHCONFIG CREATION:', {
         enableSocialAuth: config.enableSocialAuth,
         authType: authType,
-        needsUserPool: needsUserPool,
-        useUserPool: config.useUserPool,
-        userPoolId: config.userPoolId,
+        needsAuthConfig: needsAuthConfig,
+        useAuthConfig: config.useAuthConfig,
+        authConfigId: config.authConfigId,
         appClientId: config.appClientId,
         bringOwnProvider: config.bringOwnProvider,
+        currentProjectExists: !!currentProject,
+        currentProjectAuthConfigId: currentProject ? (currentProject.config as Record<string, unknown>)?.auth_config_id : undefined,
       });
       
-      if (needsUserPool) {
-        console.warn('[CreateProject] ✅ NEEDS USERPOOL - Entering creation logic');
-        console.log('[CreateProject] Social auth enabled, checking UserPool config:', {
-          useUserPool: config.useUserPool,
-          userPoolId: config.userPoolId,
+      if (needsAuthConfig) {
+        console.warn('[CreateProject] ✅ NEEDS AUTHCONFIG - Entering creation logic');
+        console.log('[CreateProject] Social auth enabled, checking AuthConfig config:', {
+          useAuthConfig: config.useAuthConfig,
+          authConfigId: config.authConfigId,
           appClientId: config.appClientId,
           bringOwnProvider: config.bringOwnProvider,
         });
 
-        // Check if we should use an existing UserPool
-        const hasExistingUserPool = config.useUserPool && config.userPoolId && config.appClientId;
+        // Check if we should use an existing AuthConfig
+        // IMPORTANT: Always use config.authConfigId from the current config state (which reflects UI changes)
+        // Do NOT use currentProject.config.auth_config_id as it may contain the old value
+        // During deployment, config.authConfigId should reflect the user's latest selection from the UI
+        const hasExistingAuthConfig = config.useAuthConfig && config.authConfigId;
         
-        if (hasExistingUserPool) {
-          // Use existing UserPool
-          console.log('[CreateProject] Using existing UserPool:', {
-            userPoolId: config.userPoolId,
-            appClientId: config.appClientId,
+        console.log('[CreateProject] 🔍 Checking existing AuthConfig:', {
+          hasExistingAuthConfig,
+          configUseAuthConfig: config.useAuthConfig,
+          configAuthConfigId: config.authConfigId,
+          currentProjectAuthConfigId: currentProject ? (currentProject.config as Record<string, unknown>)?.auth_config_id : undefined,
+          isDeploying: isDeployingRef.current,
+        });
+        
+        if (hasExistingAuthConfig) {
+          // Use existing AuthConfig - CRITICAL: Use config.authConfigId (from UI state), NOT currentProject.config.auth_config_id
+          const selectedAuthConfigId = config.authConfigId; // Capture from config state to ensure we use the latest value
+          console.log('[CreateProject] ✅ Using existing AuthConfig from config state:', selectedAuthConfigId);
+          
+          // Use appClientId from config, or defaultAppClient if set
+          let selectedAppClientId = config.appClientId || config.defaultAppClient;
+          
+          // If no app client is selected, automatically pick the first one from the auth config
+          if (!selectedAppClientId && selectedAuthConfigId) {
+            try {
+              const appClients = await api.listAppClients(selectedAuthConfigId);
+              const clientsArray = Array.isArray(appClients) ? appClients : [];
+              
+              if (clientsArray.length === 0) {
+                toast({
+                  title: 'Configuration Error',
+                  description: 'The selected auth config has no app clients. Please create an app client first.',
+                  variant: 'destructive',
+                });
+                setActiveTab('auth');
+                setIsDeploying(false);
+                return;
+              }
+              
+              // Use the first app client as default
+              selectedAppClientId = clientsArray[0].id;
+              defaultAppClientId = selectedAppClientId;
+              updateConfig({ defaultAppClient: defaultAppClientId });
+              
+              console.log('[CreateProject] Auto-selected first app client as default:', {
+                authConfigId: selectedAuthConfigId,
+                appClientId: selectedAppClientId,
+                totalClients: clientsArray.length,
+              });
+            } catch (error) {
+              console.error('Error fetching app clients for auth config:', error);
+              toast({
+                title: 'Configuration Error',
+                description: 'Failed to fetch app clients for the selected auth config. Please try again.',
+                variant: 'destructive',
+              });
+              setActiveTab('auth');
+              setIsDeploying(false);
+              return;
+            }
+          } else {
+            // Use the selected app client as default if not already set
+            if (!config.defaultAppClient) {
+              defaultAppClientId = selectedAppClientId;
+              updateConfig({ defaultAppClient: defaultAppClientId });
+            } else {
+              defaultAppClientId = config.defaultAppClient;
+            }
+          }
+          
+          console.log('[CreateProject] ✅ Using existing AuthConfig (from config state):', {
+            authConfigId: selectedAuthConfigId,
+            appClientId: selectedAppClientId,
+            defaultAppClientId,
+            isDefault: defaultAppClientId === selectedAppClientId,
+            note: 'Using selectedAuthConfigId from config state, NOT from currentProject',
           });
-          userPoolId = config.userPoolId;
-          appClientId = config.appClientId;
-          oauthConfig = undefined; // Will be handled via user_pool_id and app_client_id
+          authConfigId = selectedAuthConfigId; // Use the captured value from config state
+          appClientId = selectedAppClientId;
+          oauthConfig = undefined; // Will be handled via auth_config_id and app_client_id
         } else if (config.bringOwnProvider) {
-          console.log('[CreateProject] Creating UserPool with user-provided OAuth provider');
+          console.log('[CreateProject] Creating AuthConfig with user-provided OAuth provider');
           // Validate OAuth provider fields
           // Check if providers array exists and has items, otherwise check legacy fields
           const hasProviders = config.providers && config.providers.length > 0;
@@ -373,19 +684,65 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             return;
           }
 
-          // Create UserPool, AppClient, and Provider automatically
+          // Create AuthConfig, AppClient, and Provider automatically
           try {
-            // 1. Create UserPool
-            const userPoolName = config.userGroupName || `${config.projectName}-userpool`;
-            const userPool = await api.createUserPool({ name: userPoolName });
-            const createdUserPoolId = (userPool as { id: string }).id;
+            // 1. Check if AuthConfig with this name already exists, otherwise create it
+            const authConfigName = config.userGroupName || `${config.projectName}-authconfig`;
+            let currentAuthConfigId: string;
+            
+            // Check for existing auth config with the same name
+            const existingAuthConfigs = await api.listAuthConfigs();
+            const existingAuthConfig = Array.isArray(existingAuthConfigs) 
+              ? existingAuthConfigs.find((pool: { name: string; id: string }) => pool.name === authConfigName)
+              : null;
+            
+            if (existingAuthConfig) {
+              // Reuse existing auth config
+              console.log('[CreateProject] Reusing existing AuthConfig:', {
+                id: existingAuthConfig.id,
+                name: existingAuthConfig.name,
+              });
+              currentAuthConfigId = existingAuthConfig.id;
+            } else {
+              // Create new auth config
+              const authConfig = await api.createAuthConfig({ 
+                name: authConfigName,
+                enableSocialAuth: config.enableSocialAuth,
+                enableApiKeyAuth: config.enableApiKey,
+                bringMyOwnOAuth: config.bringOwnProvider,
+              });
+              const newAuthConfigId = (authConfig as { id: string }).id;
+              currentAuthConfigId = newAuthConfigId;
+              console.log('[CreateProject] Created new AuthConfig:', {
+                id: currentAuthConfigId,
+                name: authConfigName,
+                enable_social_auth: config.enableSocialAuth,
+                enable_api_key_auth: config.enableApiKey,
+              });
+            }
 
             // 2. Create AppClient
-            const appClient = await api.createAppClient(createdUserPoolId, {
+            // Generate default callback URL from project name
+            const projectName = config.projectName || 'project';
+            const apiVersion = config.apiVersion || '1.0.0';
+            const defaultCallbackUrl = `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
+            
+            // Ensure default URL is included and is first
+            const callbackUrls = config.authorizedCallbackUrls && config.authorizedCallbackUrls.length > 0
+              ? config.authorizedCallbackUrls
+              : [defaultCallbackUrl];
+            
+            // Make sure default URL is first if it's not already
+            const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
+              ? [defaultCallbackUrl, ...callbackUrls.filter(u => u !== defaultCallbackUrl)]
+              : [defaultCallbackUrl, ...callbackUrls];
+            
+            const appClient = await api.createAppClient(currentAuthConfigId, {
               name: `${config.projectName}-appclient`,
               scopes: config.authorizedScopes,
+              authorizedCallbackUrls: finalCallbackUrls,
             });
-            const createdAppClientId = (appClient as { id: string }).id;
+            const newAppClientId = (appClient as { id: string }).id;
             const createdAppClientClientId = (appClient as { clientId: string }).clientId;
 
             // 3. Add Provider(s) to AppClient
@@ -402,7 +759,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                   : []);
 
             for (const provider of providersToAdd) {
-              await api.addProvider(createdUserPoolId, createdAppClientId, {
+              await api.addProvider(currentAuthConfigId, newAppClientId, {
                 type: provider.type,
                 clientId: provider.clientId,
                 clientSecret: provider.clientSecret,
@@ -410,59 +767,91 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               });
             }
 
-            // Use the created UserPool and AppClient
-            userPoolId = createdUserPoolId;
-            appClientId = createdAppClientId;
-            oauthConfig = undefined; // Will be handled via user_pool_id and app_client_id
+            // Use the created AuthConfig and AppClient
+            authConfigId = currentAuthConfigId;
+            appClientId = newAppClientId;
+            oauthConfig = undefined; // Will be handled via auth_config_id and app_client_id
+            
+            // Set as default app client in project config (only one was created)
+            // CRITICAL: Set this BEFORE project creation
+            defaultAppClientId = newAppClientId;
+            // Update local config state (for UI, but we use the variable for API call)
+            updateConfig({ defaultAppClient: defaultAppClientId });
+            console.log('[CreateProject] Set defaultAppClientId for bringOwnProvider:', {
+              defaultAppClientId,
+              appClientId: newAppClientId,
+              authConfigId,
+            });
 
-            console.log('[CreateProject] Created UserPool automatically:', {
-              userPoolId,
+            console.log('[CreateProject] Created AuthConfig automatically:', {
+              authConfigId,
               appClientId,
               provider: config.socialProvider,
+              setAsDefault: true,
+              defaultAppClientId,
             });
           } catch (error) {
-            console.error('Error creating UserPool automatically:', error);
+            console.error('Error creating AuthConfig automatically:', error);
             toast({
-              title: 'Error Creating UserPool',
-              description: 'Failed to create UserPool automatically. Please try again.',
+              title: 'Error Creating AuthConfig',
+              description: 'Failed to create AuthConfig automatically. Please try again.',
               variant: 'destructive',
             });
             setIsDeploying(false);
             return;
           }
         } else {
-          // Default GitHub case - create UserPool/AppClient/Provider automatically
+          // Default GitHub case - create AuthConfig/AppClient/Provider automatically
           // This is done server-side to keep GitHub client secret secure
-          console.warn('[CreateProject] 🚀 DEFAULT GITHUB CASE - Creating UserPool with default GitHub provider (server-side)');
+          // The server-side endpoint will check for existing auth configs by name
+          console.warn('[CreateProject] 🚀 DEFAULT GITHUB CASE - Creating AuthConfig with default GitHub provider (server-side)');
           try {
-            const userPoolName = config.userGroupName || `${config.projectName}-userpool`;
+            const authConfigName = config.userGroupName || `${config.projectName}-authconfig`;
             const appClientName = `${config.projectName}-appclient`;
             
-            console.log('[CreateProject] Creating UserPool/AppClient/Provider with default GitHub (server-side)...');
-            const result = await api.createUserPoolWithDefaultGitHub({
-              userPoolName,
+            console.log('[CreateProject] Creating AuthConfig/AppClient/Provider with default GitHub (server-side)...');
+            const result = await api.createAuthConfigWithDefaultGitHub({
+              authConfigName,
               appClientName,
               scopes: config.authorizedScopes,
+              enableSocialAuth: config.enableSocialAuth,
+              enableApiKeyAuth: config.enableApiKey,
+              bringMyOwnOAuth: config.bringOwnProvider,
             });
 
-            // Use the created UserPool and AppClient
-            userPoolId = result.userPoolId;
+            // Use the created AuthConfig and AppClient
+            authConfigId = result.authConfigId;
             appClientId = result.appClientId;
-            oauthConfig = undefined; // Will be handled via user_pool_id and app_client_id
+            oauthConfig = undefined; // Will be handled via auth_config_id and app_client_id
+            
+            // Note: Provider is created server-side, we don't have its ID
+            
+            // Set as default app client in project config (only one was created)
+            // CRITICAL: Set this BEFORE project creation
+            defaultAppClientId = result.appClientId;
+            // Update local config state (for UI, but we use the variable for API call)
+            updateConfig({ defaultAppClient: defaultAppClientId });
+            console.log('[CreateProject] Set defaultAppClientId for default GitHub:', {
+              defaultAppClientId,
+              appClientId: result.appClientId,
+              authConfigId: result.authConfigId,
+            });
 
-            console.log('[CreateProject] Created UserPool for default GitHub:', {
-              userPoolId,
+            console.log('[CreateProject] Created AuthConfig for default GitHub:', {
+              authConfigId,
               appClientId,
               provider: 'github',
+              setAsDefault: true,
+              defaultAppClientId,
             });
           } catch (error) {
-            console.error('Error creating UserPool for default GitHub:', error);
+            console.error('Error creating AuthConfig for default GitHub:', error);
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
             toast({
-              title: 'Error Creating UserPool',
+              title: 'Error Creating AuthConfig',
               description: errorMessage.includes('not configured') 
                 ? 'Default GitHub OAuth credentials are not configured. Please enable "Bring My Own OAuth Provider" and provide your own GitHub credentials, or contact support to configure default credentials.'
-                : `Failed to create UserPool for default GitHub: ${errorMessage}`,
+                : `Failed to create AuthConfig for default GitHub: ${errorMessage}`,
               variant: 'destructive',
             });
             setIsDeploying(false);
@@ -470,38 +859,49 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
           }
         }
       } else {
-        console.warn('[CreateProject] ❌ SKIPPING USERPOOL - Social auth is NOT enabled!', {
+        console.warn('[CreateProject] ❌ SKIPPING AUTHCONFIG - Social auth is NOT enabled!', {
           enableSocialAuth: config.enableSocialAuth,
           authType: authType,
         });
       }
 
-      // Defensive check: if we're using oauth but don't have a UserPool, that's an error
-      if (authType === 'oauth' && !userPoolId) {
-        console.error('[CreateProject] ERROR: OAuth auth type requires UserPool but none was created!', {
+      // Defensive check: if we're using oauth but don't have a AuthConfig, that's an error
+      if (authType === 'oauth' && !authConfigId) {
+        console.error('[CreateProject] ERROR: OAuth auth type requires AuthConfig but none was created!', {
           enableSocialAuth: config.enableSocialAuth,
-          useUserPool: config.useUserPool,
-          userPoolId: config.userPoolId,
+          useAuthConfig: config.useAuthConfig,
+          authConfigId: config.authConfigId,
           appClientId: config.appClientId,
           bringOwnProvider: config.bringOwnProvider,
         });
         toast({
           title: 'Configuration Error',
-          description: 'OAuth authentication requires a UserPool. Please try again or contact support.',
+          description: 'OAuth authentication requires a AuthConfig. Please try again or contact support.',
           variant: 'destructive',
         });
         setIsDeploying(false);
         return;
       }
 
+      // Ensure defaultAppClientId is set if we have an appClientId but no default
+      if (appClientId && !defaultAppClientId) {
+        defaultAppClientId = appClientId;
+        console.log('[CreateProject] Auto-setting appClientId as defaultAppClientId:', defaultAppClientId);
+      }
+
       // Create the project
       console.log('[CreateProject] Final values before project creation:', {
-        userPoolId,
+        authConfigId,
         appClientId,
+        defaultAppClientId,
         authType,
         hasOauthConfig: !!oauthConfig,
+        configAuthConfigId: config.authConfigId,
+        configUseAuthConfig: config.useAuthConfig,
+        currentProjectAuthConfigId: currentProject ? (currentProject.config as Record<string, unknown>)?.auth_config_id : undefined,
       });
       
+      // defaultAppClientId is tracked in the function scope (may have been set during app client creation)
       const projectData = {
         name: config.projectName,
         display_name: config.projectName,
@@ -511,10 +911,35 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         github: githubSource,
         auth_type: authType,
         oauth_config: oauthConfig,
-        user_pool_id: userPoolId,
+        auth_config_id: authConfigId,
         app_client_id: appClientId, // AppClient selected at deployment time (not stored in config)
+        default_app_client_id: defaultAppClientId, // Default app client ID stored in project config
         environments: Object.keys(environments).length > 0 ? environments : undefined,
+        throttling: config.throttling || {
+          userRateLimit: 10,
+          proxyDailyQuota: 1000,
+          accountMonthlyQuota: 30000,
+        },
       };
+      
+      console.log('[CreateProject] ⚠️ CRITICAL: Project data being sent to API:', {
+        ...projectData,
+        oauth_config: oauthConfig ? '[present]' : undefined,
+      });
+      
+      console.log('[CreateProject] 🎯 FINAL CHECK - auth_config_id in projectData:', {
+        'projectData.auth_config_id (what will be sent)': projectData.auth_config_id,
+        'config.authConfigId (from config state)': config.authConfigId,
+        'authConfigId variable (from deployment logic)': authConfigId,
+        'currentProject.config.auth_config_id (OLD)': currentProject ? (currentProject.config as Record<string, unknown>)?.auth_config_id : 'N/A',
+        'MATCH?': projectData.auth_config_id === config.authConfigId ? '✅ YES' : '❌ NO - MISMATCH!',
+        timestamp: new Date().toISOString(),
+      });
+
+      console.log('[CreateProject] Project data being sent:', {
+        ...projectData,
+        oauth_config: oauthConfig ? '[present]' : undefined,
+      });
 
       console.log('[CreateProject] Deploying project with data:', projectData);
       const response = await api.createProject(projectData);
@@ -522,11 +947,15 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       console.log('[CreateProject] Success:', response);
 
       // Success!
+      const isUpdate = !!currentProject;
       toast({
-        title: 'Project Created! 🎉',
-        description: `${config.projectName} has been successfully deployed.`,
+        title: isUpdate ? 'Project Updated! 🎉' : 'Project Created! 🎉',
+        description: `${config.projectName} has been successfully ${isUpdate ? 'updated' : 'deployed'}.`,
       });
       
+      // Clear currentProject after successful deployment
+      setCurrentProject(null);
+      isDeployingRef.current = false; // Re-enable config reset
       onOpenChange(false);
       onSuccess?.();
     } catch (error) {
@@ -580,6 +1009,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       });
     } finally {
       setIsDeploying(false);
+      isDeployingRef.current = false; // Re-enable config reset even on error
     }
   };
 
@@ -610,15 +1040,28 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
 
           <div className="flex-1 overflow-y-auto mt-4">
             <TabsContent value="general" className="mt-0">
-              <GeneralSection config={config} updateConfig={updateConfig} validationError={validationError} />
+              <GeneralSection 
+                config={config} 
+                updateConfig={updateConfig} 
+                validationError={validationError}
+                preloadedGitHubRepos={preloadedGitHubRepos}
+              />
             </TabsContent>
 
             <TabsContent value="auth" className="mt-0">
               <AuthenticationSection 
                 config={config} 
                 updateConfig={updateConfig} 
-                isEditMode={!!project}
-                project={project || null}
+                isEditMode={!!currentProject}
+                project={currentProject}
+                onProjectUpdate={(updatedProject) => {
+                  setCurrentProject(updatedProject);
+                  onProjectUpdate?.(updatedProject);
+                }}
+                preloadedAuthConfigs={preloadedAuthConfigs}
+                preloadedAppClients={preloadedAppClients}
+                preloadedProviders={preloadedProviders}
+                loadingAuthData={loadingAuthData}
               />
             </TabsContent>
 

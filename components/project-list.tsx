@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useImperativeHandle, forwardRef } from 'react';
 import { Project, ProjectListResponse } from '@/types/project';
 import { ProjectCard } from '@/components/project-card';
 import { deleteProject, listProjects } from '@/lib/api/projects';
@@ -23,7 +23,12 @@ interface ProjectListProps {
   onRefresh?: () => void;
 }
 
-export function ProjectList({ teamId, onUpdateConfig, onDelete: onDeleteCallback, onRefresh }: ProjectListProps) {
+export interface ProjectListRef {
+  refresh: () => Promise<void>;
+}
+
+export const ProjectList = forwardRef<ProjectListRef, ProjectListProps>(
+  ({ teamId, onUpdateConfig, onDelete: onDeleteCallback, onRefresh }, ref) => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +82,13 @@ export function ProjectList({ teamId, onUpdateConfig, onDelete: onDeleteCallback
       onRefresh();
     }
   };
+
+  // Expose refresh function to parent via ref
+  useImperativeHandle(ref, () => ({
+    refresh: async () => {
+      await fetchProjects(1); // Always refresh from page 1 to see newly created/updated projects
+    },
+  }));
 
   const handlePageChange = (newPage: number) => {
     fetchProjects(newPage);
@@ -242,6 +254,8 @@ export function ProjectList({ teamId, onUpdateConfig, onDelete: onDeleteCallback
       </Dialog>
     </>
   );
-}
+});
+
+ProjectList.displayName = 'ProjectList';
 
 
