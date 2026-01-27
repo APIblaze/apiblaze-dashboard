@@ -12,21 +12,21 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlertCircle, Plus, X, Users, Key, Copy, Check, Trash2, Search, ChevronDown, Star, ExternalLink, Loader2 } from 'lucide-react';
 import { ProjectConfig, SocialProvider } from './types';
-import { useState, useEffect, useRef } from 'react';
-import { UserPoolModal } from '@/components/user-pool/user-pool-modal';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { AuthConfigModal } from '@/components/auth-config/auth-config-modal';
 import { api } from '@/lib/api';
 import { updateProjectConfig } from '@/lib/api/projects';
-import type { AppClient, UserPool, SocialProvider as UserPoolSocialProvider } from '@/types/user-pool';
+import type { AppClient, AuthConfig, SocialProvider as AuthConfigSocialProvider } from '@/types/auth-config';
 import type { Project } from '@/types/project';
 
 // API response may have snake_case fields from the database
 type AppClientResponse = AppClient & {
   client_id?: string;
-  redirect_uris?: string[];
+  authorized_callback_urls?: string[];
   signout_uris?: string[];
 };
 
-type SocialProviderResponse = UserPoolSocialProvider & {
+type SocialProviderResponse = AuthConfigSocialProvider & {
   client_id?: string;
 };
 
@@ -36,9 +36,9 @@ interface AuthenticationSectionProps {
   isEditMode?: boolean;
   project?: Project | null;
   onProjectUpdate?: (updatedProject: Project) => void; // Callback to update project in parent
-  preloadedUserPools?: UserPool[]; // Optional preloaded user pools from parent
-  preloadedAppClients?: Record<string, AppClient[]>; // Optional preloaded app clients keyed by userPoolId
-  preloadedProviders?: Record<string, UserPoolSocialProvider[]>; // Optional preloaded providers keyed by `${userPoolId}-${appClientId}`
+  preloadedAuthConfigs?: AuthConfig[]; // Optional preloaded auth configs from parent
+  preloadedAppClients?: Record<string, AppClient[]>; // Optional preloaded app clients keyed by authConfigId
+  preloadedProviders?: Record<string, AuthConfigSocialProvider[]>; // Optional preloaded providers keyed by `${authConfigId}-${appClientId}`
   loadingAuthData?: boolean; // Loading state for auth data preloading
 }
 
@@ -109,8 +109,8 @@ function EditModeManagementUI({
   updateConfig, 
   project,
   onProjectUpdate,
-  initialUserPoolId,
-  preloadedUserPools,
+  initialAuthConfigId,
+  preloadedAuthConfigs,
   preloadedAppClients,
   preloadedProviders,
   loadingAuthData
@@ -119,10 +119,10 @@ function EditModeManagementUI({
   updateConfig: (updates: Partial<ProjectConfig>) => void; 
   project?: Project | null;
   onProjectUpdate?: (updatedProject: Project) => void;
-  initialUserPoolId?: string;
-  preloadedUserPools?: UserPool[];
+  initialAuthConfigId?: string;
+  preloadedAuthConfigs?: AuthConfig[];
   preloadedAppClients?: Record<string, AppClient[]>;
-  preloadedProviders?: Record<string, UserPoolSocialProvider[]>;
+  preloadedProviders?: Record<string, AuthConfigSocialProvider[]>;
   loadingAuthData?: boolean;
 }) {
   // Save config changes immediately to backend (without redeployment)
@@ -160,46 +160,65 @@ function EditModeManagementUI({
     }
   };
 
-  // Get initial values from project config in edit mode
-  const getInitialUserPoolId = () => {
-    if (initialUserPoolId) return initialUserPoolId;
-    if (config.userPoolId) return config.userPoolId;
+  // Get initial values from project config in edit mode - memoized to prevent recalculation
+  const authConfigId = useMemo(() => {
+    if (initialAuthConfigId) {
+      return initialAuthConfigId;
+    }
+    if (config.authConfigId) {
+      return config.authConfigId;
+    }
     if (project?.config) {
       const projectConfig = project.config as Record<string, unknown>;
-      return projectConfig.user_pool_id as string | undefined;
+      const id = projectConfig.auth_config_id as string | undefined;
+      if (id) {
+        return id;
+      }
+    }
+    // If no authConfigId in project, but we have exactly one preloaded auth config, use it
+    if (preloadedAuthConfigs && preloadedAuthConfigs.length === 1) {
+      return preloadedAuthConfigs[0].id;
+    }
+    // Check if we have preloaded app clients - use the first key
+    if (preloadedAppClients && Object.keys(preloadedAppClients).length === 1) {
+      return Object.keys(preloadedAppClients)[0];
     }
     return undefined;
-  };
+  }, [initialAuthConfigId, config.authConfigId, project?.config, preloadedAuthConfigs, preloadedAppClients]);
 
-  const getInitialAppClients = (): AppClient[] => {
-    const userPoolId = getInitialUserPoolId();
-    if (userPoolId && preloadedAppClients?.[userPoolId]) {
-      return preloadedAppClients[userPoolId];
+  // State
+  const [authConfigs, setAuthConfigs] = useState<AuthConfig[]>(preloadedAuthConfigs || []);
+  const [loadingAuthConfigs, setLoadingAuthConfigs] = useState(false);
+  const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(authConfigId);
+  
+  // Memoize initial app clients and providers
+  const initialAppClients = useMemo(() => {
+    if (authConfigId && preloadedAppClients?.[authConfigId]) {
+      return preloadedAppClients[authConfigId];
     }
     return [];
-  };
+  }, [authConfigId, preloadedAppClients]);
 
-  const getInitialProviders = (): Record<string, SocialProviderResponse[]> => {
-    const userPoolId = getInitialUserPoolId();
+  const initialProviders = useMemo(() => {
     const result: Record<string, SocialProviderResponse[]> = {};
-    if (userPoolId && preloadedAppClients?.[userPoolId]) {
-      preloadedAppClients[userPoolId].forEach((client) => {
-        const key = `${userPoolId}-${client.id}`;
+    if (authConfigId && preloadedAppClients?.[authConfigId]) {
+      preloadedAppClients[authConfigId].forEach((client) => {
+        const key = `${authConfigId}-${client.id}`;
         if (preloadedProviders?.[key]) {
           result[client.id] = preloadedProviders[key] as SocialProviderResponse[];
         }
       });
     }
     return result;
-  };
-
-  // UserPool management
-  const [userPools, setUserPools] = useState<UserPool[]>(preloadedUserPools || []);
-  const [loadingUserPools, setLoadingUserPools] = useState(false);
-  const [selectedUserPoolId, setSelectedUserPoolId] = useState<string | undefined>(getInitialUserPoolId());
+  }, [authConfigId, preloadedAppClients, preloadedProviders]);
   
-  // AppClient management
-  const [appClients, setAppClients] = useState<AppClient[]>(getInitialAppClients());
+  // Update selectedAuthConfigId when authConfigId changes (e.g., when preloaded data arrives)
+  useEffect(() => {
+    if (authConfigId && authConfigId !== selectedAuthConfigId) {
+      setSelectedAuthConfigId(authConfigId);
+    }
+  }, [authConfigId, selectedAuthConfigId]);
+  const [appClients, setAppClients] = useState<AppClient[]>(initialAppClients);
   const [loadingAppClients, setLoadingAppClients] = useState(false);
   const [appClientDetails, setAppClientDetails] = useState<Record<string, AppClientResponse>>({});
   const [loadingAppClientDetails, setLoadingAppClientDetails] = useState<Record<string, boolean>>({});
@@ -207,31 +226,15 @@ function EditModeManagementUI({
   const [loadingSecret, setLoadingSecret] = useState<string | null>(null);
   const [showAddAppClient, setShowAddAppClient] = useState(false);
   const [newAppClientName, setNewAppClientName] = useState('');
-  
-  // Provider management - keyed by app client ID
-  const [providers, setProviders] = useState<Record<string, SocialProviderResponse[]>>(getInitialProviders());
+  const [authorizedCallbackUrls, setAuthorizedCallbackUrls] = useState<string[]>(() => {
+    const projectName = config.projectName || project?.project_id || 'project';
+    const apiVersion = config.apiVersion || '1.0.0';
+    return [`https://${projectName}.portal.apiblaze.com/${apiVersion}`];
+  });
+  const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
+  const [providers, setProviders] = useState<Record<string, SocialProviderResponse[]>>(initialProviders);
   const [loadingProviders, setLoadingProviders] = useState<Record<string, boolean>>({});
   const [showAddProvider, setShowAddProvider] = useState<Record<string, boolean>>({});
-  
-  // Update with preloaded app clients and providers when they become available
-  useEffect(() => {
-    const userPoolId = getInitialUserPoolId();
-    
-    if (userPoolId && preloadedAppClients?.[userPoolId] && appClients.length === 0) {
-      setAppClients(preloadedAppClients[userPoolId]);
-      // Load providers for all app clients
-      preloadedAppClients[userPoolId].forEach((client) => {
-        const key = `${userPoolId}-${client.id}`;
-        if (preloadedProviders?.[key]) {
-          setProviders(prev => ({
-            ...prev,
-            [client.id]: preloadedProviders[key] as SocialProviderResponse[]
-          }));
-        }
-      });
-    }
-  }, [preloadedAppClients, preloadedProviders]);
-  
   const [newProvider, setNewProvider] = useState<Record<string, {
     type: SocialProvider;
     clientId: string;
@@ -239,325 +242,61 @@ function EditModeManagementUI({
     domain: string;
     tokenType: 'apiblaze' | 'thirdParty';
   }>>({});
-  
-  // UI state
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState<Record<string, boolean>>({});
+  const [expiryValues, setExpiryValues] = useState<Record<string, {
+    accessTokenExpiry: number;
+    refreshTokenExpiry: number;
+    idTokenExpiry: number;
+  }>>({});
 
-  // Initialize with preloaded user pools if provided
-  useEffect(() => {
-    if (preloadedUserPools && preloadedUserPools.length > 0) {
-      setUserPools(preloadedUserPools);
-    }
-  }, [preloadedUserPools]);
+  // Helper functions
+  const secondsToDaysAndMinutes = (seconds: number) => {
+    const days = Math.floor(seconds / 86400);
+    const remainingSeconds = seconds % 86400;
+    const minutes = Math.floor(remainingSeconds / 60);
+    return { days, minutes };
+  };
+  
+  const daysAndMinutesToSeconds = (days: number, minutes: number) => {
+    return (days * 86400) + (minutes * 60);
+  };
 
-  // Load UserPools on mount (only if not preloaded)
-  useEffect(() => {
-    if (!preloadedUserPools || preloadedUserPools.length === 0) {
-      loadUserPools();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preloadedUserPools]);
-
-  // In edit mode, load UserPool from project config and prepopulate
-  // Or use initialUserPoolId if provided (for create mode)
-  // This must run before the UserPool selection effect
-  useEffect(() => {
-    if (initialUserPoolId && initialUserPoolId !== selectedUserPoolId) {
-      setSelectedUserPoolId(initialUserPoolId);
-    } else if (project?.config) {
-      const projectConfig = project.config as Record<string, unknown>;
-      const userPoolId = projectConfig.user_pool_id as string | undefined;
-      const defaultAppClientId = (projectConfig.default_app_client_id || projectConfig.defaultAppClient) as string | undefined;
-      
-      if (userPoolId && userPoolId !== selectedUserPoolId) {
-        setSelectedUserPoolId(userPoolId);
-      }
-      
-      // Load defaultAppClient from project config
-      if (defaultAppClientId && config.defaultAppClient !== defaultAppClientId) {
-        updateConfig({ defaultAppClient: defaultAppClientId });
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, initialUserPoolId, selectedUserPoolId]);
-
-  // Track initial UserPool to avoid clearing data on first load
-  const initialUserPoolIdRef = useRef<string | undefined>(getInitialUserPoolId());
-  const isInitialLoadRef = useRef(true);
-  const previousUserGroupNameRef = useRef<string | undefined>(config.userGroupName);
-  const selectedUserPoolIdRef = useRef<string | undefined>(selectedUserPoolId);
-
-  // Keep ref in sync with state
-  useEffect(() => {
-    selectedUserPoolIdRef.current = selectedUserPoolId;
-  }, [selectedUserPoolId]);
-
-  // Watch userGroupName changes and look up userPool by name
-  // This handles both manual changes and automatic defaults
-  useEffect(() => {
-    const currentUserGroupName = config.userGroupName?.trim();
-    const previousUserGroupName = previousUserGroupNameRef.current;
-    const currentSelectedUserPoolId = selectedUserPoolIdRef.current;
-    
-    // Skip if name hasn't changed and userPools haven't changed
-    // We need to check again when userPools load in case the name matches a newly loaded pool
-    if (currentUserGroupName === previousUserGroupName && userPools.length > 0) {
-      // If userPools are loaded and name hasn't changed, only check if we need to sync
-      // (e.g., if userPools just loaded and we have a name but no selectedUserPoolId)
-      if (currentUserGroupName && !currentSelectedUserPoolId) {
-        const matchingPool = userPools.find(pool => pool.name === currentUserGroupName);
-        if (matchingPool && matchingPool.id !== currentSelectedUserPoolId) {
-          setSelectedUserPoolId(matchingPool.id);
-          // Don't call updateConfig here - let the selectedUserPoolId useEffect handle it
-        }
-      }
-      return;
-    }
-    
-    // Only proceed if name actually changed
-    if (currentUserGroupName === previousUserGroupName) {
-      return;
-    }
-    
-    previousUserGroupNameRef.current = currentUserGroupName;
-    
-    // If userGroupName is empty, clear selection
-    if (!currentUserGroupName) {
-      if (currentSelectedUserPoolId !== undefined) {
-        setSelectedUserPoolId(undefined);
-        setAppClients([]);
-        setAppClientDetails({});
-        setProviders({});
-        // Don't call updateConfig here - let the selectedUserPoolId useEffect handle it
-      }
-      return;
-    }
-    
-    // Look up userPool by name
-    const matchingPool = userPools.find(pool => pool.name === currentUserGroupName);
-    
-    if (matchingPool) {
-      // Found matching userPool - set it if different
-      // The selectedUserPoolId useEffect will also watch userGroupName and reload if needed
-      if (matchingPool.id !== currentSelectedUserPoolId) {
-        setSelectedUserPoolId(matchingPool.id);
-        // Don't call updateConfig here - let the selectedUserPoolId useEffect handle it
-      }
-    } else {
-      // No matching userPool found
-      // If userPools are loaded (length > 0), we know for sure there's no match, so clear
-      // If userPools aren't loaded yet, wait for them to load before clearing
-      if (userPools.length > 0) {
-        // UserPools are loaded and no match found - clear to blank state
-        // Only clear if we're not on initial load or if we had a selectedUserPoolId before
-        if (!isInitialLoadRef.current && currentSelectedUserPoolId !== undefined) {
-          setSelectedUserPoolId(undefined);
-          setAppClients([]);
-          setAppClientDetails({});
-          setProviders({});
-          // Don't call updateConfig here - let the selectedUserPoolId useEffect handle it
-        }
-      }
-      // If userPools.length === 0, they might not be loaded yet, so don't clear yet
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.userGroupName, userPools]);
-
-  // Also reload userPools when userGroupName changes to ensure we have the latest list
-  // This is important for the automatic default case (e.g., "my-api-users")
-  const lastUserGroupNameRef = useRef<string | undefined>(config.userGroupName);
-  useEffect(() => {
-    const currentName = config.userGroupName?.trim();
-    // Only reload if the name actually changed
-    if (currentName && currentName !== lastUserGroupNameRef.current) {
-      lastUserGroupNameRef.current = currentName;
-      // Refresh user pools in background to catch newly created pools
-      loadUserPools();
-    }
-  }, [config.userGroupName]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-
-  // Sync selectedUserPoolId when userPools load and we have a userGroupName but no selectedUserPoolId
-  // Use a ref to track the last userPools length to avoid unnecessary checks
-  const lastUserPoolsLengthRef = useRef<number>(userPools.length);
-  useEffect(() => {
-    // Only check if userPools length actually increased (new pools loaded)
-    if (userPools.length > lastUserPoolsLengthRef.current) {
-      lastUserPoolsLengthRef.current = userPools.length;
-      const currentUserGroupName = config.userGroupName?.trim();
-      if (currentUserGroupName && !selectedUserPoolIdRef.current) {
-        const matchingPool = userPools.find(pool => pool.name === currentUserGroupName);
-        if (matchingPool) {
-          setSelectedUserPoolId(matchingPool.id);
-        }
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userPools]);
-
-  // Track previous selectedUserPoolId and userGroupName to detect changes
-  // Initialize to undefined so we always detect the first change
-  const previousSelectedUserPoolIdRef = useRef<string | undefined>(undefined);
-  const previousUserGroupNameForPoolRef = useRef<string | undefined>(undefined);
-
-  // Load AppClients when UserPool is selected
-  useEffect(() => {
-    const previousPoolId = previousSelectedUserPoolIdRef.current;
-    const currentUserGroupName = config.userGroupName?.trim();
-    const previousUserGroupName = previousUserGroupNameForPoolRef.current;
-    const poolChanged = previousPoolId !== selectedUserPoolId;
-    const userGroupNameChanged = previousUserGroupName !== currentUserGroupName;
-    
-    // If userGroupName changed, we need to reload even if pool ID is the same
-    // (this handles switching back to original pool after changing it)
-    const needsReload = poolChanged || (selectedUserPoolId && userGroupNameChanged && previousPoolId === selectedUserPoolId);
-    
-    if (selectedUserPoolId) {
-      // Always clear old data when pool changes or userGroupName changes (unless it's the initial load)
-      if (needsReload) {
-        if (isInitialLoadRef.current) {
-          isInitialLoadRef.current = false;
-        } else {
-          // Clear all data when switching pools (including switching back to original)
-          setAppClients([]);
-          setAppClientDetails({});
-          setProviders({});
-        }
-        // Update the refs AFTER we've handled the change
-        previousSelectedUserPoolIdRef.current = selectedUserPoolId;
-        previousUserGroupNameForPoolRef.current = currentUserGroupName;
-        
-        // Pool changed or userGroupName changed - always load fresh data
-        loadAppClients(selectedUserPoolId, true);
-      } else {
-        // Pool hasn't changed - check if we can use preloaded data
-        const hasPreloaded = preloadedAppClients?.[selectedUserPoolId] && preloadedAppClients[selectedUserPoolId].length > 0;
-        const hasClients = appClients.length > 0;
-        
-        if (hasPreloaded && !hasClients) {
-          // Use preloaded data immediately
-          const clients = preloadedAppClients[selectedUserPoolId];
-          setAppClients(clients);
-          // Load providers for all app clients
-          clients.forEach((client) => {
-            const key = `${selectedUserPoolId}-${client.id}`;
-            if (preloadedProviders?.[key]) {
-              setProviders(prev => ({
-                ...prev,
-                [client.id]: preloadedProviders[key] as SocialProviderResponse[]
-              }));
-            } else {
-              // Load providers from API if not preloaded
-              loadProviders(selectedUserPoolId, client.id, false);
-            }
-            // Load app client details
-            loadAppClientDetails(selectedUserPoolId, client.id);
-          });
-        } else if (!hasClients) {
-          // No preloaded data and no clients - load fresh
-          loadAppClients(selectedUserPoolId, true);
-        }
-      }
-      
-      updateConfig({ userPoolId: selectedUserPoolId });
-    } else {
-      setAppClients([]);
-      setAppClientDetails({});
-      setProviders({});
-      updateConfig({ userPoolId: undefined, appClientId: undefined });
-      previousSelectedUserPoolIdRef.current = undefined;
-      previousUserGroupNameForPoolRef.current = undefined;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUserPoolId, config.userGroupName]);
-
-
-  const loadUserPools = async () => {
-    setLoadingUserPools(true);
+  const loadAuthConfigs = async () => {
+    setLoadingAuthConfigs(true);
     try {
-      const pools = await api.listUserPools();
-      setUserPools(Array.isArray(pools) ? pools : []);
+      const pools = await api.listAuthConfigs();
+      setAuthConfigs(Array.isArray(pools) ? pools : []);
     } catch (error) {
-      console.error('Error loading user pools:', error);
-      setUserPools([]);
+      console.error('Error loading auth configs:', error);
+      setAuthConfigs([]);
     } finally {
-      setLoadingUserPools(false);
+      setLoadingAuthConfigs(false);
     }
   };
 
-  const loadAppClients = async (poolId: string, showLoading = true, forceRefresh = false) => {
-    // Check if we have preloaded data first (unless forcing refresh)
-    if (!forceRefresh && preloadedAppClients?.[poolId] && preloadedAppClients[poolId].length > 0) {
-      const clients = preloadedAppClients[poolId];
-      setAppClients(clients);
-      // Load providers and details for all app clients
-      clients.forEach((client) => {
-        const key = `${poolId}-${client.id}`;
-        if (preloadedProviders?.[key]) {
-          setProviders(prev => ({
-            ...prev,
-            [client.id]: preloadedProviders[key] as SocialProviderResponse[]
-          }));
-        } else {
-          // Load providers from API if not preloaded
-          loadProviders(poolId, client.id, false);
-        }
-        // Load app client details
-        loadAppClientDetails(poolId, client.id);
-      });
-      
-      // Ensure one app client is always the default
-      if (clients.length === 1 && !config.defaultAppClient) {
-        updateConfig({ defaultAppClient: clients[0].id });
-        await saveConfigImmediately({ defaultAppClient: clients[0].id });
-      }
-      return;
-    }
-    
-    if (showLoading) {
-      setLoadingAppClients(true);
-    }
-    try {
-      const clients = await api.listAppClients(poolId);
-      const clientsArray = Array.isArray(clients) ? clients : [];
-      setAppClients(clientsArray);
-      
-      // Load providers and details for all app clients
-      clientsArray.forEach((client) => {
-        loadProviders(poolId, client.id, false);
-        loadAppClientDetails(poolId, client.id);
-      });
-      
-      // Ensure one app client is always the default
-      if (clientsArray.length === 1 && !config.defaultAppClient) {
-        updateConfig({ defaultAppClient: clientsArray[0].id });
-        await saveConfigImmediately({ defaultAppClient: clientsArray[0].id });
-      }
-    } catch (error) {
-      console.error('Error loading app clients:', error);
-      setAppClients([]);
-    } finally {
-      if (showLoading) {
-        setLoadingAppClients(false);
-      }
-    }
-  };
-
-  const loadAppClientDetails = async (poolId: string, clientId: string) => {
+  const loadAppClientDetails = async (authConfigId: string, clientId: string) => {
     setLoadingAppClientDetails(prev => ({ ...prev, [clientId]: true }));
     try {
-      const client = await api.getAppClient(poolId, clientId);
+      const client = await api.getAppClient(authConfigId, clientId);
       setAppClientDetails(prev => ({
         ...prev,
         [clientId]: client
       }));
-      // If secret is in the response, store it in revealedSecrets
       if (client.clientSecret) {
         setRevealedSecrets(prev => ({
           ...prev,
           [clientId]: client.clientSecret || ''
         }));
       }
+      setExpiryValues(prev => ({
+        ...prev,
+        [clientId]: {
+          accessTokenExpiry: client.accessTokenExpiry || 3600,
+          refreshTokenExpiry: client.refreshTokenExpiry || 2592000,
+          idTokenExpiry: client.idTokenExpiry || 3600,
+        }
+      }));
     } catch (error) {
       console.error('Error loading app client details:', error);
     } finally {
@@ -565,11 +304,129 @@ function EditModeManagementUI({
     }
   };
 
-  const revealClientSecret = async (poolId: string, clientId: string) => {
+  const loadProviders = async (authConfigId: string, clientId: string, showLoading = true) => {
+    const preloadKey = `${authConfigId}-${clientId}`;
+    if (preloadedProviders?.[preloadKey] && preloadedProviders[preloadKey].length > 0) {
+      setProviders(prev => ({
+        ...prev,
+        [clientId]: preloadedProviders[preloadKey] as SocialProviderResponse[]
+      }));
+      return;
+    }
+    
+    if (showLoading) {
+      setLoadingProviders(prev => ({ ...prev, [clientId]: true }));
+    }
+    try {
+      const providerList = await api.listProviders(authConfigId, clientId);
+      setProviders(prev => ({
+        ...prev,
+        [clientId]: Array.isArray(providerList) ? providerList : []
+      }));
+    } catch (error) {
+      console.error('Error loading providers:', error);
+      setProviders(prev => ({
+        ...prev,
+        [clientId]: []
+      }));
+    } finally {
+      if (showLoading) {
+        setLoadingProviders(prev => ({ ...prev, [clientId]: false }));
+      }
+    }
+  };
+
+  // ONE simple useEffect to load everything
+  useEffect(() => {
+    const currentAuthConfigId = authConfigId || selectedAuthConfigId;
+    
+    if (!currentAuthConfigId) {
+      return;
+    }
+
+    // Set selectedAuthConfigId if not set
+    if (!selectedAuthConfigId && currentAuthConfigId) {
+      setSelectedAuthConfigId(currentAuthConfigId);
+    }
+
+    // Use preloaded data if available
+    const preloadedClients = preloadedAppClients?.[currentAuthConfigId];
+    if (preloadedClients && preloadedClients.length > 0) {
+      console.log('[AuthSection] ✅ Using preloaded data for authConfigId:', currentAuthConfigId);
+      setAppClients(preloadedClients);
+      
+      // Set providers from preloaded data
+      const providersMap: Record<string, SocialProviderResponse[]> = {};
+      preloadedClients.forEach((client) => {
+        const key = `${currentAuthConfigId}-${client.id}`;
+        if (preloadedProviders?.[key]) {
+          providersMap[client.id] = preloadedProviders[key] as SocialProviderResponse[];
+        }
+      });
+      setProviders(providersMap);
+      
+      // Load app client details for display
+      preloadedClients.forEach((client) => {
+        loadAppClientDetails(currentAuthConfigId, client.id);
+      });
+      
+      // Sync config from preloaded auth config
+      const preloadedAuthConfig = preloadedAuthConfigs?.find(ac => ac.id === currentAuthConfigId);
+      if (preloadedAuthConfig) {
+        updateConfig({ 
+          authConfigId: currentAuthConfigId, 
+          useAuthConfig: true,
+          userGroupName: preloadedAuthConfig.name, // Set the auth config name
+          enableSocialAuth: preloadedAuthConfig.enableSocialAuth || false,
+          enableApiKey: preloadedAuthConfig.enableApiKeyAuth || false,
+          bringOwnProvider: preloadedAuthConfig.bringMyOwnOAuth || false,
+        });
+      }
+      return;
+    }
+
+    // No preloaded data - load from API
+    if (appClients.length === 0 && !loadingAppClients) {
+      console.log('[AuthSection] 📡 Loading from API for authConfigId:', currentAuthConfigId);
+      setLoadingAppClients(true);
+      api.listAppClients(currentAuthConfigId)
+        .then(clients => {
+          const clientsArray = Array.isArray(clients) ? clients : [];
+          setAppClients(clientsArray);
+          
+          // Load providers and details for all clients
+          clientsArray.forEach((client) => {
+            loadProviders(currentAuthConfigId, client.id, false);
+            loadAppClientDetails(currentAuthConfigId, client.id);
+          });
+        })
+        .catch(error => {
+          console.error('[AuthSection] ❌ Error loading app clients:', error);
+          setAppClients([]);
+        })
+        .finally(() => {
+          setLoadingAppClients(false);
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authConfigId, selectedAuthConfigId]);
+
+  // Load auth configs if not preloaded
+  useEffect(() => {
+    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
+      setAuthConfigs(preloadedAuthConfigs);
+    } else if (authConfigs.length === 0) {
+      loadAuthConfigs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preloadedAuthConfigs]);
+
+
+  const revealClientSecret = async (authConfigId: string, clientId: string) => {
     setLoadingSecret(clientId);
     try {
       // Fetch the app client - the API should now return the secret
-      const client = await api.getAppClient(poolId, clientId);
+      const client = await api.getAppClient(authConfigId, clientId);
       const secret = client.clientSecret;
       
       if (secret) {
@@ -597,46 +454,65 @@ function EditModeManagementUI({
     }
   };
 
-  const loadProviders = async (poolId: string, clientId: string, showLoading = true) => {
-    // Check if we have preloaded data first
-    const preloadKey = `${poolId}-${clientId}`;
-    if (preloadedProviders?.[preloadKey] && preloadedProviders[preloadKey].length > 0) {
-      setProviders(prev => ({
-        ...prev,
-        [clientId]: preloadedProviders[preloadKey] as SocialProviderResponse[]
-      }));
-      return;
-    }
-    
-    if (showLoading) {
-      setLoadingProviders(prev => ({ ...prev, [clientId]: true }));
-    }
+
+  const validateHttpsUrl = (url: string): { valid: boolean; error?: string } => {
     try {
-      const providerList = await api.listProviders(poolId, clientId);
-      setProviders(prev => ({
-        ...prev,
-        [clientId]: Array.isArray(providerList) ? providerList : []
-      }));
-    } catch (error) {
-      console.error('Error loading providers:', error);
-      setProviders(prev => ({
-        ...prev,
-        [clientId]: []
-      }));
-    } finally {
-      if (showLoading) {
-        setLoadingProviders(prev => ({ ...prev, [clientId]: false }));
+      const urlObj = new URL(url);
+      if (urlObj.protocol !== 'https:') {
+        return { valid: false, error: 'URL must use HTTPS protocol' };
       }
+      return { valid: true };
+    } catch (error) {
+      return { valid: false, error: 'Invalid URL format' };
     }
   };
 
+  const addAuthorizedCallbackUrl = () => {
+    const url = newAuthorizedCallbackUrl.trim();
+    if (!url) return;
+
+    if (authorizedCallbackUrls.includes(url)) {
+      alert('This URL is already in the list');
+      return;
+    }
+
+    const validation = validateHttpsUrl(url);
+    if (!validation.valid) {
+      alert(validation.error || 'Invalid URL');
+      return;
+    }
+
+    setAuthorizedCallbackUrls([...authorizedCallbackUrls, url]);
+    setNewAuthorizedCallbackUrl('');
+  };
+
+  const removeAuthorizedCallbackUrl = (url: string) => {
+    setAuthorizedCallbackUrls(authorizedCallbackUrls.filter((u) => u !== url));
+  };
+
   const handleCreateAppClient = async () => {
-    if (!selectedUserPoolId || !newAppClientName.trim()) return;
+    if (!selectedAuthConfigId || !newAppClientName.trim()) return;
+    
+    // Generate default callback URL from project name
+    const projectName = config.projectName || project?.project_id || 'project';
+    const apiVersion = config.apiVersion || '1.0.0';
+    const defaultCallbackUrl = `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
+    
+    // Ensure default URL is included and is first
+    const callbackUrls = authorizedCallbackUrls.length > 0 
+      ? authorizedCallbackUrls 
+      : [defaultCallbackUrl];
+    
+    // Make sure default URL is first if it's not already
+    const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
+      ? [defaultCallbackUrl, ...callbackUrls.filter(u => u !== defaultCallbackUrl)]
+      : [defaultCallbackUrl, ...callbackUrls];
     
     try {
-      const newClient = await api.createAppClient(selectedUserPoolId, {
+      const newClient = await api.createAppClient(selectedAuthConfigId, {
         name: newAppClientName,
         scopes: ['email', 'openid', 'profile'],
+        authorizedCallbackUrls: finalCallbackUrls,
       });
       
       // Add the new client to the state immediately so it appears right away
@@ -647,8 +523,8 @@ function EditModeManagementUI({
       
       // Load details and providers for the new client
       const clientId = clientToAdd.id;
-      loadAppClientDetails(selectedUserPoolId, clientId);
-      loadProviders(selectedUserPoolId, clientId, false);
+      loadAppClientDetails(selectedAuthConfigId, clientId);
+      loadProviders(selectedAuthConfigId, clientId, false);
       
       // If this is the only app client (or no default is set), make it the default
       if (updatedClients.length === 1 || !config.defaultAppClient) {
@@ -656,10 +532,25 @@ function EditModeManagementUI({
         await saveConfigImmediately({ defaultAppClient: clientId });
       }
       
-      // Also refresh the full list to ensure consistency (force refresh to bypass preloaded data)
-      await loadAppClients(selectedUserPoolId, false, true);
+      // Refresh the list by reloading from API
+      setLoadingAppClients(true);
+      try {
+        const clients = await api.listAppClients(selectedAuthConfigId);
+        const clientsArray = Array.isArray(clients) ? clients : [];
+        setAppClients(clientsArray);
+        clientsArray.forEach((client) => {
+          loadProviders(selectedAuthConfigId, client.id, false);
+          loadAppClientDetails(selectedAuthConfigId, client.id);
+        });
+      } catch (error) {
+        console.error('Error refreshing app clients:', error);
+      } finally {
+        setLoadingAppClients(false);
+      }
       
       setNewAppClientName('');
+      setAuthorizedCallbackUrls([]);
+      setNewAuthorizedCallbackUrl('');
       setShowAddAppClient(false);
     } catch (error) {
       console.error('Error creating app client:', error);
@@ -667,12 +558,34 @@ function EditModeManagementUI({
     }
   };
 
+  const handleUpdateAppClientExpiries = async (clientId: string) => {
+    if (!selectedAuthConfigId) return;
+    
+    const expiries = expiryValues[clientId];
+    if (!expiries) return;
+    
+    try {
+      // Values are already in seconds, send directly to API
+      await api.updateAppClient(selectedAuthConfigId, clientId, {
+        accessTokenExpiry: expiries.accessTokenExpiry,
+        refreshTokenExpiry: expiries.refreshTokenExpiry,
+        idTokenExpiry: expiries.idTokenExpiry,
+      });
+      
+      // Reload app client details to reflect the update
+      await loadAppClientDetails(selectedAuthConfigId, clientId);
+    } catch (error) {
+      console.error('Error updating app client expiries:', error);
+      alert('Failed to update token expiries');
+    }
+  };
+
   const handleDeleteAppClient = async (clientId: string) => {
-    if (!selectedUserPoolId) return;
+    if (!selectedAuthConfigId) return;
     if (!confirm('Are you sure you want to delete this AppClient? This action cannot be undone.')) return;
     
     try {
-      await api.deleteAppClient(selectedUserPoolId, clientId);
+      await api.deleteAppClient(selectedAuthConfigId, clientId);
       
       // Check if the deleted client was the default
       const wasDefault = config.defaultAppClient === clientId;
@@ -719,7 +632,7 @@ function EditModeManagementUI({
   };
 
   const handleAddProvider = async (clientId: string) => {
-    if (!selectedUserPoolId) return;
+    if (!selectedAuthConfigId) return;
     const provider = newProvider[clientId];
     if (!provider || !provider.clientId || !provider.clientSecret) {
       alert('Please provide Client ID and Client Secret');
@@ -727,7 +640,7 @@ function EditModeManagementUI({
     }
     
     try {
-      await api.addProvider(selectedUserPoolId, clientId, {
+      await api.addProvider(selectedAuthConfigId, clientId, {
         type: provider.type,
         clientId: provider.clientId,
         clientSecret: provider.clientSecret,
@@ -735,7 +648,7 @@ function EditModeManagementUI({
         tokenType: provider.tokenType || 'thirdParty',
       });
       
-      await loadProviders(selectedUserPoolId, clientId);
+      await loadProviders(selectedAuthConfigId, clientId);
       setNewProvider(prev => {
         const next = { ...prev };
         delete next[clientId];
@@ -749,12 +662,12 @@ function EditModeManagementUI({
   };
 
   const handleDeleteProvider = async (clientId: string, providerId: string) => {
-    if (!selectedUserPoolId) return;
+    if (!selectedAuthConfigId) return;
     if (!confirm('Are you sure you want to delete this provider?')) return;
     
     try {
-      await api.removeProvider(selectedUserPoolId, clientId, providerId);
-      await loadProviders(selectedUserPoolId, clientId);
+      await api.removeProvider(selectedAuthConfigId, clientId, providerId);
+      await loadProviders(selectedAuthConfigId, clientId);
     } catch (error) {
       console.error('Error deleting provider:', error);
       alert('Failed to delete provider');
@@ -831,13 +744,12 @@ function EditModeManagementUI({
     }
   };
 
-  // Determine if we're still loading initial data
-  const userPoolId = getInitialUserPoolId();
-  const effectiveUserPoolId = userPoolId || selectedUserPoolId;
+  // Determine if we're still loading initial data  
+  const currentAuthConfigIdForLoading = authConfigId || selectedAuthConfigId;
   const isLoadingInitialData = loadingAuthData || 
-    (effectiveUserPoolId && 
-     (!preloadedAppClients?.[effectiveUserPoolId] || 
-      preloadedAppClients[effectiveUserPoolId].length === 0) &&
+    (currentAuthConfigIdForLoading && 
+     (!preloadedAppClients?.[currentAuthConfigIdForLoading] || 
+      preloadedAppClients[currentAuthConfigIdForLoading].length === 0) &&
      appClients.length === 0 && !loadingAppClients);
 
   return (
@@ -845,7 +757,7 @@ function EditModeManagementUI({
       <div>
         <Label className="text-base font-semibold">OAuth Configuration</Label>
         <p className="text-sm text-muted-foreground">
-          Manage AppClients and Providers for this project. The UserPool is selected via the &quot;User Pool Name&quot; field above.
+          Manage AppClients and Providers for this project. The AuthConfig is selected via the &quot;Auth Config Name&quot; field above.
         </p>
       </div>
 
@@ -858,7 +770,7 @@ function EditModeManagementUI({
       )}
 
       {/* AppClient Management */}
-      {selectedUserPoolId && (
+      {selectedAuthConfigId && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-medium">AppClients</Label>
@@ -889,6 +801,51 @@ function EditModeManagementUI({
                     className="mt-1"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Authorized Callback URLs</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={newAuthorizedCallbackUrl}
+                      onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)}
+                      placeholder="https://example.com/callback"
+                      className="text-xs"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addAuthorizedCallbackUrl();
+                        }
+                      }}
+                    />
+                    <Button type="button" size="sm" onClick={addAuthorizedCallbackUrl}>
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {authorizedCallbackUrls.map((url, index) => (
+                      <div
+                        key={url}
+                        className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs"
+                      >
+                        {index === 0 && (
+                          <Badge variant="secondary" className="mr-1 text-xs">
+                            <Star className="h-2 w-2 mr-1" />
+                            Default
+                          </Badge>
+                        )}
+                        <span>{url}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-4 w-4 p-0"
+                          onClick={() => removeAuthorizedCallbackUrl(url)}
+                        >
+                          <X className="h-2 w-2" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -905,6 +862,8 @@ function EditModeManagementUI({
                     onClick={() => {
                       setShowAddAppClient(false);
                       setNewAppClientName('');
+                      setAuthorizedCallbackUrls([]);
+                      setNewAuthorizedCallbackUrl('');
                     }}
                   >
                     Cancel
@@ -936,6 +895,38 @@ function EditModeManagementUI({
                               <Key className="h-4 w-4 text-blue-600" />
                               <div>
                                 <div className="font-semibold text-base">{client.name}</div>
+                                {/* JWKS Display */}
+                                {clientDetails?.jwks && (() => {
+                                  const clientId = clientDetails?.client_id || clientDetails?.clientId;
+                                  const projectName = project?.project_id || 'project';
+                                  const apiVersion = project?.api_version || '1.0.0';
+                                  const jwksUrl = `https://${projectName}.auth.apiblaze.com/${apiVersion}/${clientId}/.well-known/jwk.json`;
+                                  
+                                  return (
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                      <div className="text-xs text-muted-foreground">
+                                        JWKS (RS256 Public Key):{' '}
+                                        <a
+                                          href={jwksUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-blue-600 hover:text-blue-800 underline"
+                                        >
+                                          {jwksUrl}
+                                        </a>
+                                      </div>
+                                      <a
+                                        href={jwksUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-800"
+                                        title="Open JWKS in new tab"
+                                      >
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    </div>
+                                  );
+                                })()}
                                 {(() => {
                                   const clientId = clientDetails?.client_id || clientDetails?.clientId;
                                   const projectName = project?.project_id || 'project';
@@ -1087,8 +1078,8 @@ function EditModeManagementUI({
                                         variant="ghost"
                                         size="sm"
                                         onClick={() => {
-                                          if (selectedUserPoolId) {
-                                            revealClientSecret(selectedUserPoolId, client.id);
+                                          if (selectedAuthConfigId) {
+                                            revealClientSecret(selectedAuthConfigId, client.id);
                                           }
                                         }}
                                         className="h-8 px-3 text-xs hover:bg-blue-100"
@@ -1099,6 +1090,265 @@ function EditModeManagementUI({
                                     )}
                                   </div>
                                 </div>
+                              </div>
+                              
+                              {/* Advanced Settings - Expiry Configuration */}
+                              <div className="pt-2 border-t border-blue-100">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setShowAdvancedSettings(prev => ({
+                                    ...prev,
+                                    [client.id]: !prev[client.id]
+                                  }))}
+                                  className="w-full justify-between h-8 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-blue-50"
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <ChevronDown className={`h-3 w-3 transition-transform ${showAdvancedSettings[client.id] ? 'rotate-180' : ''}`} />
+                                    Advanced Settings
+                                  </span>
+                                </Button>
+                                
+                                {showAdvancedSettings[client.id] && (
+                                  <div className="mt-3 space-y-4">
+                                    {/* Access Token Expiry */}
+                                    <div className="space-y-2">
+                                      <Label className="text-xs font-medium">Access Token Expiry</Label>
+                                      <div className="flex items-end gap-2">
+                                        <div className="w-20">
+                                          <Label htmlFor={`accessTokenDays-${client.id}`} className="text-xs text-muted-foreground">Days</Label>
+                                          <Input
+                                            id={`accessTokenDays-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
+                                              return secondsToDaysAndMinutes(seconds).days;
+                                            })()}
+                                            onChange={(e) => {
+                                              const days = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
+                                              const { minutes } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  accessTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                        <span className="text-xs text-muted-foreground pb-2">and</span>
+                                        <div className="w-20">
+                                          <Label htmlFor={`accessTokenMinutes-${client.id}`} className="text-xs text-muted-foreground">Minutes</Label>
+                                          <Input
+                                            id={`accessTokenMinutes-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
+                                              return secondsToDaysAndMinutes(seconds).minutes;
+                                            })()}
+                                            onChange={(e) => {
+                                              const minutes = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
+                                              const { days } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  accessTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Refresh Token Expiry */}
+                                    <div className="space-y-2">
+                                      <Label className="text-xs font-medium">Refresh Token Expiry</Label>
+                                      <div className="flex items-end gap-2">
+                                        <div className="w-20">
+                                          <Label htmlFor={`refreshTokenDays-${client.id}`} className="text-xs text-muted-foreground">Days</Label>
+                                          <Input
+                                            id={`refreshTokenDays-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
+                                              return secondsToDaysAndMinutes(seconds).days;
+                                            })()}
+                                            onChange={(e) => {
+                                              const days = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
+                                              const { minutes } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  refreshTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                        <span className="text-xs text-muted-foreground pb-2">and</span>
+                                        <div className="w-20">
+                                          <Label htmlFor={`refreshTokenMinutes-${client.id}`} className="text-xs text-muted-foreground">Minutes</Label>
+                                          <Input
+                                            id={`refreshTokenMinutes-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
+                                              return secondsToDaysAndMinutes(seconds).minutes;
+                                            })()}
+                                            onChange={(e) => {
+                                              const minutes = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
+                                              const { days } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  refreshTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* ID Token Expiry */}
+                                    <div className="space-y-2">
+                                      <Label className="text-xs font-medium">ID Token Expiry</Label>
+                                      <div className="flex items-end gap-2">
+                                        <div className="w-20">
+                                          <Label htmlFor={`idTokenDays-${client.id}`} className="text-xs text-muted-foreground">Days</Label>
+                                          <Input
+                                            id={`idTokenDays-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
+                                              return secondsToDaysAndMinutes(seconds).days;
+                                            })()}
+                                            onChange={(e) => {
+                                              const days = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
+                                              const { minutes } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  idTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                        <span className="text-xs text-muted-foreground pb-2">and</span>
+                                        <div className="w-20">
+                                          <Label htmlFor={`idTokenMinutes-${client.id}`} className="text-xs text-muted-foreground">Minutes</Label>
+                                          <Input
+                                            id={`idTokenMinutes-${client.id}`}
+                                            type="number"
+                                            value={(() => {
+                                              const seconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
+                                              return secondsToDaysAndMinutes(seconds).minutes;
+                                            })()}
+                                            onChange={(e) => {
+                                              const minutes = parseInt(e.target.value) || 0;
+                                              const currentSeconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
+                                              const { days } = secondsToDaysAndMinutes(currentSeconds);
+                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
+                                              setExpiryValues(prev => ({
+                                                ...prev,
+                                                [client.id]: {
+                                                  ...(prev[client.id] || {
+                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
+                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
+                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
+                                                  }),
+                                                  idTokenExpiry: newSeconds,
+                                                }
+                                              }));
+                                            }}
+                                            className="mt-1 text-xs"
+                                            min="0"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    
+                                    <div className="flex gap-2 pt-2">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={() => handleUpdateAppClientExpiries(client.id)}
+                                        className="text-xs"
+                                      >
+                                        Save Changes
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          // Reset to original values from clientDetails
+                                          if (clientDetails) {
+                                            setExpiryValues(prev => ({
+                                              ...prev,
+                                              [client.id]: {
+                                                accessTokenExpiry: clientDetails.accessTokenExpiry || 3600,
+                                                refreshTokenExpiry: clientDetails.refreshTokenExpiry || 2592000,
+                                                idTokenExpiry: clientDetails.idTokenExpiry || 3600,
+                                              }
+                                            }));
+                                          }
+                                        }}
+                                        className="text-xs"
+                                      >
+                                        Reset
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           )}
@@ -1363,131 +1613,470 @@ function EditModeManagementUI({
   );
 }
 
-export function AuthenticationSection({ config, updateConfig, isEditMode = false, project, onProjectUpdate, preloadedUserPools, preloadedAppClients, preloadedProviders, loadingAuthData }: AuthenticationSectionProps) {
+export function AuthenticationSection({ config, updateConfig, isEditMode = false, project, onProjectUpdate, preloadedAuthConfigs, preloadedAppClients, preloadedProviders, loadingAuthData }: AuthenticationSectionProps) {
+  
   const [newScope, setNewScope] = useState('');
-  const [userPoolModalOpen, setUserPoolModalOpen] = useState(false);
-  const [selectedAppClient, setSelectedAppClient] = useState<AppClient & { userPoolId: string } | null>(null);
-  const [existingUserPools, setExistingUserPools] = useState<UserPool[]>(preloadedUserPools || []);
-  const [loadingUserPools, setLoadingUserPools] = useState(false);
-  const [appClientDetails, setAppClientDetails] = useState<AppClientResponse | null>(null);
-  const [loadingAppClient, setLoadingAppClient] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [thirdPartyProvider, setThirdPartyProvider] = useState<SocialProviderResponse | null>(null);
-  const [loadingProvider, setLoadingProvider] = useState(false);
-  const [userPoolSelectModalOpen, setUserPoolSelectModalOpen] = useState(false);
-
-  // Load existing UserPools when social auth is enabled
-  useEffect(() => {
-    if (config.enableSocialAuth) {
-      // Only show loading if pools haven't been loaded yet
-      loadUserPools(existingUserPools.length === 0);
+  // Helper to get default callback URL based on current project name
+  const getDefaultCallbackUrl = () => {
+    const projectName = config.projectName || 'project';
+    const apiVersion = config.apiVersion || '1.0.0';
+    return `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
+  };
+  
+  // Initialize with default URL if none exist
+  const [authorizedCallbackUrls, setAuthorizedCallbackUrls] = useState<string[]>(() => {
+    if (config.authorizedCallbackUrls && config.authorizedCallbackUrls.length > 0) {
+      return config.authorizedCallbackUrls;
     }
-  }, [config.enableSocialAuth]);
-
-  // Initialize with preloaded user pools if provided
+    const defaultUrl = getDefaultCallbackUrl();
+    return [defaultUrl];
+  });
+  const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
+  const [authConfigModalOpen, setAuthConfigModalOpen] = useState(false);
+  
+  // Update default URL when project name changes
   useEffect(() => {
-    if (preloadedUserPools && preloadedUserPools.length > 0) {
-      setExistingUserPools(preloadedUserPools);
-    }
-  }, [preloadedUserPools]);
-
-  // Preload user pools in the background when component mounts (if not already preloaded)
-  // This ensures the dropdown feels instant when opened
-  useEffect(() => {
-    // Only load if we don't have preloaded data
-    if (!preloadedUserPools || preloadedUserPools.length === 0) {
-      // Start loading user pools immediately in the background
-      // Don't wait for enableSocialAuth to be true
-      // Pass false to avoid showing loading state on mount
-      loadUserPools(false);
-    }
-  }, [preloadedUserPools]);
-
-  // In edit mode, populate userGroupName from project's user pool
-  // Only sync on initial load, not when existingUserPools changes (to avoid reverting user changes)
-  const hasSyncedUserGroupNameRef = useRef(false);
-  useEffect(() => {
-    if (isEditMode && project?.config && !hasSyncedUserGroupNameRef.current) {
-      const projectConfig = project.config as Record<string, unknown>;
-      const userPoolId = projectConfig.user_pool_id as string | undefined;
-      
-      if (userPoolId) {
-        // Try to find the user pool name from preloaded user pools first
-        const allPools = preloadedUserPools && preloadedUserPools.length > 0 
-          ? preloadedUserPools 
-          : existingUserPools;
-        
-        const userPool = allPools.find(pool => pool.id === userPoolId);
-        if (userPool && userPool.name !== config.userGroupName) {
-          // Only update if the name is different to avoid unnecessary updates
-          updateConfig({ userGroupName: userPool.name });
-          hasSyncedUserGroupNameRef.current = true;
-        } else if (userPool) {
-          // Even if names match, mark as synced
-          hasSyncedUserGroupNameRef.current = true;
-        }
-      } else {
-        // No userPoolId in project config, mark as synced anyway
-        hasSyncedUserGroupNameRef.current = true;
+    const defaultUrl = getDefaultCallbackUrl();
+    const currentUrls = authorizedCallbackUrls;
+    
+    // Check if first URL is a portal.apiblaze.com URL (old default pattern without version, or new pattern with version)
+    const firstUrlIsDefault = currentUrls.length > 0 && 
+      (currentUrls[0].match(/^https:\/\/[^/]+\.portal\.apiblaze\.com$/) || 
+       currentUrls[0].match(/^https:\/\/[^/]+\.portal\.apiblaze\.com\/[^/]+$/));
+    
+    if (firstUrlIsDefault) {
+      // Replace the first URL with the new default
+      const otherUrls = currentUrls.slice(1).filter(u => u !== defaultUrl);
+      const updatedUrls = [defaultUrl, ...otherUrls];
+      if (JSON.stringify(updatedUrls) !== JSON.stringify(currentUrls)) {
+        setAuthorizedCallbackUrls(updatedUrls);
+        updateConfig({ authorizedCallbackUrls: updatedUrls });
       }
+    } else if (currentUrls.length === 0 || !currentUrls.some(u => u.match(/^https:\/\/[^/]+\.portal\.apiblaze\.com(\/.*)?$/))) {
+      // No default URL present, add it as first
+      const otherUrls = currentUrls.filter(u => !u.match(/^https:\/\/[^/]+\.portal\.apiblaze\.com(\/.*)?$/));
+      const updatedUrls = [defaultUrl, ...otherUrls];
+      setAuthorizedCallbackUrls(updatedUrls);
+      updateConfig({ authorizedCallbackUrls: updatedUrls });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditMode, project, preloadedUserPools]);
+  }, [config.projectName, config.apiVersion]);
   
-  // Reset sync flag when project changes
-  useEffect(() => {
-    hasSyncedUserGroupNameRef.current = false;
-  }, [project]);
+  // Helper function to update both state and config
+  const updateAuthorizedCallbackUrls = (urls: string[]) => {
+    setAuthorizedCallbackUrls(urls);
+    updateConfig({ authorizedCallbackUrls: urls });
+  };
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [selectedAppClient, setSelectedAppClient] = useState<AppClient & { authConfigId: string } | null>(null);
+  const [existingAuthConfigs, setExistingAuthConfigs] = useState<AuthConfig[]>(preloadedAuthConfigs || []);
+  const [loadingAuthConfigs, setLoadingAuthConfigs] = useState(false);
+  // State for edit mode functions (used internally by loadAppClientDetails and loadThirdPartyProvider)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [appClientDetails, setAppClientDetails] = useState<AppClientResponse | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [loadingAppClient, setLoadingAppClient] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [thirdPartyProvider, setThirdPartyProvider] = useState<SocialProviderResponse | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [loadingProvider, setLoadingProvider] = useState(false);
+  const [authConfigSelectModalOpen, setAuthConfigSelectModalOpen] = useState(false);
 
-  // Load AppClient details when UserPool is configured (either from selection or from existing config)
+  // Track if we've already loaded auth configs to prevent repeated API calls
+  const hasLoadedAuthConfigsRef = useRef(false);
+
+  // Load existing AuthConfigs when social auth is enabled (only once or when enabled changes)
+  // Skip if we have preloaded data - create-project-dialog already handles loading
   useEffect(() => {
-    // Load details if we have userPoolId and appClientId (either from selection or from existing config)
-    if (config.userPoolId && config.appClientId) {
-      loadAppClientDetails(config.userPoolId, config.appClientId);
-      // Only load third-party provider from API if bringOwnProvider is not already set
-      // If bringOwnProvider is true, it means third_party_provider_config was already loaded from config
-      // and we don't want to override it by fetching from the API
-      if ((isEditMode || config.useUserPool) && !config.bringOwnProvider) {
-        loadThirdPartyProvider(config.userPoolId, config.appClientId);
+    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
+      if (existingAuthConfigs.length === 0) {
+        setExistingAuthConfigs(preloadedAuthConfigs);
+        hasLoadedAuthConfigsRef.current = true;
+      }
+      return;
+    }
+    
+    // Only load if no preloaded data and social auth is enabled
+    if (config.enableSocialAuth && !hasLoadedAuthConfigsRef.current && existingAuthConfigs.length === 0) {
+      loadAuthConfigs(true);
+      hasLoadedAuthConfigsRef.current = true;
+    } else if (!config.enableSocialAuth) {
+      hasLoadedAuthConfigsRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.enableSocialAuth, preloadedAuthConfigs]);
+
+  // Track initial enableSocialAuth, enableApiKey, and bringOwnProvider to avoid updating on mount
+  // These refs are used to prevent triggering update useEffects when syncing from authConfig
+  const previousEnableSocialAuthRef = useRef<boolean | undefined>(config.enableSocialAuth);
+  const previousEnableApiKeyRef = useRef<boolean | undefined>(config.enableApiKey);
+  const previousBringOwnProviderRef = useRef<boolean | undefined>(config.bringOwnProvider);
+
+  // Update authConfig's enable_social_auth when enableSocialAuth changes
+  useEffect(() => {
+    // Only update if we have a authConfigId and we're in edit mode
+    if (!isEditMode || !config.authConfigId || !project) {
+      previousEnableSocialAuthRef.current = config.enableSocialAuth;
+      return;
+    }
+
+    // Skip if this is the initial load (value hasn't changed)
+    if (previousEnableSocialAuthRef.current === config.enableSocialAuth) {
+      return;
+    }
+
+    // Update the authConfig with the new enableSocialAuth value
+    const updateAuthConfigSocialAuth = async () => {
+      try {
+        // Backend requires 'name' field, so we need to include it
+        // Try to get name from existingAuthConfigs list, or fetch it, or use userGroupName as fallback
+        let name = config.userGroupName;
+        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
+        if (authConfig) {
+          name = authConfig.name;
+        } else if (!name) {
+          // Fetch the auth config to get its name
+          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
+          name = fullAuthConfig.name;
+        }
+        await api.updateAuthConfig(config.authConfigId!, {
+          name: name || 'Unnamed Auth Config',
+          enableSocialAuth: config.enableSocialAuth,
+        });
+        console.log('[AuthSection] ✅ Updated authConfig enable_social_auth:', config.enableSocialAuth);
+        previousEnableSocialAuthRef.current = config.enableSocialAuth;
+      } catch (error) {
+        console.error('[AuthSection] ❌ Error updating authConfig enable_social_auth:', error);
+      }
+    };
+
+    updateAuthConfigSocialAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.enableSocialAuth, config.authConfigId, isEditMode, project]);
+
+  // Update authConfig's enable_api_key_auth when enableApiKey changes
+  useEffect(() => {
+    // Only update if we have a authConfigId and we're in edit mode
+    if (!isEditMode || !config.authConfigId || !project) {
+      previousEnableApiKeyRef.current = config.enableApiKey;
+      return;
+    }
+
+    // Skip if this is the initial load (value hasn't changed)
+    if (previousEnableApiKeyRef.current === config.enableApiKey) {
+      return;
+    }
+
+    // Update the authConfig with the new enableApiKey value
+    const updateAuthConfigApiKey = async () => {
+      try {
+        // Backend requires 'name' field, so we need to include it
+        // Try to get name from existingAuthConfigs list, or fetch it, or use userGroupName as fallback
+        let name = config.userGroupName;
+        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
+        if (authConfig) {
+          name = authConfig.name;
+        } else if (!name) {
+          // Fetch the auth config to get its name
+          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
+          name = fullAuthConfig.name;
+        }
+        await api.updateAuthConfig(config.authConfigId!, {
+          name: name || 'Unnamed Auth Config',
+          enableApiKeyAuth: config.enableApiKey,
+        });
+        console.log('[AuthSection] ✅ Updated authConfig enable_api_key_auth:', config.enableApiKey);
+        previousEnableApiKeyRef.current = config.enableApiKey;
+      } catch (error) {
+        console.error('[AuthSection] ❌ Error updating authConfig enable_api_key_auth:', error);
+      }
+    };
+
+    updateAuthConfigApiKey();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.enableApiKey, config.authConfigId, isEditMode, project]);
+
+  // Update authConfig's bringMyOwnOAuth when bringOwnProvider changes
+  useEffect(() => {
+    // Only update if we have a authConfigId and we're in edit mode
+    if (!isEditMode || !config.authConfigId || !project) {
+      previousBringOwnProviderRef.current = config.bringOwnProvider;
+      return;
+    }
+
+    // Skip if this is the initial load (value hasn't changed)
+    if (previousBringOwnProviderRef.current === config.bringOwnProvider) {
+      return;
+    }
+
+    // Update the authConfig with the new bringOwnProvider value
+    const updateAuthConfigBringOwnOAuth = async () => {
+      try {
+        // Backend requires 'name' field, so we need to include it
+        // Try to get name from existingAuthConfigs list, or fetch it, or use userGroupName as fallback
+        let name = config.userGroupName;
+        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
+        if (authConfig) {
+          name = authConfig.name;
+        } else if (!name) {
+          // Fetch the auth config to get its name
+          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
+          name = fullAuthConfig.name;
+        }
+        await api.updateAuthConfig(config.authConfigId!, {
+          name: name || 'Unnamed Auth Config',
+          bringMyOwnOAuth: config.bringOwnProvider,
+        });
+        console.log('[AuthSection] ✅ Updated authConfig bringMyOwnOAuth:', config.bringOwnProvider);
+        previousBringOwnProviderRef.current = config.bringOwnProvider;
+      } catch (error) {
+        console.error('[AuthSection] ❌ Error updating authConfig bringMyOwnOAuth:', error);
+      }
+    };
+
+    updateAuthConfigBringOwnOAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.bringOwnProvider, config.authConfigId, isEditMode, project]);
+
+  // Initialize with preloaded auth configs if provided
+  useEffect(() => {
+    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
+      setExistingAuthConfigs(preloadedAuthConfigs);
+    }
+  }, [preloadedAuthConfigs]);
+
+  // Initialize with preloaded auth configs - no need to load if already preloaded
+  useEffect(() => {
+    if (preloadedAuthConfigs && preloadedAuthConfigs.length > 0) {
+      setExistingAuthConfigs(preloadedAuthConfigs);
+    }
+    // Don't load from API here - create-project-dialog already handles it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preloadedAuthConfigs]);
+
+  // Track selected authConfigId - only set if we're in edit mode with an existing config
+  const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(
+    isEditMode && project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : undefined
+  );
+  
+  // Only sync from config.authConfigId in edit mode on initial mount
+  const hasSyncedFromConfigRef = useRef(false);
+  useEffect(() => {
+    if (hasSyncedFromConfigRef.current) return;
+    if (isEditMode && config.authConfigId && config.authConfigId !== selectedAuthConfigId) {
+      setSelectedAuthConfigId(config.authConfigId);
+      hasSyncedFromConfigRef.current = true;
+    }
+  }, [isEditMode, config.authConfigId, selectedAuthConfigId]);
+
+  // Get the determined authConfigId (same logic as in EditModeManagementUI)
+  const determinedAuthConfigId = useMemo(() => {
+    if (!isEditMode || !project) {
+      return undefined;
+    }
+    const projectConfig = project.config as Record<string, unknown> | undefined;
+    const projectAuthConfigId = projectConfig?.auth_config_id as string | undefined;
+    
+    if (projectAuthConfigId) return projectAuthConfigId;
+    if (config.authConfigId) return config.authConfigId;
+    if (preloadedAuthConfigs && preloadedAuthConfigs.length === 1) return preloadedAuthConfigs[0].id;
+    if (preloadedAppClients && Object.keys(preloadedAppClients).length === 1) {
+      return Object.keys(preloadedAppClients)[0];
+    }
+    return undefined;
+  }, [isEditMode, project, config.authConfigId, preloadedAuthConfigs, preloadedAppClients]);
+
+  // In edit mode, populate userGroupName from project's auth config or from determined authConfigId
+  useEffect(() => {
+    if (!isEditMode || !project || !determinedAuthConfigId) {
+      return;
+    }
+    
+    // Find the auth config name from preloaded or existing configs
+    // Priority: preloadedAuthConfigs > existingAuthConfigs
+    const allPools = preloadedAuthConfigs && preloadedAuthConfigs.length > 0 
+      ? preloadedAuthConfigs 
+      : existingAuthConfigs;
+    
+    const authConfig = allPools.find(pool => pool.id === determinedAuthConfigId);
+    if (authConfig) {
+      // Always set userGroupName if we found the auth config and it's different or empty
+      if (!config.userGroupName || config.userGroupName !== authConfig.name) {
+        console.log('[AuthSection] Setting userGroupName:', authConfig.name, 'for authConfigId:', determinedAuthConfigId);
+        updateConfig({ 
+          userGroupName: authConfig.name,
+          authConfigId: determinedAuthConfigId, // Also ensure authConfigId is set
+        });
       }
     } else {
-      setAppClientDetails(null);
-      setThirdPartyProvider(null);
+      console.log('[AuthSection] Auth config not found:', {
+        determinedAuthConfigId,
+        preloadedCount: preloadedAuthConfigs?.length || 0,
+        existingCount: existingAuthConfigs.length,
+        allPoolsCount: allPools.length,
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.userPoolId, config.appClientId, isEditMode, config.useUserPool, config.bringOwnProvider]);
+  }, [isEditMode, project, determinedAuthConfigId, config.userGroupName, preloadedAuthConfigs, existingAuthConfigs]);
 
-  const loadUserPools = async (showLoading = false) => {
+  // Track which authConfigId we've already loaded data for to prevent duplicate loads
+  const loadedAuthConfigIdRef = useRef<string | undefined>(undefined);
+  
+  // When selectedAuthConfigId changes, update config and load data - simplified to prevent loops
+  // NOTE: This only runs in CREATE mode. In EDIT mode, EditModeManagementUI handles loading.
+  useEffect(() => {
+    // Skip entirely in edit mode - EditModeManagementUI handles it
+    if (isEditMode && project) {
+      return;
+    }
+    
+    if (!selectedAuthConfigId) {
+      return;
+    }
+    
+    // Skip if we've already loaded data for this authConfigId
+    if (loadedAuthConfigIdRef.current === selectedAuthConfigId) {
+      return;
+    }
+    
+    // Mark as loading
+    loadedAuthConfigIdRef.current = selectedAuthConfigId;
+    
+    // Load authConfig details to sync toggles - check preloaded first
+    const preloadedAuthConfig = preloadedAuthConfigs?.find(ac => ac.id === selectedAuthConfigId);
+    if (preloadedAuthConfig) {
+      console.log('[AuthSection] ✅ Using preloaded auth config for toggles (create mode)');
+      updateConfig({ 
+        authConfigId: selectedAuthConfigId, 
+        useAuthConfig: true,
+        enableSocialAuth: preloadedAuthConfig.enableSocialAuth || false,
+        enableApiKey: preloadedAuthConfig.enableApiKeyAuth || false,
+        bringOwnProvider: preloadedAuthConfig.bringMyOwnOAuth || false,
+      });
+    } else {
+      console.log('[AuthSection] 📡 Loading auth config from API for toggles (create mode)');
+      api.getAuthConfig(selectedAuthConfigId).then(authConfig => {
+        updateConfig({ 
+          authConfigId: selectedAuthConfigId, 
+          useAuthConfig: true,
+          enableSocialAuth: authConfig.enableSocialAuth || false,
+          enableApiKey: authConfig.enableApiKeyAuth || false,
+          bringOwnProvider: authConfig.bringMyOwnOAuth || false,
+        });
+      }).catch(() => {
+        updateConfig({ authConfigId: selectedAuthConfigId, useAuthConfig: true });
+      });
+    }
+    
+    // Load AppClients (use preloaded if available)
+    if (preloadedAppClients?.[selectedAuthConfigId]) {
+      console.log('[AuthSection] ✅ Using preloaded app clients (create mode)');
+      const clients = preloadedAppClients[selectedAuthConfigId];
+      if (clients.length > 0 && !config.appClientId) {
+        const defaultClient = clients.find(c => c.id === config.defaultAppClient) || clients[0];
+        updateConfig({ 
+          appClientId: defaultClient.id,
+          defaultAppClient: config.defaultAppClient || defaultClient.id,
+        });
+      }
+      // Load details and providers for all clients
+      clients.forEach(client => {
+        loadAppClientDetails(selectedAuthConfigId, client.id);
+        const providerKey = `${selectedAuthConfigId}-${client.id}`;
+        if (preloadedProviders?.[providerKey]) {
+          const providers = preloadedProviders[providerKey];
+          if (providers.length > 0 && (client.id === config.appClientId || (!config.appClientId && client === clients[0]))) {
+            const provider = providers[0] as SocialProviderResponse;
+            setThirdPartyProvider(provider);
+            updateConfig({
+              bringOwnProvider: true,
+              socialProvider: (provider.type || 'github') as 'github' | 'google' | 'microsoft' | 'facebook' | 'auth0' | 'other',
+              identityProviderDomain: provider.domain || '',
+              identityProviderClientId: provider.client_id || provider.clientId || '',
+            });
+          }
+        } else if (config.useAuthConfig && !config.bringOwnProvider) {
+          loadThirdPartyProvider(selectedAuthConfigId, client.id);
+        }
+      });
+    } else {
+      // Load from API
+      console.log('[AuthSection] 📡 Loading app clients from API (create mode)');
+      api.listAppClients(selectedAuthConfigId).then(response => {
+        const clients = Array.isArray(response) ? response : [];
+        if (clients.length > 0 && !config.appClientId) {
+          const defaultClient = clients.find(c => c.id === config.defaultAppClient) || clients[0];
+          updateConfig({ 
+            appClientId: defaultClient.id,
+            defaultAppClient: config.defaultAppClient || defaultClient.id,
+          });
+        }
+        // Load details and providers for all clients
+        clients.forEach(client => {
+          loadAppClientDetails(selectedAuthConfigId, client.id);
+          const providerKey = `${selectedAuthConfigId}-${client.id}`;
+          if (preloadedProviders?.[providerKey]) {
+            const providers = preloadedProviders[providerKey];
+            if (providers.length > 0 && (client.id === config.appClientId || (!config.appClientId && client === clients[0]))) {
+              const provider = providers[0] as SocialProviderResponse;
+              setThirdPartyProvider(provider);
+              updateConfig({
+                bringOwnProvider: true,
+                socialProvider: (provider.type || 'github') as 'github' | 'google' | 'microsoft' | 'facebook' | 'auth0' | 'other',
+                identityProviderDomain: provider.domain || '',
+                identityProviderClientId: provider.client_id || provider.clientId || '',
+              });
+            }
+          } else if (config.useAuthConfig && !config.bringOwnProvider) {
+            loadThirdPartyProvider(selectedAuthConfigId, client.id);
+          }
+        });
+      }).catch(error => {
+        console.error('[AuthSection] ❌ Error loading app clients:', error);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAuthConfigId, isEditMode, project]);
+
+  const loadAuthConfigs = async (showLoading = false) => {
     // Only show loading state if explicitly requested (e.g., first load)
     // For background refreshes, don't show loading to keep UI responsive
     if (showLoading) {
-      setLoadingUserPools(true);
+      setLoadingAuthConfigs(true);
     }
     try {
-      const pools = await api.listUserPools();
-      setExistingUserPools(Array.isArray(pools) ? pools : []);
+      console.log('[AuthSection] 📥 Fetching auth configs from API...');
+      const pools = await api.listAuthConfigs();
+      const poolsArray = Array.isArray(pools) ? pools : [];
+      console.log('[AuthSection] ✅ Auth configs loaded:', {
+        count: poolsArray.length,
+        names: poolsArray.map(p => p.name),
+      });
+      setExistingAuthConfigs(poolsArray);
     } catch (error) {
-      console.error('Error loading user pools:', error);
+      console.error('[AuthSection] ❌ Error loading auth configs:', error);
       // Only clear pools if this was the initial load
       if (showLoading) {
-        setExistingUserPools([]);
+        setExistingAuthConfigs([]);
       }
     } finally {
       if (showLoading) {
-        setLoadingUserPools(false);
+        setLoadingAuthConfigs(false);
       }
     }
   };
 
-  const loadAppClientDetails = async (userPoolId?: string, appClientId?: string) => {
-    const poolId = userPoolId || config.userPoolId;
+  const loadAppClientDetails = async (authConfigId?: string, appClientId?: string) => {
+    const authConfigIdToUse = authConfigId || config.authConfigId;
     const clientId = appClientId || config.appClientId;
     
-    if (!poolId || !clientId) return;
+    if (!authConfigIdToUse || !clientId) return;
     
     setLoadingAppClient(true);
     try {
-      const client = await api.getAppClient(poolId, clientId);
+      const client = await api.getAppClient(authConfigIdToUse, clientId);
       setAppClientDetails(client);
     } catch (error) {
       console.error('Error loading app client details:', error);
@@ -1497,15 +2086,15 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     }
   };
 
-  const loadThirdPartyProvider = async (userPoolId?: string, appClientId?: string) => {
-    const poolId = userPoolId || config.userPoolId;
+  const loadThirdPartyProvider = async (authConfigId?: string, appClientId?: string) => {
+    const authConfigIdToUse = authConfigId || config.authConfigId;
     const clientId = appClientId || config.appClientId;
     
-    if (!poolId || !clientId) return;
+    if (!authConfigIdToUse || !clientId) return;
     
     setLoadingProvider(true);
     try {
-      const providers = await api.listProviders(poolId, clientId);
+      const providers = await api.listProviders(authConfigIdToUse, clientId);
       // Get the first provider (usually there's one per app client)
       if (providers && providers.length > 0) {
         const provider = providers[0];
@@ -1535,74 +2124,6 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     }
   };
 
-  const copyToClipboard = async (text: string, field: string) => {
-    if (!text || text.trim() === '') {
-      console.warn('No text to copy');
-      return;
-    }
-
-    try {
-      // Check if clipboard API is available (requires secure context)
-      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-        setCopiedField(field);
-        setTimeout(() => setCopiedField(null), 2000);
-        return;
-      }
-    } catch (clipboardError) {
-      console.warn('Clipboard API failed, trying fallback:', clipboardError);
-    }
-
-    // Fallback for browsers/environments without clipboard API
-    try {
-      const textArea = document.createElement('textarea');
-      textArea.value = text;
-      textArea.style.position = 'fixed';
-      textArea.style.left = '-999999px';
-      textArea.style.top = '-999999px';
-      textArea.style.opacity = '0';
-      textArea.setAttribute('readonly', '');
-      textArea.setAttribute('aria-hidden', 'true');
-      document.body.appendChild(textArea);
-      
-      // For iOS
-      if (navigator.userAgent.match(/ipad|iphone/i)) {
-        const range = document.createRange();
-        range.selectNodeContents(textArea);
-        const selection = window.getSelection();
-        if (selection) {
-          selection.removeAllRanges();
-          selection.addRange(range);
-        }
-        textArea.setSelectionRange(0, 999999);
-      } else {
-        textArea.focus();
-        textArea.select();
-        textArea.setSelectionRange(0, text.length);
-      }
-      
-      const successful = document.execCommand('copy');
-      
-      // Clean up
-      if (textArea.parentNode) {
-        document.body.removeChild(textArea);
-      }
-      
-      if (successful) {
-        setCopiedField(field);
-        setTimeout(() => setCopiedField(null), 2000);
-      } else {
-        throw new Error('Copy command returned false');
-      }
-    } catch (fallbackError) {
-      console.error('Fallback copy failed:', fallbackError);
-      // Still show as copied to give user feedback
-      setCopiedField(field);
-      setTimeout(() => setCopiedField(null), 2000);
-      // Optionally show an error toast/alert here if you have toast system
-    }
-  };
-
   const handleProviderChange = (provider: SocialProvider) => {
     updateConfig({
       socialProvider: provider,
@@ -1626,63 +2147,53 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     });
   };
 
-  const handleUseExistingUserPool = (appClient: AppClient & { userPoolId: string }) => {
+  const handleUseExistingAuthConfig = (appClient: AppClient & { authConfigId: string }) => {
     setSelectedAppClient(appClient);
     updateConfig({
-      useUserPool: true,
-      userPoolId: appClient.userPoolId,
+      useAuthConfig: true,
+      authConfigId: appClient.authConfigId,
       appClientId: appClient.id,
-      // Clear bringOwnProvider when using existing UserPool
+      // Clear bringOwnProvider when using existing AuthConfig
       bringOwnProvider: false,
       identityProviderClientId: '',
       identityProviderClientSecret: '',
       identityProviderDomain: '',
     });
-    setUserPoolModalOpen(false); 
-  };
-
-  const handleClearUserPool = () => {
-    setSelectedAppClient(null);
-    updateConfig({
-      useUserPool: false,
-      userPoolId: undefined,
-      appClientId: undefined,
-    });
+    setAuthConfigModalOpen(false); 
   };
 
   return (
     <div className="space-y-6">
-      {/* User Pool Name */}
+      {/* Auth Config Name */}
       <div>
         <Label htmlFor="userGroupName" className="text-base font-semibold">
-          User Pool Name
+          Auth Config Name
         </Label>
         <p className="text-sm text-muted-foreground mb-3">
-          User pools are groups of users with specific permissions that can be reused between various APIs
+          Give a name to your Auth Config if its new or Search for an existing Auth Config to reuse
         </p>
         <div className="relative">
           <Input
             id="userGroupName"
-            placeholder="Enter a unique name (e.g., my-api-users)"
+            placeholder={
+              loadingAuthConfigs || (loadingAuthData && !config.userGroupName)
+                ? "Loading..."
+                : "Enter a unique name (e.g., my-api-users)"
+            }
             value={config.userGroupName}
             onChange={(e) => updateConfig({ userGroupName: e.target.value })}
             className="pr-10"
             disabled={loadingAuthData && !config.userGroupName}
           />
-          {loadingUserPools || (loadingAuthData && !config.userGroupName) ? (
+          {loadingAuthConfigs || (loadingAuthData && !config.userGroupName) ? (
             <div className="absolute right-10 top-1/2 -translate-y-1/2">
               <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
             </div>
           ) : null}
           <DropdownMenu
-            onOpenChange={(open) => {
-              // Refresh user pools in background when dropdown opens
-              // Show cached data immediately, refresh silently
-              if (open) {
-                // Load in background without blocking UI
-                // Only show loading if we have no cached data
-                loadUserPools(existingUserPools.length === 0);
-              }
+            onOpenChange={() => {
+              // Don't load here - use preloaded data or existing data
+              // create-project-dialog already handles preloading
             }}
           >
             <DropdownMenuTrigger asChild>
@@ -1691,18 +2202,18 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                 variant="ghost"
                 size="icon"
                 className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                title="Select existing user pool"
+                title="Select existing auth config"
               >
                 <Search className="h-4 w-4 text-muted-foreground" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-[200px] max-w-[400px]">
-              {loadingUserPools && existingUserPools.length === 0 ? (
+              {loadingAuthConfigs && existingAuthConfigs.length === 0 ? (
                 <DropdownMenuItem disabled>Loading...</DropdownMenuItem>
-              ) : existingUserPools.length === 0 ? (
-                <DropdownMenuItem disabled>No user pools found</DropdownMenuItem>
+              ) : existingAuthConfigs.length === 0 ? (
+                <DropdownMenuItem disabled>No auth configs found</DropdownMenuItem>
               ) : (
-                existingUserPools.map((pool) => (
+                existingAuthConfigs.map((pool) => (
                   <DropdownMenuItem
                     key={pool.id}
                     onClick={() => {
@@ -1764,42 +2275,59 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         </div>
 
         {/* OAuth Provider Configuration */}
-        {config.enableSocialAuth && (
+        {/* In edit mode, always show EditModeManagementUI if we have a project (to load auth config data) */}
+        {/* In create mode, only show if enableSocialAuth is true */}
+        {((isEditMode && project) || config.enableSocialAuth) && (
           <div className="space-y-4 pl-4 border-l-2 border-blue-200">
-            {/* Edit Mode: Show UserPool/AppClient/Provider Management UI */}
+            {/* Edit Mode: Show AuthConfig/AppClient/Provider Management UI */}
             {isEditMode ? (
               <EditModeManagementUI
                 config={config}
                 updateConfig={updateConfig}
                 project={project}
                 onProjectUpdate={onProjectUpdate}
-                preloadedUserPools={preloadedUserPools}
+                initialAuthConfigId={project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : config.authConfigId}
+                preloadedAuthConfigs={preloadedAuthConfigs}
                 preloadedAppClients={preloadedAppClients}
                 preloadedProviders={preloadedProviders}
                 loadingAuthData={loadingAuthData}
               />
             ) : (
-              /* Create Mode: Third-party OAuth Provider Configuration */
+              /* Create Mode: Show AuthConfig data if selected AND social auth enabled, otherwise show third-party provider config */
               <div className="space-y-4">
-                {/* Bring Your Own Provider Toggle */}
-                <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
-                  <div className="space-y-1">
-                    <Label htmlFor="bringOwnProvider" className="text-sm font-medium">
-                      Bring My Own OAuth Provider
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Use your own Google, Auth0, or other OAuth provider 
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Leave off to use default APIBlaze GitHub
-                    </p>
-                  </div>
-                  <Switch
-                    id="bringOwnProvider"
-                    checked={config.bringOwnProvider}
-                    onCheckedChange={(checked) => updateConfig({ bringOwnProvider: checked })}
+                {/* Show AuthConfig/AppClient/Provider info when useAuthConfig is true AND social auth is enabled */}
+                {config.useAuthConfig && config.authConfigId && config.enableSocialAuth ? (
+                  <EditModeManagementUI
+                    config={config}
+                    updateConfig={updateConfig}
+                    project={project}
+                    onProjectUpdate={onProjectUpdate}
+                    preloadedAuthConfigs={preloadedAuthConfigs}
+                    preloadedAppClients={preloadedAppClients}
+                    preloadedProviders={preloadedProviders}
+                    loadingAuthData={loadingAuthData}
                   />
-                </div>
+                ) : (
+                  <>
+                    {/* Bring Your Own Provider Toggle */}
+                    <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
+                      <div className="space-y-1">
+                        <Label htmlFor="bringOwnProvider" className="text-sm font-medium">
+                          Bring My Own OAuth Provider
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          Use your own Google, Auth0, or other OAuth provider 
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Leave off to use default APIBlaze GitHub
+                        </p>
+                      </div>
+                      <Switch
+                        id="bringOwnProvider"
+                        checked={config.bringOwnProvider}
+                        onCheckedChange={(checked) => updateConfig({ bringOwnProvider: checked })}
+                      />
+                    </div>
 
                 {/* Provider Configuration - Two Column Layout */}
                 {config.bringOwnProvider && (
@@ -1945,7 +2473,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                         </CardHeader>
                         <CardContent>
                           <code className="text-xs bg-white px-2 py-1 rounded border block">
-                            callback.apiblaze.com
+                            https://callback.apiblaze.com
                           </code>
                         </CardContent>
                       </Card>
@@ -1967,6 +2495,90 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                       </Card>
                     </div>
                   </div>
+                    )}
+
+                    {/* Authorized Callback URLs - Moved after Bring My Own OAuth Provider section */}
+                    <div className="space-y-2">
+                      <Label className="text-sm">Authorized Callback URLs</Label>
+                      <div className="flex gap-2 mb-2 mt-2">
+                        <Input
+                          value={newAuthorizedCallbackUrl}
+                          onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)}
+                          placeholder="https://example.com/callback"
+                          className="text-xs"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const url = newAuthorizedCallbackUrl.trim();
+                              if (url && !authorizedCallbackUrls.includes(url)) {
+                                try {
+                                  const urlObj = new URL(url);
+                                  if (urlObj.protocol !== 'https:') {
+                                    alert('URL must use HTTPS protocol');
+                                    return;
+                                  }
+                                  updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]);
+                                  setNewAuthorizedCallbackUrl('');
+                                } catch {
+                                  alert('Invalid URL format');
+                                }
+                              }
+                            }
+                          }}
+                        />
+                        <Button 
+                          type="button" 
+                          size="sm" 
+                          onClick={() => {
+                            const url = newAuthorizedCallbackUrl.trim();
+                            if (!url) return;
+                            if (authorizedCallbackUrls.includes(url)) {
+                              alert('This URL is already in the list');
+                              return;
+                            }
+                            try {
+                              const urlObj = new URL(url);
+                              if (urlObj.protocol !== 'https:') {
+                                alert('URL must use HTTPS protocol');
+                                return;
+                              }
+                              updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]);
+                              setNewAuthorizedCallbackUrl('');
+                            } catch {
+                              alert('Invalid URL format');
+                            }
+                          }}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {authorizedCallbackUrls.map((url, index) => (
+                          <div
+                            key={url}
+                            className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs"
+                          >
+                            {index === 0 && (
+                              <Badge variant="secondary" className="mr-1 text-xs">
+                                <Star className="h-2 w-2 mr-1" />
+                                Default
+                              </Badge>
+                            )}
+                            <span>{url}</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-4 w-4 p-0"
+                              onClick={() => updateAuthorizedCallbackUrls(authorizedCallbackUrls.filter((u) => u !== url))}
+                            >
+                              <X className="h-2 w-2" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -1974,37 +2586,37 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         )}
       </div>
 
-      <UserPoolModal
-        open={userPoolModalOpen}
-        onOpenChange={setUserPoolModalOpen}
+      <AuthConfigModal
+        open={authConfigModalOpen}
+        onOpenChange={setAuthConfigModalOpen}
         mode="select"
-        onSelect={handleUseExistingUserPool}
+        onSelect={handleUseExistingAuthConfig}
       />
 
-      {/* Simple User Pool Name Selection Modal */}
-      <Dialog open={userPoolSelectModalOpen} onOpenChange={setUserPoolSelectModalOpen}>
+      {/* Simple Auth Config Name Selection Modal */}
+      <Dialog open={authConfigSelectModalOpen} onOpenChange={setAuthConfigSelectModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Select User Pool</DialogTitle>
+            <DialogTitle>Select Auth Config</DialogTitle>
             <DialogDescription>
-              Select an existing user pool to reuse its name
+              Select an existing auth config to reuse its name
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            {loadingUserPools ? (
-              <div className="text-sm text-muted-foreground text-center py-4">Loading user pools...</div>
-            ) : existingUserPools.length === 0 ? (
-              <div className="text-sm text-muted-foreground text-center py-4">No user pools found</div>
+            {loadingAuthConfigs ? (
+              <div className="text-sm text-muted-foreground text-center py-4">Loading auth configs...</div>
+            ) : existingAuthConfigs.length === 0 ? (
+              <div className="text-sm text-muted-foreground text-center py-4">No auth configs found</div>
             ) : (
               <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {existingUserPools.map((pool) => (
+                {existingAuthConfigs.map((pool) => (
                   <Button
                     key={pool.id}
                     variant="outline"
                     className="w-full justify-start"
                     onClick={() => {
                       updateConfig({ userGroupName: pool.name });
-                      setUserPoolSelectModalOpen(false);
+                      setAuthConfigSelectModalOpen(false);
                     }}
                   >
                     <Users className="h-4 w-4 mr-2" />
@@ -2015,7 +2627,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUserPoolSelectModalOpen(false)}>
+            <Button variant="outline" onClick={() => setAuthConfigSelectModalOpen(false)}>
               Cancel
             </Button>
           </DialogFooter>
