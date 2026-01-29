@@ -71,6 +71,7 @@ class ApiClient {
     try {
       const response = await fetch(url, {
         ...options,
+        credentials: 'include',
         headers,
         signal: controller.signal,
       });

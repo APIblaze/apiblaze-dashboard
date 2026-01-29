@@ -44,6 +44,7 @@ export async function listProjects(params: ListProjectsParams = {}): Promise<Pro
   const url = `/api/projects?${queryParams.toString()}`;
   
   const response = await fetch(url, {
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
     },
@@ -69,6 +70,7 @@ export async function getProjectStatus(projectId: string): Promise<ProjectStatus
   const url = `/api/projects/${projectId}/status`;
   
   const response = await fetch(url, {
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
     },
@@ -87,6 +89,7 @@ export async function deleteProject(projectId: string, apiVersion: string = '1.0
   
   const response = await fetch(url, {
     method: 'DELETE',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
     },
@@ -107,6 +110,7 @@ export async function updateProjectConfig(
   
   const response = await fetch(url, {
     method: 'PATCH',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
     },
@@ -124,6 +128,7 @@ export async function createProject(data: CreateProxyPayload): Promise<unknown> 
   
   const response = await fetch(url, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
     },

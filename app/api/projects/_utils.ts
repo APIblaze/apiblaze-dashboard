@@ -38,6 +38,11 @@ async function getApiblazeUserId(
   return data.apiblazeUserId;
 }
 
+/**
+ * Get user claims for admin-api JWT. Requires an active session (cookies sent with request).
+ * In production, set NEXTAUTH_URL to your dashboard URL (e.g. https://dashboard.apiblaze.com)
+ * so the session cookie is set for the correct domain.
+ */
 export async function getUserClaims() {
   const session = await getServerSession(authOptions);
 
