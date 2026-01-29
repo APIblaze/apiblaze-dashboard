@@ -57,8 +57,19 @@ export async function getUserClaims() {
     throw new Error('Invalid user session - missing email');
   }
 
-  // session.user.id is "github:12345" (NextAuth)
+  // session.user.id is either apiblazeUserId (user_xxx) or legacy github:12345
   const rawId = session.user.id ?? `github:${handle}`;
+  if (rawId.startsWith('user_')) {
+    // Already apiblaze user id from NextAuth; use as-is so we don't call ensure-apiblaze-user
+    // with wrong provider_sub (which would create a duplicate user)
+    return {
+      sub: rawId,
+      handle,
+      email: session.user.email,
+      roles: ['admin'],
+    };
+  }
+
   const providerMatch = rawId.match(/^github:(.+)$/);
   const provider = 'github';
   const providerSub = providerMatch ? providerMatch[1] : rawId;
