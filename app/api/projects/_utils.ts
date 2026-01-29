@@ -13,9 +13,9 @@ async function getApiblazeUserId(
   email: string | null | undefined,
   displayName: string | null | undefined
 ): Promise<string> {
-  const apiKey = process.env.APIBLAZE_ADMIN_API_KEY;
+  const apiKey = process.env.INTERNAL_API_KEY || process.env.APIBLAZE_ADMIN_API_KEY;
   if (!apiKey) {
-    throw new Error('APIBLAZE_ADMIN_API_KEY is not set');
+    throw new Error('INTERNAL_API_KEY (or APIBLAZE_ADMIN_API_KEY) is not set');
   }
   const res = await fetch(`${ADMIN_API_BASE}/ensure-apiblaze-user`, {
     method: 'POST',
