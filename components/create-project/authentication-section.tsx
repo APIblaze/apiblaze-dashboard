@@ -433,8 +433,14 @@ function EditModeManagementUI({
 
   const handleAddProvider = async (clientId: string) => {
     if (!selectedAuthConfigId) return;
-    const provider = newProvider[clientId];
-    if (!provider || !provider.clientId || !provider.clientSecret) {
+    const provider = newProvider[clientId] ?? {
+      type: 'google' as SocialProvider,
+      clientId: '',
+      clientSecret: '',
+      domain: PROVIDER_DOMAINS.google,
+      tokenType: 'apiblaze' as const,
+    };
+    if (!provider.clientId || !provider.clientSecret) {
       alert('Please provide Client ID and Client Secret');
       return;
     }
@@ -445,7 +451,7 @@ function EditModeManagementUI({
         clientId: provider.clientId,
         clientSecret: provider.clientSecret,
         domain: provider.domain || PROVIDER_DOMAINS[provider.type],
-        tokenType: provider.tokenType || 'thirdParty',
+        tokenType: provider.tokenType || 'apiblaze',
       });
       
       await invalidateAndRefetch(teamId);
@@ -1194,7 +1200,7 @@ function EditModeManagementUI({
                                       clientId: prev[client.id]?.clientId || '',
                                       clientSecret: prev[client.id]?.clientSecret || '',
                                       domain: PROVIDER_DOMAINS[value as SocialProvider],
-                                      tokenType: prev[client.id]?.tokenType || 'thirdParty',
+                                      tokenType: prev[client.id]?.tokenType || 'apiblaze',
                                     }
                                   }))}
                                 >
@@ -1215,11 +1221,11 @@ function EditModeManagementUI({
                                 <Label htmlFor={`providerDomain-${client.id}`} className="text-xs">Domain</Label>
                                 <Input
                                   id={`providerDomain-${client.id}`}
-                                  value={newProvider[client.id]?.domain || ''}
+                                  value={newProvider[client.id]?.domain ?? PROVIDER_DOMAINS[newProvider[client.id]?.type || 'google']}
                                   onChange={(e) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: '', tokenType: 'thirdParty' }),
+                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze' }),
                                       domain: e.target.value
                                     }
                                   }))}
@@ -1235,7 +1241,7 @@ function EditModeManagementUI({
                                   onChange={(e) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: '', tokenType: 'thirdParty' }),
+                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze' }),
                                       clientId: e.target.value
                                     }
                                   }))}
@@ -1252,7 +1258,7 @@ function EditModeManagementUI({
                                   onChange={(e) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: '', tokenType: 'thirdParty' }),
+                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze' }),
                                       clientSecret: e.target.value
                                     }
                                   }))}
@@ -1263,11 +1269,11 @@ function EditModeManagementUI({
                               <div>
                                 <Label htmlFor={`providerTokenType-${client.id}`} className="text-xs">Token Type</Label>
                                 <Select
-                                  value={newProvider[client.id]?.tokenType || 'thirdParty'}
+                                  value={newProvider[client.id]?.tokenType || 'apiblaze'}
                                   onValueChange={(value) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: '', tokenType: 'thirdParty' }),
+                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze' }),
                                       tokenType: value as 'apiblaze' | 'thirdParty'
                                     }
                                   }))}
@@ -1710,8 +1716,8 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         setThirdPartyProvider(provider);
         updateConfig({
           bringOwnProvider: true,
-          socialProvider: (provider.type || 'github') as 'github' | 'google' | 'microsoft' | 'facebook' | 'auth0' | 'other',
-          identityProviderDomain: provider.domain || '',
+          socialProvider: (provider.type || 'google') as 'github' | 'google' | 'microsoft' | 'facebook' | 'auth0' | 'other',
+          identityProviderDomain: provider.domain || 'https://accounts.google.com',
           identityProviderClientId: (provider as { client_id?: string }).client_id || provider.clientId || '',
         });
       } else {
@@ -1989,7 +1995,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                       <div>
                         <Label htmlFor="tokenType" className="text-sm">Token Type</Label>
                         <Select
-                          value={config.tokenType || 'thirdParty'}
+                          value={config.tokenType || 'apiblaze'}
                           onValueChange={(value) => updateConfig({ tokenType: value as 'apiblaze' | 'thirdParty' })}
                         >
                           <SelectTrigger className="mt-1">

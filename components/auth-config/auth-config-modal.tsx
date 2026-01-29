@@ -82,7 +82,8 @@ export function AuthConfigModal({
     type: 'google',
     clientId: '',
     clientSecret: '',
-    domain: '',
+    domain: 'https://accounts.google.com',
+    tokenType: 'apiblaze',
   });
   const [isAddingProvider, setIsAddingProvider] = useState(false);
   const [newRedirectUri, setNewRedirectUri] = useState('');
@@ -215,13 +216,15 @@ export function AuthConfigModal({
         clientId: newProvider.clientId,
         clientSecret: newProvider.clientSecret,
         domain: newProvider.domain || PROVIDER_DOMAINS[newProvider.type],
+        tokenType: newProvider.tokenType ?? 'apiblaze',
       });
       await invalidateAndRefetch();
       setNewProvider({
         type: 'google',
         clientId: '',
         clientSecret: '',
-        domain: '',
+        domain: 'https://accounts.google.com',
+        tokenType: 'apiblaze',
       });
       setShowAddProvider(false);
       toast({
@@ -679,7 +682,8 @@ export function AuthConfigModal({
                             type: 'google',
                             clientId: '',
                             clientSecret: '',
-                            domain: '',
+                            domain: 'https://accounts.google.com',
+                            tokenType: 'apiblaze',
                           });
                         }}
                       >

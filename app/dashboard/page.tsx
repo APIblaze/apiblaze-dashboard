@@ -59,7 +59,7 @@ export default function DashboardPage() {
 
   const handleProjectCreated = async () => {
     setCreateDialogOpen(false);
-    const teamId = session?.user?.githubHandle ? `team_${(session.user as { githubHandle?: string }).githubHandle}` : undefined;
+    const teamId = session?.user?.id ? `team_${(session.user as { id?: string }).id}` : undefined;
     await invalidateAndRefetch(teamId);
   };
   
@@ -173,11 +173,11 @@ export default function DashboardPage() {
             <Card>
               <CardHeader>
                 <Shield className="w-8 h-8 text-green-600 mb-2" />
-                <CardTitle className="text-lg">Fine-Grained Policies</CardTitle>
+                <CardTitle className="text-lg">Fine-grained authorization</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Easily enforce policies allowing fine-grained authorization. For example: POST book/id/123 with &lbrace;&quot;user&quot;:&quot;John&quot;&rbrace; allows John to book, but GET book/id/123 with &lbrace;&quot;user&quot;:&quot;Bob&quot;&rbrace; returns &quot;Sorry, only John or an admin can access book id 123&quot;.
+                  It&apos;s super easy to define any policy you need. For example: only allow the user who created a resource with POST to later GET that same resource—so the author can read their own booking or document, but others can&apos;t.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -236,9 +236,9 @@ export default function DashboardPage() {
       <main className="container mx-auto px-4 py-8">
         <ProjectList 
           ref={projectListRef}
-          teamId={user?.githubHandle ? `team_${user.githubHandle}` : undefined}
+          teamId={user?.id ? `team_${user.id}` : undefined}
           onRefresh={async () => {
-            const teamId = user?.githubHandle ? `team_${user.githubHandle}` : undefined;
+            const teamId = user?.id ? `team_${user.id}` : undefined;
             await invalidateAndRefetch(teamId);
           }}
           onUpdateConfig={(project: Project) => {

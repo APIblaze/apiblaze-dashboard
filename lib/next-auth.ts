@@ -23,6 +23,7 @@ declare module "next-auth" {
 // Extend the JWT interface
 declare module "next-auth/jwt" {
   interface JWT {
+    sub?: string;
     accessToken?: string;
     githubHandle?: string | null;
   }
@@ -36,26 +37,40 @@ export const authOptions: NextAuthOptions = {
       authorization: {
         params: { scope: "read:user user:email repo" },
       },
+      profile(profile) {
+        return {
+          id: profile.id.toString(),
+          name: profile.name ?? profile.login,
+          email: profile.email,
+          image: profile.avatar_url,
+          login: profile.login,
+        };
+      },
     }),
   ],
   callbacks: {
-    async jwt({ token, account, profile }) {
-      // Persist the GitHub access token to the JWT token
+    async jwt({ token, account, user }) {
       if (account?.access_token) {
         token.accessToken = account.access_token;
       }
-      if (profile && (profile as { login?: string }).login) {
-        token.githubHandle = (profile as { login: string }).login;
+      if (user) {
+        const u = user as { login?: string };
+        if (u.login) token.githubHandle = u.login;
       }
       return token;
     },
     async session({ session, token }) {
-      // Send the GitHub access token to the client
       if (typeof token.accessToken === 'string') {
         session.accessToken = token.accessToken;
       }
-      if (session.user && typeof token.githubHandle === 'string') {
-        session.user.githubHandle = token.githubHandle;
+      if (session.user) {
+        if (typeof token.githubHandle === 'string') {
+          session.user.githubHandle = token.githubHandle;
+        }
+        // NextAuth sets token.sub from user.id (our profile() returns id: profile.id.toString())
+        if (token.sub) {
+          session.user.id = `github:${token.sub}`;
+        }
       }
       return session;
     },

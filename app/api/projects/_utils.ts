@@ -20,7 +20,8 @@ export async function getUserClaims() {
     throw new Error('Invalid user session - missing email');
   }
 
-  const userId = session.user.id || session.user.email || `github:${handle}`;
+  // Use only stable id for ownership; never email (mutable, not unique)
+  const userId = session.user.id ?? `github:${handle}`;
 
   console.log(`[Auth] Creating JWT for user: ${handle} (${userId})`);
 

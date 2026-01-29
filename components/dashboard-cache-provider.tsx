@@ -18,8 +18,8 @@ export function DashboardCacheProvider({ children }: { children: React.ReactNode
     if (status !== 'authenticated' || isBootstrapping) return;
     if (projects.length > 0 || hasBootstrapped.current) return;
 
-    const teamId = session?.user?.githubHandle
-      ? `team_${(session.user as { githubHandle?: string }).githubHandle}`
+    const teamId = session?.user?.id
+      ? `team_${(session.user as { id?: string }).id}`
       : undefined;
 
     hasBootstrapped.current = true;

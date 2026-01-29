@@ -20,7 +20,7 @@ import { PortalSection } from './create-project/portal-section';
 import { ThrottlingSection } from './create-project/throttling-section';
 import { PrePostProcessingSection } from './create-project/preprocessing-section';
 import { DomainsSection } from './create-project/domains-section';
-import { ProjectConfig } from './create-project/types';
+import { ProjectConfig, type SocialProvider } from './create-project/types';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { fetchGitHubAPI } from '@/lib/github-api';
@@ -128,11 +128,12 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         authConfigId: undefined,
         appClientId: undefined,
     bringOwnProvider: false,
-    socialProvider: 'github',
-    identityProviderDomain: '',
+    socialProvider: 'google',
+    identityProviderDomain: 'https://accounts.google.com',
     identityProviderClientId: '',
     identityProviderClientSecret: '',
     authorizedScopes: ['email', 'openid', 'profile'],
+    tokenType: 'apiblaze',
     
     // Target Servers
     targetServers: [
@@ -190,11 +191,12 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       appClientId: undefined, // Not stored in config - selected at deployment time from database
       defaultAppClient: (projectConfig?.default_app_client_id || projectConfig?.defaultAppClient) as string | undefined,
       bringOwnProvider: !!(projectConfig?.oauth_config as Record<string, unknown>),
-      socialProvider: 'github',
-      identityProviderDomain: (projectConfig?.oauth_config as Record<string, unknown>)?.domain as string || '',
+      socialProvider: (((projectConfig?.oauth_config as Record<string, unknown>)?.provider as string) || 'google') as SocialProvider,
+      identityProviderDomain: (projectConfig?.oauth_config as Record<string, unknown>)?.domain as string || 'https://accounts.google.com',
       identityProviderClientId: (projectConfig?.oauth_config as Record<string, unknown>)?.client_id as string || '',
       identityProviderClientSecret: '',
       authorizedScopes: ((projectConfig?.oauth_config as Record<string, unknown>)?.scopes as string)?.split(' ') || ['email', 'openid', 'profile'],
+      tokenType: ((projectConfig?.oauth_config as Record<string, unknown>)?.token_type as 'apiblaze' | 'thirdParty') || 'apiblaze',
       
       // Target Servers
       targetServers: [
@@ -788,7 +790,6 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         display_name: config.projectName,
         subdomain: config.projectName.toLowerCase().replace(/[^a-z0-9]/g, ''),
         target_url: config.targetUrl || config.targetServers.find(s => s.targetUrl)?.targetUrl,
-        username: config.githubUser || session?.user?.githubHandle || session?.user?.email?.split('@')[0] || 'dashboard-user',
         github: githubSource,
         auth_type: authType,
         oauth_config: oauthConfig,
@@ -939,7 +940,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                   setCurrentProject(updatedProject);
                   onProjectUpdate?.(updatedProject);
                 }}
-                teamId={session?.user?.githubHandle ? `team_${(session.user as { githubHandle?: string }).githubHandle}` : undefined}
+                teamId={session?.user?.id ? `team_${(session.user as { id?: string }).id}` : undefined}
               />
             </TabsContent>
 
