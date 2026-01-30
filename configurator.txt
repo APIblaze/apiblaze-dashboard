@@ -12,7 +12,7 @@ The API version should be another input field on the right hand side of that inp
 Overall, the whole line should signify the url that will be used to query the api. So if the user types tenant123ProjectABC as a project name, the whole line will look like tenant123ProjectABC.apiblaze.com / 1.0.0
 Look at general.png as an example
 
-* Source
+* Source 
 The source should allow the user to choose between 'Target URL', 'Github' or 'File upload' with a widget for either.
 Once selected, it should show the source:
 Github: Github user, Github repo, Github path to the openapi file, Github branch
