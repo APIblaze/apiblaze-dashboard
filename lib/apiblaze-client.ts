@@ -206,6 +206,29 @@ export class APIBlazeClient {
     });
   }
 
+  /**
+   * Check project name and API version against team ownership (TEAM_PROJECTS).
+   * Returns exists, project_id, api_version, message for UI to block deploy or prompt change.
+   */
+  async checkProjectName(
+    userClaims: UserAssertionClaims,
+    projectName: string,
+    apiVersion: string
+  ): Promise<{
+    exists: boolean;
+    project_id: string | null;
+    api_version: string | null;
+    message?: string;
+  }> {
+    const queryParams = new URLSearchParams();
+    queryParams.set('projectName', projectName);
+    queryParams.set('apiVersion', apiVersion);
+    return this.request(`/checkProjectName?${queryParams.toString()}`, {
+      method: 'GET',
+      userClaims,
+    });
+  }
+
   async listProxies(userClaims: UserAssertionClaims, params?: {
     page?: number;
     limit?: number;

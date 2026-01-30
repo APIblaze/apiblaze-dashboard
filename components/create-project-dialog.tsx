@@ -102,6 +102,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
   const [currentProject, setCurrentProject] = useState<Project | null>(project || null);
   const isDeployingRef = useRef(false); // Track deployment state to prevent config reset
   const [preloadedGitHubRepos, setPreloadedGitHubRepos] = useState<Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>>([]);
+  const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
 
   // Initialize config from project if in edit mode
@@ -299,6 +300,8 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
   useEffect(() => {
     if (!open) {
       setPreloadedGitHubRepos([]);
+    } else {
+      setProjectNameCheckBlockDeploy(false);
     }
   }, [open]);
 
@@ -927,6 +930,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                 updateConfig={updateConfig} 
                 validationError={validationError}
                 preloadedGitHubRepos={preloadedGitHubRepos}
+                onProjectNameCheckResult={(blockDeploy) => setProjectNameCheckBlockDeploy(blockDeploy)}
               />
             </TabsContent>
 
@@ -976,6 +980,10 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                 {validationError === 'project-name' && 'Enter a project name to continue'}
                 {!validationError && 'Configure a source to deploy'}
               </p>
+            ) : projectNameCheckBlockDeploy ? (
+              <p className="text-sm text-red-600">
+                Change project name or API version to continue.
+              </p>
             ) : (
               <p className="text-sm text-muted-foreground">
                 Ready to deploy! Customize other sections or deploy now.
@@ -988,8 +996,8 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             </Button>
             <Button 
               onClick={handleDeploy} 
-              disabled={isDeploying || !isSourceConfigured()}
-              className={!isSourceConfigured() ? 'opacity-50 cursor-not-allowed' : ''}
+              disabled={isDeploying || !isSourceConfigured() || projectNameCheckBlockDeploy}
+              className={!isSourceConfigured() || projectNameCheckBlockDeploy ? 'opacity-50 cursor-not-allowed' : ''}
             >
               {isDeploying ? (
                 <>

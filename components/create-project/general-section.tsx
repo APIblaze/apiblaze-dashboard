@@ -12,17 +12,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { GitHubRepoSelectorModal } from './github-repo-selector-modal';
 import { GitHubAppInstallModal } from './github-app-install-modal';
 import { fetchGitHubAPI } from '@/lib/github-api';
+import { api } from '@/lib/api';
 
 interface GeneralSectionProps {
   config: ProjectConfig;
   updateConfig: (updates: Partial<ProjectConfig>) => void;
   validationError?: 'project-name' | 'github-source' | 'target-url' | 'upload-file' | null;
   preloadedGitHubRepos?: Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>;
+  /** Called when project name check completes. blockDeploy=true disables deploy; message is shown under the field. */
+  onProjectNameCheckResult?: (blockDeploy: boolean, message?: string) => void;
 }
 
-export function GeneralSection({ config, updateConfig, validationError, preloadedGitHubRepos }: GeneralSectionProps) {
+const PROJECT_NAME_CHECK_DEBOUNCE_MS = 400;
+
+export function GeneralSection({ config, updateConfig, validationError, preloadedGitHubRepos, onProjectNameCheckResult }: GeneralSectionProps) {
   const [checkingName, setCheckingName] = useState(false);
   const [nameAvailable, setNameAvailable] = useState<boolean | null>(null);
+  const [projectNameCheckMessage, setProjectNameCheckMessage] = useState<string | null>(null);
   const [repoSelectorOpen, setRepoSelectorOpen] = useState(false);
   const [installModalOpen, setInstallModalOpen] = useState(false);
   const [githubAppInstalled, setGithubAppInstalled] = useState(false);
@@ -179,20 +185,52 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
     }
   };
 
-  const handleProjectNameBlur = async () => {
-    if (!config.projectName) return;
-    
-    setCheckingName(true);
-    try {
-      // TODO: Implement actual name check against backend
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setNameAvailable(true);
-    } catch {
-      setNameAvailable(false);
-    } finally {
-      setCheckingName(false);
+  // Run project name check whenever projectName or apiVersion change (debounced; also runs when autopopulated e.g. from GitHub spec)
+  useEffect(() => {
+    const name = config.projectName?.trim();
+    const version = config.apiVersion?.trim() || '1.0.0';
+
+    if (!name) {
+      setNameAvailable(null);
+      setProjectNameCheckMessage(null);
+      onProjectNameCheckResult?.(false);
+      return;
     }
-  };
+
+    const timeoutId = window.setTimeout(async () => {
+      setCheckingName(true);
+      setProjectNameCheckMessage(null);
+      onProjectNameCheckResult?.(false);
+      try {
+        const result = await api.checkProjectName(name, version);
+
+        // Block deploy: Scenario 1 (same team, same version exists) or Scenario 3 (other team owns name)
+        const blockDeploy =
+          (result.exists && result.api_version !== null && result.message?.includes('already created this project with this version')) ||
+          (result.exists && result.api_version === null && result.message?.includes('Another team owns'));
+
+        if (blockDeploy) {
+          setNameAvailable(false);
+          setProjectNameCheckMessage(result.message ?? 'This project name or version is not available.');
+          onProjectNameCheckResult?.(true, result.message);
+        } else {
+          setNameAvailable(true);
+          setProjectNameCheckMessage(null);
+          onProjectNameCheckResult?.(false);
+        }
+      } catch {
+        setNameAvailable(false);
+        const message = 'Could not verify project name. Try again or deploy anyway.';
+        setProjectNameCheckMessage(message);
+        onProjectNameCheckResult?.(false); // Don't block deploy on network/API error
+      } finally {
+        setCheckingName(false);
+      }
+    }, PROJECT_NAME_CHECK_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onProjectNameCheckResult is intentionally omitted to avoid resetting debounce on every parent render
+  }, [config.projectName, config.apiVersion]);
 
   const handleSourceTypeChange = (type: SourceType) => {
     updateConfig({ sourceType: type });
@@ -216,8 +254,7 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
               placeholder="myawesomeapi"
               value={config.projectName}
               onChange={(e) => updateConfig({ projectName: e.target.value })}
-              onBlur={handleProjectNameBlur}
-              className={`pr-10 ${validationError === 'project-name' ? 'border-red-500 ring-2 ring-red-500 ring-offset-2' : ''}`}
+              className={`pr-10 ${validationError === 'project-name' || nameAvailable === false ? 'border-red-500 ring-2 ring-red-500 ring-offset-2' : ''}`}
             />
             {checkingName && (
               <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
@@ -244,6 +281,12 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
             Your API will be available at: <span className="font-mono text-blue-600">
               {config.projectName}.apiblaze.com/{config.apiVersion}
             </span>
+          </p>
+        )}
+        {projectNameCheckMessage && nameAvailable === false && (
+          <p className="text-sm text-red-600 mt-2 flex items-center gap-1.5" role="alert">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            {projectNameCheckMessage}
           </p>
         )}
       </div>

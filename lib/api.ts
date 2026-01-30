@@ -130,6 +130,23 @@ class ApiClient {
     if (apiVersion) queryParams.append('api_version', apiVersion);
     return this.request<{ exists: boolean; project_id?: string; api_version?: string }>(`/projects/check?${queryParams.toString()}`);
   }
+
+  async checkProjectName(projectName: string, apiVersion: string): Promise<{
+    exists: boolean;
+    project_id: string | null;
+    api_version: string | null;
+    message?: string;
+  }> {
+    const queryParams = new URLSearchParams();
+    queryParams.set('projectName', projectName);
+    queryParams.set('apiVersion', apiVersion);
+    return this.request<{
+      exists: boolean;
+      project_id: string | null;
+      api_version: string | null;
+      message?: string;
+    }>(`/projects/checkProjectName?${queryParams.toString()}`);
+  }
   
   async getProject(id: string): Promise<Project> {
     return this.request<Project>(`/proxies/${id}`);
