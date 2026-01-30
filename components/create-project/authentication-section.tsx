@@ -699,9 +699,7 @@ function EditModeManagementUI({
                                 {/* JWKS Display */}
                                 {clientDetails?.jwks && (() => {
                                   const clientId = clientDetails?.client_id || clientDetails?.clientId;
-                                  const projectName = project?.project_id || 'project';
-                                  const apiVersion = project?.api_version || '1.0.0';
-                                  const jwksUrl = `https://${projectName}.auth.apiblaze.com/${apiVersion}/${clientId}/.well-known/jwk.json`;
+                                  const jwksUrl = `https://auth.apiblaze.com/${clientId}/.well-known/jwks.json`;
                                   
                                   return (
                                     <div className="flex items-center gap-2 mt-0.5">
