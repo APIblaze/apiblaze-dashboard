@@ -57,6 +57,11 @@ export function UserMenu() {
             <p className="text-xs leading-none text-muted-foreground">
               {user.email}
             </p>
+            {user.id && (
+              <p className="text-[0.375rem] leading-none text-muted-foreground font-mono">
+                {user.id.replace(/^user_/, '')}
+              </p>
+            )}
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
