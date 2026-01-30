@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Plus, Users, Key, UserCog, Settings, Trash2, MoreVertical } from 'lucide-react';
+import { Loader2, Plus, UserCog, Settings, Trash2, MoreVertical } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -170,18 +170,10 @@ export function AuthConfigList() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 gap-4">
                     <div className="text-center">
                       <div className="text-2xl font-bold">{config.app_clients_count || 0}</div>
                       <div className="text-xs text-muted-foreground">App Clients</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-2xl font-bold">{config.users_count || 0}</div>
-                      <div className="text-xs text-muted-foreground">Users</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-2xl font-bold">{config.groups_count || 0}</div>
-                      <div className="text-xs text-muted-foreground">Groups</div>
                     </div>
                   </div>
                 </CardContent>

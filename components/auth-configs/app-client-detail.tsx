@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ArrowLeft, Settings, Trash2, Copy, Check, Star } from 'lucide-react';
+import { Loader2, ArrowLeft, Settings, Trash2, Copy, Check, Star, Eye } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AppClient } from '@/types/auth-config';
 import { ProviderList } from './provider-list';
+import { UsersList } from './users-list';
+import { GroupsList } from './groups-list';
 import { AppClientFormDialog } from './app-client-form-dialog';
 import {
   Dialog,
@@ -38,6 +40,8 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const [loadingReveal, setLoadingReveal] = useState(false);
 
   const handleCopy = async (text: string) => {
     try {
@@ -55,6 +59,27 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
         description: 'Failed to copy to clipboard. Please try again.',
         variant: 'destructive',
       });
+    }
+  };
+
+  const handleRevealSecret = async () => {
+    try {
+      setLoadingReveal(true);
+      const { clientSecret } = await api.getAppClientSecret(authConfigId, clientId);
+      setRevealedSecret(clientSecret);
+      toast({
+        title: 'Secret revealed',
+        description: 'Copy and store it securely. It will not be shown again until you click Reveal.',
+      });
+    } catch (error) {
+      console.error('Failed to reveal client secret:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to retrieve client secret',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingReveal(false);
     }
   };
 
@@ -157,20 +182,73 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
 
           <Card>
             <CardHeader>
+              <CardTitle className="text-sm font-medium">Client Secret</CardTitle>
+              <CardDescription>Reveal only when needed. Never share or log.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {revealedSecret !== null ? (
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-sm font-mono break-all bg-muted px-2 py-1 rounded">
+                    {revealedSecret}
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleCopy(revealedSecret)}
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRevealSecret}
+                  disabled={loadingReveal}
+                >
+                  {loadingReveal ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Eye className="h-4 w-4 mr-2" />
+                  )}
+                  {loadingReveal ? 'Loading...' : 'Reveal'}
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle className="text-sm font-medium">Token Expiry Settings</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Refresh Token:</span>
-                <span>{Math.floor(appClient.refreshTokenExpiry / 86400)} days</span>
+                <span>
+                  {typeof appClient.refreshTokenExpiry === 'number'
+                    ? `${Math.floor(appClient.refreshTokenExpiry / 86400)} days`
+                    : '—'}
+                </span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">ID Token:</span>
-                <span>{Math.floor(appClient.idTokenExpiry / 60)} minutes</span>
+                <span>
+                  {typeof appClient.idTokenExpiry === 'number'
+                    ? `${Math.floor(appClient.idTokenExpiry / 60)} minutes`
+                    : '—'}
+                </span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Access Token:</span>
-                <span>{Math.floor(appClient.accessTokenExpiry / 60)} minutes</span>
+                <span>
+                  {typeof appClient.accessTokenExpiry === 'number'
+                    ? `${Math.floor(appClient.accessTokenExpiry / 60)} minutes`
+                    : '—'}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -242,6 +320,16 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
         <div>
           <ProviderList authConfigId={authConfigId} clientId={clientId} onRefresh={() => invalidateAndRefetch()} />
         </div>
+
+        {/* Users Section (per app client) */}
+        <div>
+          <UsersList authConfigId={authConfigId} clientId={clientId} onRefresh={() => invalidateAndRefetch()} />
+        </div>
+
+        {/* Groups Section (per app client) */}
+        <div>
+          <GroupsList authConfigId={authConfigId} clientId={clientId} onRefresh={() => invalidateAndRefetch()} />
+        </div>
       </div>
 
       {/* Edit Dialog */}
@@ -260,7 +348,7 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
             <DialogTitle>Delete App Client?</DialogTitle>
             <DialogDescription>
               This action cannot be undone. This will permanently delete the app client
-              {appClient && ` "${appClient.name}"`} and all associated providers.
+              {appClient && ` "${appClient.name}"`} and all associated providers, users, and groups.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

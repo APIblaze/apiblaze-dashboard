@@ -1638,6 +1638,20 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     }
   }, [isEditMode, config.authConfigId, selectedAuthConfigId]);
 
+  // In create mode, sync selectedAuthConfigId from config.authConfigId so prefill or future flows trigger the load effect
+  useEffect(() => {
+    if (isEditMode || !config.authConfigId || config.authConfigId === selectedAuthConfigId) return;
+    setSelectedAuthConfigId(config.authConfigId);
+  }, [isEditMode, config.authConfigId, selectedAuthConfigId]);
+
+  // On a new project, prepopulate Auth Config Name with {projectName}-authConfig when project name is set (only while field is empty)
+  useEffect(() => {
+    if (isEditMode || project) return;
+    if (!config.projectName || config.userGroupName !== '') return;
+    updateConfig({ userGroupName: `${config.projectName}-authConfig` });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.projectName, isEditMode, project]);
+
   // Get the determined authConfigId (same logic as in EditModeManagementUI)
   const determinedAuthConfigId = useMemo(() => {
     if (!isEditMode || !project) {
@@ -1780,7 +1794,11 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           <Input
             id="userGroupName"
             placeholder={
-              loadingAuthConfigs ? "Loading..." : "Enter a unique name (e.g., my-api-users)"
+              loadingAuthConfigs
+                ? "Loading..."
+                : config.projectName
+                  ? `Enter a unique name (e.g., ${config.projectName}-authConfig)`
+                  : "Enter a unique name (e.g., my-project-authConfig)"
             }
             value={config.userGroupName}
             onChange={(e) => updateConfig({ userGroupName: e.target.value })}
@@ -1819,7 +1837,8 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   <DropdownMenuItem
                     key={pool.id}
                     onClick={() => {
-                      updateConfig({ userGroupName: pool.name });
+                      updateConfig({ userGroupName: pool.name, authConfigId: pool.id, useAuthConfig: true });
+                      setSelectedAuthConfigId(pool.id);
                     }}
                   >
                     {pool.name}
@@ -2211,7 +2230,8 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                     variant="outline"
                     className="w-full justify-start"
                     onClick={() => {
-                      updateConfig({ userGroupName: pool.name });
+                      updateConfig({ userGroupName: pool.name, authConfigId: pool.id, useAuthConfig: true });
+                      setSelectedAuthConfigId(pool.id);
                       setAuthConfigSelectModalOpen(false);
                     }}
                   >

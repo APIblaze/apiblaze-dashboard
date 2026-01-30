@@ -159,7 +159,7 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
                         {PROVIDER_TYPE_LABELS[provider.type]}
                       </CardTitle>
                       <CardDescription className="font-mono text-xs break-all">
-                        {provider.clientId.substring(0, 30)}...
+                        {(provider.clientId ?? (provider as { client_id?: string }).client_id ?? '').substring(0, 30)}...
                       </CardDescription>
                     </div>
                     <DropdownMenu>
@@ -193,7 +193,7 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Token Type:</span>
                     <Badge variant="secondary">
-                      {provider.tokenType === 'apiblaze' ? 'APIBlaze' : 'Third Party'}
+                      {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'apiblaze' ? 'APIBlaze' : 'Third Party'}
                     </Badge>
                   </div>
                   {provider.domain && (

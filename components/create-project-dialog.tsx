@@ -121,7 +121,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     uploadedFile: null,
     
     // Authentication
-    userGroupName: 'my-api-users',
+    userGroupName: '',
     enableApiKey: true,
     enableSocialAuth: false,
         useAuthConfig: false,

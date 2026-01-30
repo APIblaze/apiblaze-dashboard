@@ -355,6 +355,17 @@ export class APIBlazeClient {
     });
   }
 
+  async getAppClientSecret(
+    userClaims: UserAssertionClaims,
+    authConfigId: string,
+    clientId: string
+  ): Promise<{ clientSecret: string }> {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/secret`, {
+      method: 'GET',
+      userClaims,
+    });
+  }
+
   async updateAppClient(
     userClaims: UserAssertionClaims,
     authConfigId: string,
@@ -427,6 +438,18 @@ export class APIBlazeClient {
   ) {
     return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}`, {
       method: 'DELETE',
+      userClaims,
+    });
+  }
+
+  async getProviderSecret(
+    userClaims: UserAssertionClaims,
+    authConfigId: string,
+    clientId: string,
+    providerId: string
+  ): Promise<{ clientSecret: string }> {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}/secret`, {
+      method: 'GET',
       userClaims,
     });
   }

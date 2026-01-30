@@ -6,13 +6,14 @@ import { Users, Plus } from 'lucide-react';
 
 interface UsersListProps {
   authConfigId: string;
+  clientId?: string;
   onRefresh?: () => void;
 }
 
-export function UsersList({ authConfigId, onRefresh }: UsersListProps) {
-  // TODO: Implement users management when backend API is available
-  // This is a placeholder component that shows the structure
-  
+export function UsersList({ authConfigId, clientId, onRefresh }: UsersListProps) {
+  // TODO: Implement users management when backend API is available (per app client)
+  const scopeLabel = clientId ? 'app client' : 'auth config';
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -20,7 +21,7 @@ export function UsersList({ authConfigId, onRefresh }: UsersListProps) {
         <div>
           <h3 className="text-lg font-semibold">Users</h3>
           <p className="text-muted-foreground text-sm mt-1">
-            Manage users in this auth config
+            Manage users for this {scopeLabel}
           </p>
         </div>
         <Button disabled>
@@ -38,7 +39,10 @@ export function UsersList({ authConfigId, onRefresh }: UsersListProps) {
             User management functionality will be available once the backend API is implemented.
           </p>
           <p className="text-sm text-muted-foreground">
-            Auth Config ID: <code className="font-mono">{authConfigId}</code>
+            Auth Config: <code className="font-mono">{authConfigId}</code>
+            {clientId && (
+              <> · App Client: <code className="font-mono">{clientId}</code></>
+            )}
           </p>
         </CardContent>
       </Card>

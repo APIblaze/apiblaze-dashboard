@@ -6,13 +6,14 @@ import { UserCog, Plus } from 'lucide-react';
 
 interface GroupsListProps {
   authConfigId: string;
+  clientId?: string;
   onRefresh?: () => void;
 }
 
-export function GroupsList({ authConfigId, onRefresh }: GroupsListProps) {
-  // TODO: Implement groups management when backend API is available
-  // This is a placeholder component that shows the structure
-  
+export function GroupsList({ authConfigId, clientId, onRefresh }: GroupsListProps) {
+  // TODO: Implement groups management when backend API is available (per app client)
+  const scopeLabel = clientId ? 'app client' : 'auth config';
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -20,7 +21,7 @@ export function GroupsList({ authConfigId, onRefresh }: GroupsListProps) {
         <div>
           <h3 className="text-lg font-semibold">Groups</h3>
           <p className="text-muted-foreground text-sm mt-1">
-            Manage groups in this auth config
+            Manage groups for this {scopeLabel}
           </p>
         </div>
         <Button disabled>
@@ -38,7 +39,10 @@ export function GroupsList({ authConfigId, onRefresh }: GroupsListProps) {
             Group management functionality will be available once the backend API is implemented.
           </p>
           <p className="text-sm text-muted-foreground">
-            Auth Config ID: <code className="font-mono">{authConfigId}</code>
+            Auth Config: <code className="font-mono">{authConfigId}</code>
+            {clientId && (
+              <> · App Client: <code className="font-mono">{clientId}</code></>
+            )}
           </p>
         </CardContent>
       </Card>

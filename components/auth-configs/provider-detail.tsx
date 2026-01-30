@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ArrowLeft, Settings, Trash2, Copy, Check } from 'lucide-react';
+import { Loader2, ArrowLeft, Settings, Trash2, Copy, Check, Eye } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
@@ -48,6 +48,8 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const [loadingReveal, setLoadingReveal] = useState(false);
 
   const handleCopy = async (text: string) => {
     try {
@@ -96,6 +98,27 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
   const handleSuccess = async () => {
     setEditDialogOpen(false);
     await invalidateAndRefetch();
+  };
+
+  const handleRevealSecret = async () => {
+    try {
+      setLoadingReveal(true);
+      const { clientSecret } = await api.getProviderSecret(authConfigId, clientId, providerId);
+      setRevealedSecret(clientSecret);
+      toast({
+        title: 'Secret revealed',
+        description: 'Copy and store it securely. It will not be shown again until you click Reveal.',
+      });
+    } catch (error) {
+      console.error('Failed to reveal provider secret:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to retrieve provider secret',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingReveal(false);
+    }
   };
 
   if (loading) {
@@ -149,11 +172,11 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2">
-                <code className="flex-1 text-sm font-mono break-all">{provider.clientId}</code>
+                <code className="flex-1 text-sm font-mono break-all">{provider.clientId ?? (provider as { client_id?: string }).client_id ?? ''}</code>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => handleCopy(provider.clientId)}
+                  onClick={() => handleCopy(provider.clientId ?? (provider as { client_id?: string }).client_id ?? '')}
                 >
                   {copied ? (
                     <Check className="h-4 w-4" />
@@ -171,8 +194,49 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
             </CardHeader>
             <CardContent>
               <Badge variant="secondary">
-                {provider.tokenType === 'apiblaze' ? 'APIBlaze' : 'Third Party'}
+                {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'apiblaze' ? 'APIBlaze' : 'Third Party'}
               </Badge>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Client Secret</CardTitle>
+              <CardDescription>Reveal only when needed. Never share or log.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {revealedSecret !== null ? (
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-sm font-mono break-all bg-muted px-2 py-1 rounded">
+                    {revealedSecret}
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleCopy(revealedSecret)}
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRevealSecret}
+                  disabled={loadingReveal}
+                >
+                  {loadingReveal ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Eye className="h-4 w-4 mr-2" />
+                  )}
+                  {loadingReveal ? 'Loading...' : 'Reveal'}
+                </Button>
+              )}
             </CardContent>
           </Card>
         </div>

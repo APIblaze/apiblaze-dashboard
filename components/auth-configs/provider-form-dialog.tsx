@@ -65,10 +65,10 @@ export function ProviderFormDialog({
     if (open) {
       if (provider) {
         setType(provider.type);
-        setClientIdValue(provider.clientId);
-        setClientSecret(provider.clientSecret);
+        setClientIdValue(provider.clientId ?? (provider as { client_id?: string }).client_id ?? '');
+        setClientSecret(provider.clientSecret ?? (provider as { client_secret?: string }).client_secret ?? '');
         setDomain(provider.domain || '');
-        setTokenType(provider.tokenType || 'apiblaze');
+        setTokenType(((provider.tokenType ?? (provider as { token_type?: string }).token_type) ?? 'apiblaze') as 'apiblaze' | 'thirdParty');
       } else {
         setType('google');
         setClientIdValue('');

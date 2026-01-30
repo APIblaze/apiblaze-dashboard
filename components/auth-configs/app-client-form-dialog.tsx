@@ -55,12 +55,12 @@ export function AppClientFormDialog({
     if (open) {
       if (appClient) {
         setName(appClient.name);
-        setRefreshTokenExpiry(appClient.refreshTokenExpiry);
-        setIdTokenExpiry(appClient.idTokenExpiry);
-        setAccessTokenExpiry(appClient.accessTokenExpiry);
-        setAuthorizedCallbackUrls(appClient.authorizedCallbackUrls || []);
-        setSignoutUris(appClient.signoutUris || []);
-        setScopes(appClient.scopes || []);
+        setRefreshTokenExpiry(appClient.refreshTokenExpiry ?? 2592000);
+        setIdTokenExpiry(appClient.idTokenExpiry ?? 3600);
+        setAccessTokenExpiry(appClient.accessTokenExpiry ?? 3600);
+        setAuthorizedCallbackUrls(appClient.authorizedCallbackUrls ?? []);
+        setSignoutUris(appClient.signoutUris ?? []);
+        setScopes(appClient.scopes ?? ['email', 'openid', 'profile']);
         setClientSecret(null);
       } else {
         setName('');

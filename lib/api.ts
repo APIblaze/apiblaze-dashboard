@@ -274,6 +274,11 @@ class ApiClient {
     return this.request<AppClientResponse>(`/auth-configs/${authConfigId}/app-clients/${clientId}`);
   }
 
+  /** Reveal (decrypt) app client secret for dashboard. Use only when user clicks Reveal. */
+  async getAppClientSecret(authConfigId: string, clientId: string): Promise<{ clientSecret: string }> {
+    return this.request<{ clientSecret: string }>(`/auth-configs/${authConfigId}/app-clients/${clientId}/secret`);
+  }
+
   async createAppClient(authConfigId: string, data: {
     name: string;
     refreshTokenExpiry?: number;
@@ -345,6 +350,11 @@ class ApiClient {
     return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}`, {
       method: 'DELETE',
     });
+  }
+
+  /** Reveal (decrypt) provider client secret for dashboard. Use only when user clicks Reveal. */
+  async getProviderSecret(authConfigId: string, clientId: string, providerId: string): Promise<{ clientSecret: string }> {
+    return this.request<{ clientSecret: string }>(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}/secret`);
   }
 
   /**

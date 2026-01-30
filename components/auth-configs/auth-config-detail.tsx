@@ -2,17 +2,14 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, ArrowLeft, Settings, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AuthConfig } from '@/types/auth-config';
 import { AppClientList } from './app-client-list';
-import { UsersList } from './users-list';
-import { GroupsList } from './groups-list';
 import { AuthConfigFormDialog } from './auth-config-form-dialog';
 import {
   Dialog,
@@ -38,8 +35,6 @@ export function AuthConfigDetail({ authConfigId, onBack }: AuthConfigDetailProps
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [activeTab, setActiveTab] = useState('app-clients');
-
   const handleDeleteConfirm = async () => {
     if (!authConfig) return;
 
@@ -113,7 +108,7 @@ export function AuthConfigDetail({ authConfigId, onBack }: AuthConfigDetailProps
           </div>
         </div>
 
-        {/* Stats Cards */}
+        {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card>
             <CardHeader className="pb-3">
@@ -123,41 +118,12 @@ export function AuthConfigDetail({ authConfigId, onBack }: AuthConfigDetailProps
               <div className="text-2xl font-bold">{authConfig.app_clients_count || 0}</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Users</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{authConfig.users_count || 0}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Groups</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{authConfig.groups_count || 0}</div>
-            </CardContent>
-          </Card>
         </div>
 
-        {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList>
-            <TabsTrigger value="app-clients">App Clients</TabsTrigger>
-            <TabsTrigger value="users">Users</TabsTrigger>
-            <TabsTrigger value="groups">Groups</TabsTrigger>
-          </TabsList>
-          <TabsContent value="app-clients" className="mt-6">
-            <AppClientList authConfigId={authConfigId} onRefresh={() => invalidateAndRefetch()} />
-          </TabsContent>
-          <TabsContent value="users" className="mt-6">
-            <UsersList authConfigId={authConfigId} onRefresh={() => invalidateAndRefetch()} />
-          </TabsContent>
-          <TabsContent value="groups" className="mt-6">
-            <GroupsList authConfigId={authConfigId} onRefresh={() => invalidateAndRefetch()} />
-          </TabsContent>
-        </Tabs>
+        {/* App Clients */}
+        <div className="mt-6">
+          <AppClientList authConfigId={authConfigId} onRefresh={() => invalidateAndRefetch()} />
+        </div>
       </div>
 
       {/* Edit Dialog */}
@@ -175,8 +141,7 @@ export function AuthConfigDetail({ authConfigId, onBack }: AuthConfigDetailProps
             <DialogTitle>Delete Auth Config?</DialogTitle>
             <DialogDescription>
               This action cannot be undone. This will permanently delete the auth config
-              {authConfig && ` "${authConfig.name}"`} and all associated data including app clients,
-              providers, users, and groups.
+              {authConfig && ` "${authConfig.name}"`} and all associated app clients and providers.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
