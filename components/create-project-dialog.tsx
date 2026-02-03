@@ -931,6 +931,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                 validationError={validationError}
                 preloadedGitHubRepos={preloadedGitHubRepos}
                 onProjectNameCheckResult={(blockDeploy) => setProjectNameCheckBlockDeploy(blockDeploy)}
+                editingProject={currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null}
               />
             </TabsContent>
 

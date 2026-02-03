@@ -39,6 +39,23 @@ NEXTAUTH_SECRET=your-random-secret-string-here
 # Generate with: openssl rand -base64 32
 ```
 
+## Test Environment (code.julienjacquet.com:3000)
+
+For your test deployment at `http://code.julienjacquet.com:3000`, set these so login redirects back to the test env instead of production:
+
+```bash
+NEXTAUTH_URL=http://code.julienjacquet.com:3000
+NEXT_PUBLIC_DASHBOARD_URL=http://code.julienjacquet.com:3000
+NEXT_PUBLIC_APP_URL=http://code.julienjacquet.com:3000
+```
+
+**GitHub OAuth App** (Settings → Developer settings → OAuth Apps → your app): add to **Authorization callback URL**:
+```
+http://code.julienjacquet.com:3000/api/auth/callback/github
+```
+
+Without these, NextAuth uses `NEXTAUTH_URL` (production) to tell GitHub where to redirect, so you end up on `https://dashboard.apiblaze.com/dashboard` after login.
+
 ## Optional Variables
 
 ### Portal Callback URL (for OAuth configuration)

@@ -21,11 +21,13 @@ interface GeneralSectionProps {
   preloadedGitHubRepos?: Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>;
   /** Called when project name check completes. blockDeploy=true disables deploy; message is shown under the field. */
   onProjectNameCheckResult?: (blockDeploy: boolean, message?: string) => void;
+  /** When editing an existing project, pass its project_id and api_version so "already exists" for this project is treated as valid. */
+  editingProject?: { project_id: string; api_version: string } | null;
 }
 
 const PROJECT_NAME_CHECK_DEBOUNCE_MS = 400;
 
-export function GeneralSection({ config, updateConfig, validationError, preloadedGitHubRepos, onProjectNameCheckResult }: GeneralSectionProps) {
+export function GeneralSection({ config, updateConfig, validationError, preloadedGitHubRepos, onProjectNameCheckResult, editingProject }: GeneralSectionProps) {
   const [checkingName, setCheckingName] = useState(false);
   const [nameAvailable, setNameAvailable] = useState<boolean | null>(null);
   const [projectNameCheckMessage, setProjectNameCheckMessage] = useState<string | null>(null);
@@ -204,10 +206,17 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
       try {
         const result = await api.checkProjectName(name, version);
 
-        // Block deploy: Scenario 1 (same team, same version exists) or Scenario 3 (other team owns name)
+        // When editing this same project, "already exists with this version" is expected — don't block
+        const isEditingThisProject =
+          editingProject &&
+          name.toLowerCase() === editingProject.project_id.toLowerCase() &&
+          version === (editingProject.api_version || '1.0.0');
+
+        // Block deploy: Scenario 1 (same team, same version exists) or Scenario 3 (other team owns name) — unless we're editing that project
         const blockDeploy =
-          (result.exists && result.api_version !== null && result.message?.includes('already created this project with this version')) ||
-          (result.exists && result.api_version === null && result.message?.includes('Another team owns'));
+          !isEditingThisProject &&
+          ((result.exists && result.api_version !== null && result.message?.includes('already created this project with this version')) ||
+            (result.exists && result.api_version === null && result.message?.includes('Another team owns')));
 
         if (blockDeploy) {
           setNameAvailable(false);
@@ -230,7 +239,7 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
 
     return () => window.clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onProjectNameCheckResult is intentionally omitted to avoid resetting debounce on every parent render
-  }, [config.projectName, config.apiVersion]);
+  }, [config.projectName, config.apiVersion, editingProject?.project_id, editingProject?.api_version]);
 
   const handleSourceTypeChange = (type: SourceType) => {
     updateConfig({ sourceType: type });
