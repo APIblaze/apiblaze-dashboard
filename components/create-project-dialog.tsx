@@ -184,7 +184,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       uploadedFile: null,
       
       // Authentication - extract from config
-      userGroupName: '',
+      userGroupName: (projectConfig?.auth_config_name as string) || '',
       enableApiKey: (projectConfig?.auth_type as string) !== 'none',
       enableSocialAuth: (projectConfig?.auth_type as string) === 'oauth' || !!(projectConfig?.auth_config_id as string),
       useAuthConfig: !!(projectConfig?.auth_config_id as string),

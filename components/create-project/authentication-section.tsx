@@ -221,6 +221,72 @@ function EditModeManagementUI({
     refreshTokenExpiry: number;
     idTokenExpiry: number;
   }>>({});
+  const [newCallbackUrlByClient, setNewCallbackUrlByClient] = useState<Record<string, string>>({});
+  const [savingCallbackUrlsForClient, setSavingCallbackUrlsForClient] = useState<string | null>(null);
+
+  const validateHttpsUrlForEdit = (url: string): { valid: boolean; error?: string } => {
+    try {
+      const urlObj = new URL(url);
+      if (urlObj.protocol !== 'https:') {
+        return { valid: false, error: 'URL must use HTTPS protocol' };
+      }
+      return { valid: true };
+    } catch {
+      return { valid: false, error: 'Invalid URL format' };
+    }
+  };
+
+  const getClientCallbackUrls = (clientId: string): string[] => {
+    const detail = appClientDetails[clientId] as AppClientResponse | undefined;
+    return (detail?.authorizedCallbackUrls ?? detail?.authorized_callback_urls ?? []) as string[];
+  };
+
+  const addCallbackUrlForClient = async (clientId: string) => {
+    const url = (newCallbackUrlByClient[clientId] ?? '').trim();
+    if (!url) return;
+    const current = getClientCallbackUrls(clientId);
+    if (current.includes(url)) {
+      alert('This URL is already in the list');
+      return;
+    }
+    const validation = validateHttpsUrlForEdit(url);
+    if (!validation.valid) {
+      alert(validation.error || 'Invalid URL');
+      return;
+    }
+    if (!currentAuthConfigId || !teamId) return;
+    setSavingCallbackUrlsForClient(clientId);
+    try {
+      await api.updateAppClient(currentAuthConfigId, clientId, {
+        authorizedCallbackUrls: [...current, url],
+      });
+      setNewCallbackUrlByClient(prev => ({ ...prev, [clientId]: '' }));
+      await invalidateAndRefetch(teamId);
+    } catch (err) {
+      console.error('Error adding callback URL:', err);
+      alert('Failed to add callback URL');
+    } finally {
+      setSavingCallbackUrlsForClient(null);
+    }
+  };
+
+  const removeCallbackUrlForClient = async (clientId: string, urlToRemove: string) => {
+    const current = getClientCallbackUrls(clientId);
+    const next = current.filter(u => u !== urlToRemove);
+    if (!currentAuthConfigId || !teamId) return;
+    setSavingCallbackUrlsForClient(clientId);
+    try {
+      await api.updateAppClient(currentAuthConfigId, clientId, {
+        authorizedCallbackUrls: next,
+      });
+      await invalidateAndRefetch(teamId);
+    } catch (err) {
+      console.error('Error removing callback URL:', err);
+      alert('Failed to remove callback URL');
+    } finally {
+      setSavingCallbackUrlsForClient(null);
+    }
+  };
 
   // Sync config from auth config when we have a single one
   useEffect(() => {
@@ -804,6 +870,7 @@ function EditModeManagementUI({
                             </div>
                           </div>
                           {clientDetails && (
+                            <>
                             <div className="space-y-3 pt-2 border-t border-blue-100">
                               <div className="space-y-2">
                                 <div>
@@ -886,6 +953,67 @@ function EditModeManagementUI({
                                       >
                                         {loadingSecret === client.id ? '...' : 'Reveal'}
                                       </Button>
+                                    )}
+                                  </div>
+                                </div>
+                                {/* Authorized callback URLs - below Client Secret, before Advanced Settings (editable, same UX as create mode) */}
+                                <div className="space-y-2">
+                                  <Label className="text-xs font-medium text-muted-foreground">Authorized callback URLs</Label>
+                                  <div className="flex gap-2">
+                                    <Input
+                                      value={newCallbackUrlByClient[client.id] ?? ''}
+                                      onChange={(e) => setNewCallbackUrlByClient(prev => ({ ...prev, [client.id]: e.target.value }))}
+                                      placeholder="https://example.com/callback"
+                                      className="text-xs"
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          addCallbackUrlForClient(client.id);
+                                        }
+                                      }}
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => addCallbackUrlForClient(client.id)}
+                                      disabled={savingCallbackUrlsForClient === client.id}
+                                    >
+                                      {savingCallbackUrlsForClient === client.id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <Plus className="h-3 w-3" />
+                                      )}
+                                    </Button>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2 mt-2">
+                                    {getClientCallbackUrls(client.id).length === 0 ? (
+                                      <p className="text-xs text-muted-foreground italic">None configured</p>
+                                    ) : (
+                                      getClientCallbackUrls(client.id).map((url: string, index: number) => (
+                                        <div
+                                          key={url}
+                                          className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs"
+                                        >
+                                          {index === 0 && (
+                                            <Badge variant="secondary" className="mr-1 text-xs">
+                                              <Star className="h-2 w-2 mr-1" />
+                                              Default
+                                            </Badge>
+                                          )}
+                                          <span className="break-all">{url}</span>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-4 w-4 p-0 shrink-0"
+                                            onClick={() => removeCallbackUrlForClient(client.id, url)}
+                                            disabled={savingCallbackUrlsForClient === client.id}
+                                          >
+                                            <X className="h-2 w-2" />
+                                          </Button>
+                                        </div>
+                                      ))
                                     )}
                                   </div>
                                 </div>
@@ -1150,6 +1278,7 @@ function EditModeManagementUI({
                                 )}
                               </div>
                             </div>
+                            </>
                           )}
                         </div>
                       </CardContent>
@@ -1669,42 +1798,69 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     if (!isEditMode || !project || !determinedAuthConfigId) {
       return;
     }
-    
-    const authConfig = existingAuthConfigs.find(pool => pool.id === determinedAuthConfigId);
-    if (authConfig && (!config.userGroupName || config.userGroupName !== authConfig.name)) {
-      updateConfig({ userGroupName: authConfig.name, authConfigId: determinedAuthConfigId });
+    const nameToSet = existingAuthConfigs.find(pool => pool.id === determinedAuthConfigId)?.name;
+    if (nameToSet && (!config.userGroupName || config.userGroupName !== nameToSet)) {
+      updateConfig({ userGroupName: nameToSet, authConfigId: determinedAuthConfigId });
+      return;
+    }
+    // Fallback: fetch auth config by id when not in cache (e.g. list not yet loaded)
+    if (!config.userGroupName || config.userGroupName === '') {
+      let cancelled = false;
+      api.getAuthConfig(determinedAuthConfigId)
+        .then((ac) => {
+          if (!cancelled && ac?.name) {
+            updateConfig({ userGroupName: ac.name, authConfigId: determinedAuthConfigId });
+          }
+        })
+        .catch(() => { /* ignore */ });
+      return () => { cancelled = true; };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditMode, project, determinedAuthConfigId, config.userGroupName, existingAuthConfigs]);
 
   // Track which authConfigId we've already loaded data for to prevent duplicate loads
   const loadedAuthConfigIdRef = useRef<string | undefined>(undefined);
-  
-  // When selectedAuthConfigId changes, update config and load data - simplified to prevent loops
-  // NOTE: This only runs in CREATE mode. In EDIT mode, EditModeManagementUI handles loading.
+
+  // When user types in Auth Config Name: if it matches an existing auth config, select and load it; if non-empty and no match, clear selection (new auth config)
+  // Skip when name is empty to avoid clearing on initial load before edit-mode effect populates the name
   useEffect(() => {
-    // Skip entirely in edit mode - EditModeManagementUI handles it
-    if (isEditMode && project) {
-      return;
+    const name = (config.userGroupName ?? '').trim();
+    if (!name) return;
+    const match = existingAuthConfigs.find(pool => pool.name === name);
+    if (match) {
+      if (config.authConfigId !== match.id || selectedAuthConfigId !== match.id) {
+        loadedAuthConfigIdRef.current = undefined;
+        setSelectedAuthConfigId(match.id);
+        updateConfig({ authConfigId: match.id, userGroupName: match.name, useAuthConfig: true });
+      }
+    } else {
+      if (config.authConfigId != null || selectedAuthConfigId != null) {
+        loadedAuthConfigIdRef.current = undefined;
+        setSelectedAuthConfigId(undefined);
+        updateConfig({ authConfigId: undefined, useAuthConfig: false });
+      }
     }
-    
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.userGroupName]);
+
+  // When selectedAuthConfigId changes (user selected from search/dropdown/modal), load that auth config and replace all fields
+  // Runs in both create and edit mode so changing auth config always populates from the new one
+  useEffect(() => {
     if (!selectedAuthConfigId) {
       return;
     }
-    
-    // Skip if we've already loaded data for this authConfigId
+    // Skip if we've already loaded data for this authConfigId (avoids re-running on same selection)
     if (loadedAuthConfigIdRef.current === selectedAuthConfigId) {
       return;
     }
-    
-    // Mark as loading
     loadedAuthConfigIdRef.current = selectedAuthConfigId;
-    
+
     const ac = getAuthConfig(selectedAuthConfigId);
     if (ac) {
       updateConfig({
         authConfigId: selectedAuthConfigId,
         useAuthConfig: true,
+        userGroupName: ac.name,
         enableSocialAuth: ac.enableSocialAuth ?? false,
         enableApiKey: ac.enableApiKeyAuth ?? false,
         bringOwnProvider: ac.bringMyOwnOAuth ?? false,
@@ -1713,15 +1869,17 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
       updateConfig({ authConfigId: selectedAuthConfigId, useAuthConfig: true });
     }
     const clients = getAppClients(selectedAuthConfigId);
-    if (clients.length > 0 && !config.appClientId) {
+    if (clients.length > 0) {
       const defaultClient = clients.find(c => c.id === config.defaultAppClient) || clients[0];
       updateConfig({
         appClientId: defaultClient.id,
-        defaultAppClient: config.defaultAppClient || defaultClient.id,
+        defaultAppClient: defaultClient.id,
       });
+    } else {
+      updateConfig({ appClientId: undefined, defaultAppClient: undefined });
     }
     const first = clients[0];
-    if (first && config.useAuthConfig && !config.bringOwnProvider) {
+    if (first) {
       const provList = getProviders(selectedAuthConfigId, first.id);
       if (provList.length > 0) {
         const provider = provList[0] as SocialProviderResponse;
@@ -1734,11 +1892,15 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         });
       } else {
         setThirdPartyProvider(null);
-        updateConfig({ bringOwnProvider: false });
+        updateConfig({
+          bringOwnProvider: false,
+          identityProviderDomain: 'https://accounts.google.com',
+          identityProviderClientId: '',
+        });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAuthConfigId, isEditMode, project]);
+  }, [selectedAuthConfigId]);
 
   const handleProviderChange = (provider: SocialProvider) => {
     updateConfig({
@@ -1765,17 +1927,14 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
 
   const handleUseExistingAuthConfig = (appClient: AppClient & { authConfigId: string }) => {
     setSelectedAppClient(appClient);
+    loadedAuthConfigIdRef.current = undefined;
+    setSelectedAuthConfigId(appClient.authConfigId);
     updateConfig({
       useAuthConfig: true,
       authConfigId: appClient.authConfigId,
       appClientId: appClient.id,
-      // Clear bringOwnProvider when using existing AuthConfig
-      bringOwnProvider: false,
-      identityProviderClientId: '',
-      identityProviderClientSecret: '',
-      identityProviderDomain: '',
     });
-    setAuthConfigModalOpen(false); 
+    setAuthConfigModalOpen(false);
   };
 
   return (
@@ -1898,18 +2057,10 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         {/* In create mode, only show if enableSocialAuth is true */}
         {((isEditMode && project) || config.enableSocialAuth) && (
           <div className="space-y-4 pl-4 border-l-2 border-blue-200">
-            {/* Edit Mode: Show AuthConfig/AppClient/Provider Management UI + Bring My Own OAuth toggle */}
+            {/* Edit Mode: Bring My Own toggle above AppClients, then EditModeManagementUI (no provider editing menu) */}
             {isEditMode ? (
               <div className="space-y-4">
-                <EditModeManagementUI
-                  config={config}
-                  updateConfig={updateConfig}
-                  project={project}
-                  onProjectUpdate={onProjectUpdate}
-                  initialAuthConfigId={project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : config.authConfigId}
-                  teamId={teamId}
-                />
-                {/* Bring My Own OAuth Provider - show in edit mode so user can view/change */}
+                {/* Bring My Own OAuth Provider - above AppClients, toggle only (no provider editing menu in edit mode) */}
                 <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
                   <div className="space-y-1">
                     <Label htmlFor="bringOwnProvider-edit" className="text-sm font-medium">
@@ -1928,152 +2079,14 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                     onCheckedChange={(checked) => updateConfig({ bringOwnProvider: checked })}
                   />
                 </div>
-                {config.bringOwnProvider && (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="space-y-4">
-                      <div>
-                        <Label htmlFor="socialProvider-edit" className="text-sm">OAuth Provider</Label>
-                        <Select
-                          value={config.socialProvider}
-                          onValueChange={(value) => handleProviderChange(value as SocialProvider)}
-                        >
-                          <SelectTrigger className="mt-1" id="socialProvider-edit">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="google">Google</SelectItem>
-                            <SelectItem value="microsoft">Microsoft</SelectItem>
-                            <SelectItem value="github">GitHub</SelectItem>
-                            <SelectItem value="facebook">Facebook</SelectItem>
-                            <SelectItem value="auth0">Auth0</SelectItem>
-                            <SelectItem value="other">Other</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="identityProviderDomain-edit" className="text-sm">Identity Provider Domain</Label>
-                        <Input
-                          id="identityProviderDomain-edit"
-                          placeholder="https://accounts.google.com"
-                          value={config.identityProviderDomain}
-                          onChange={(e) => updateConfig({ identityProviderDomain: e.target.value })}
-                          className="mt-1"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="identityProviderClientId-edit" className="text-sm">Client ID</Label>
-                        <Input
-                          id="identityProviderClientId-edit"
-                          placeholder="your-client-id"
-                          value={config.identityProviderClientId}
-                          onChange={(e) => updateConfig({ identityProviderClientId: e.target.value })}
-                          className="mt-1"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="identityProviderClientSecret-edit" className="text-sm">Client Secret</Label>
-                        <Input
-                          id="identityProviderClientSecret-edit"
-                          type="password"
-                          placeholder="your-client-secret"
-                          value={config.identityProviderClientSecret}
-                          onChange={(e) => updateConfig({ identityProviderClientSecret: e.target.value })}
-                          className="mt-1"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="tokenType-edit" className="text-sm">Token Type</Label>
-                        <Select
-                          value={config.tokenType || 'apiblaze'}
-                          onValueChange={(value) => updateConfig({ tokenType: value as 'apiblaze' | 'thirdParty' })}
-                        >
-                          <SelectTrigger className="mt-1" id="tokenType-edit">
-                            <SelectValue>
-                              {config.tokenType === 'apiblaze'
-                                ? 'APIBlaze'
-                                : `${config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} token`}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="apiblaze">APIBlaze</SelectItem>
-                            <SelectItem value="thirdParty">
-                              {config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} token
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label className="text-sm">Authorized Scopes</Label>
-                        <p className="text-xs text-muted-foreground mb-2">
-                          Default mandatory scopes: email, openid, profile
-                        </p>
-                        <div className="flex flex-wrap gap-2 mb-2">
-                          {config.authorizedScopes.map((scope) => (
-                            <Badge key={scope} variant="secondary" className="text-xs">
-                              {scope}
-                              {!['email', 'openid', 'profile'].includes(scope) && (
-                                <X
-                                  className="ml-1 h-3 w-3 cursor-pointer"
-                                  onClick={() => removeScope(scope)}
-                                />
-                              )}
-                            </Badge>
-                          ))}
-                        </div>
-                        <div className="flex gap-2">
-                          <Input
-                            placeholder="Add custom scope"
-                            value={newScope}
-                            onChange={(e) => setNewScope(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                addScope();
-                              }
-                            }}
-                          />
-                          <Button type="button" size="sm" onClick={addScope}>
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-4">
-                      <Card className="border-orange-200 bg-orange-50/50">
-                        <CardHeader className="pb-3">
-                          <div className="flex items-start gap-2">
-                            <AlertCircle className="h-4 w-4 text-orange-600 mt-0.5" />
-                            <div>
-                              <CardTitle className="text-sm">Important</CardTitle>
-                              <CardDescription className="text-xs mt-1">
-                                Don&apos;t forget to add this authorized callback URL to your OAuth provider:
-                              </CardDescription>
-                            </div>
-                          </div>
-                        </CardHeader>
-                        <CardContent>
-                          <code className="text-xs bg-white px-2 py-1 rounded border block">
-                            https://callback.apiblaze.com
-                          </code>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardHeader>
-                          <CardTitle className="text-sm">
-                            {config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} Setup Guide
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <ol className="text-xs space-y-2 list-decimal list-inside text-muted-foreground">
-                            {PROVIDER_SETUP_GUIDES[config.socialProvider].map((step, index) => (
-                              <li key={index}>{step}</li>
-                            ))}
-                          </ol>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </div>
-                )}
+                <EditModeManagementUI
+                  config={config}
+                  updateConfig={updateConfig}
+                  project={project}
+                  onProjectUpdate={onProjectUpdate}
+                  initialAuthConfigId={config.authConfigId ?? (project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : undefined)}
+                  teamId={teamId}
+                />
               </div>
             ) : (
               /* Create Mode: Show AuthConfig data if selected AND social auth enabled, otherwise show third-party provider config */
