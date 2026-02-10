@@ -1616,6 +1616,31 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [loadingProvider, setLoadingProvider] = useState(false);
   const [authConfigSelectModalOpen, setAuthConfigSelectModalOpen] = useState(false);
+  const [newAllowedIssuer, setNewAllowedIssuer] = useState('');
+  const [newAllowedAudience, setNewAllowedAudience] = useState('');
+
+  const addAllowedIssuer = () => {
+    const v = newAllowedIssuer.trim();
+    if (!v) return;
+    const current = config.allowedIssuers ?? [];
+    if (current.includes(v)) return;
+    setNewAllowedIssuer('');
+    updateConfig({ allowedIssuers: [...current, v] });
+  };
+  const removeAllowedIssuer = (iss: string) => {
+    updateConfig({ allowedIssuers: (config.allowedIssuers ?? []).filter((i) => i !== iss) });
+  };
+  const addAllowedAudience = () => {
+    const v = newAllowedAudience.trim();
+    if (!v) return;
+    const current = config.allowedAudiences ?? [];
+    if (current.includes(v)) return;
+    setNewAllowedAudience('');
+    updateConfig({ allowedAudiences: [...current, v] });
+  };
+  const removeAllowedAudience = (aud: string) => {
+    updateConfig({ allowedAudiences: (config.allowedAudiences ?? []).filter((a) => a !== aud) });
+  };
 
   // Track if we've already loaded auth configs to prevent repeated API calls
   // Track initial enableSocialAuth, enableApiKey, and bringOwnProvider to avoid updating on mount
@@ -2035,50 +2060,56 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           />
         </div>
 
-        {/* Social Authentication */}
+        {/* Create a login page for this API */}
         <div className="flex items-center justify-between p-4 border rounded-lg">
           <div className="space-y-1">
             <Label htmlFor="enableSocialAuth" className="text-sm font-medium">
-              Enable Social Authentication
+              Create a login page for this API
             </Label>
             <p className="text-xs text-muted-foreground">
-              Users will authenticate using OAuth tokens (GitHub default)
+              Users will be able to authenticate using OAuth tokens (GitHub default)
             </p>
           </div>
           <Switch
             id="enableSocialAuth"
             checked={config.enableSocialAuth}
-            onCheckedChange={(checked) => updateConfig({ enableSocialAuth: checked })}
+            onCheckedChange={(checked) => {
+              const updates: Partial<ProjectConfig> = { enableSocialAuth: checked };
+              if (checked) {
+                updates.requestsAuthMode = 'authenticate';
+                updates.requestsAuthMethods = config.requestsAuthMethods?.includes('jwt')
+                  ? config.requestsAuthMethods
+                  : ['jwt', ...(config.requestsAuthMethods ?? []).filter((m) => m !== 'jwt')];
+              }
+              updateConfig(updates);
+            }}
           />
         </div>
 
-        {/* OAuth Provider Configuration */}
-        {/* In edit mode, always show EditModeManagementUI if we have a project (to load auth config data) */}
-        {/* In create mode, only show if enableSocialAuth is true */}
-        {((isEditMode && project) || config.enableSocialAuth) && (
+        {/* OAuth config - Bring My Own OAuth Provider, etc. - only when Create login page is on */}
+        {config.enableSocialAuth && (
           <div className="space-y-4 pl-4 border-l-2 border-blue-200">
-            {/* Edit Mode: Bring My Own toggle above AppClients, then EditModeManagementUI (no provider editing menu) */}
+            {/* Bring My Own OAuth Provider - first inside expanded section */}
+            <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
+              <div className="space-y-1">
+                <Label htmlFor="bringOwnProvider" className="text-sm font-medium">
+                  Bring My Own OAuth Provider
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Use your own Google, Auth0, or other OAuth provider
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Leave off to use default APIBlaze GitHub
+                </p>
+              </div>
+              <Switch
+                id="bringOwnProvider"
+                checked={config.bringOwnProvider}
+                onCheckedChange={(checked) => updateConfig({ bringOwnProvider: checked })}
+              />
+            </div>
             {isEditMode ? (
               <div className="space-y-4">
-                {/* Bring My Own OAuth Provider - above AppClients, toggle only (no provider editing menu in edit mode) */}
-                <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
-                  <div className="space-y-1">
-                    <Label htmlFor="bringOwnProvider-edit" className="text-sm font-medium">
-                      Bring My Own OAuth Provider
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Use your own Google, Auth0, or other OAuth provider
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Leave off to use default APIBlaze GitHub
-                    </p>
-                  </div>
-                  <Switch
-                    id="bringOwnProvider-edit"
-                    checked={config.bringOwnProvider}
-                    onCheckedChange={(checked) => updateConfig({ bringOwnProvider: checked })}
-                  />
-                </div>
                 <EditModeManagementUI
                   config={config}
                   updateConfig={updateConfig}
@@ -2089,9 +2120,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                 />
               </div>
             ) : (
-              /* Create Mode: Show AuthConfig data if selected AND social auth enabled, otherwise show third-party provider config */
               <div className="space-y-4">
-                {/* Show AuthConfig/AppClient/Provider info when useAuthConfig is true AND social auth is enabled */}
                 {config.useAuthConfig && config.authConfigId && config.enableSocialAuth ? (
                   <EditModeManagementUI
                     config={config}
@@ -2102,271 +2131,142 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   />
                 ) : (
                   <>
-                    {/* Bring Your Own Provider Toggle */}
-                    <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
-                      <div className="space-y-1">
-                        <Label htmlFor="bringOwnProvider" className="text-sm font-medium">
-                          Bring My Own OAuth Provider
-                        </Label>
-                        <p className="text-xs text-muted-foreground">
-                          Use your own Google, Auth0, or other OAuth provider 
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Leave off to use default APIBlaze GitHub
-                        </p>
-                      </div>
-                      <Switch
-                        id="bringOwnProvider"
-                        checked={config.bringOwnProvider}
-                        onCheckedChange={(checked) => updateConfig({ bringOwnProvider: checked })}
-                      />
-                    </div>
-
-                {/* Provider Configuration - Two Column Layout */}
-                {config.bringOwnProvider && (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Left Column - Configuration Fields */}
-                    <div className="space-y-4">
-                      {/* Provider Selection */}
-                      <div>
-                        <Label htmlFor="socialProvider" className="text-sm">OAuth Provider</Label>
-                        <Select
-                          value={config.socialProvider}
-                          onValueChange={(value) => handleProviderChange(value as SocialProvider)}
-                        >
-                          <SelectTrigger className="mt-1">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="google">Google</SelectItem>
-                            <SelectItem value="microsoft">Microsoft</SelectItem>
-                            <SelectItem value="github">GitHub</SelectItem>
-                            <SelectItem value="facebook">Facebook</SelectItem>
-                            <SelectItem value="auth0">Auth0</SelectItem>
-                            <SelectItem value="other">Other</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Provider Details */}
-                      <div>
-                        <Label htmlFor="identityProviderDomain" className="text-sm">
-                          Identity Provider Domain
-                        </Label>
-                        <Input
-                          id="identityProviderDomain"
-                          placeholder="https://accounts.google.com"
-                          value={config.identityProviderDomain}
-                          onChange={(e) => updateConfig({ identityProviderDomain: e.target.value })}
-                          className="mt-1"
-                        />
-                      </div>
-
-                      <div>
-                        <Label htmlFor="identityProviderClientId" className="text-sm">
-                          Client ID
-                        </Label>
-                        <Input
-                          id="identityProviderClientId"
-                          placeholder="your-client-id"
-                          value={config.identityProviderClientId}
-                          onChange={(e) => updateConfig({ identityProviderClientId: e.target.value })}
-                          className="mt-1"
-                        />
-                      </div>
-
-                      <div>
-                        <Label htmlFor="identityProviderClientSecret" className="text-sm">
-                          Client Secret
-                        </Label>
-                        <Input
-                          id="identityProviderClientSecret"
-                          type="password"
-                          placeholder="your-client-secret"
-                          value={config.identityProviderClientSecret}
-                          onChange={(e) => updateConfig({ identityProviderClientSecret: e.target.value })}
-                          className="mt-1"
-                        />
-                      </div>
-
-                      <div>
-                        <Label htmlFor="tokenType" className="text-sm">Token Type</Label>
-                        <Select
-                          value={config.tokenType || 'apiblaze'}
-                          onValueChange={(value) => updateConfig({ tokenType: value as 'apiblaze' | 'thirdParty' })}
-                        >
-                          <SelectTrigger className="mt-1">
-                            <SelectValue>
-                              {config.tokenType === 'apiblaze' 
-                                ? 'APIBlaze' 
-                                : `${config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} token`}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="apiblaze">APIBlaze</SelectItem>
-                            <SelectItem value="thirdParty">
-                              {config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} token
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Authorized Scopes */}
-                      <div>
-                        <Label className="text-sm">Authorized Scopes</Label>
-                        <p className="text-xs text-muted-foreground mb-2">
-                          Default mandatory scopes: email, openid, profile
-                        </p>
-                        <div className="flex flex-wrap gap-2 mb-2">
-                          {config.authorizedScopes.map((scope) => (
-                            <Badge key={scope} variant="secondary" className="text-xs">
-                              {scope}
-                              {!['email', 'openid', 'profile'].includes(scope) && (
-                                <X
-                                  className="ml-1 h-3 w-3 cursor-pointer"
-                                  onClick={() => removeScope(scope)}
-                                />
-                              )}
-                            </Badge>
-                          ))}
-                        </div>
-                        <div className="flex gap-2">
-                          <Input
-                            placeholder="Add custom scope"
-                            value={newScope}
-                            onChange={(e) => setNewScope(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                addScope();
-                              }
-                            }}
-                          />
-                          <Button type="button" size="sm" onClick={addScope}>
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Right Column - Important Messages & Setup Guide */}
-                    <div className="space-y-4">
-                      {/* Important Callback URL */}
-                      <Card className="border-orange-200 bg-orange-50/50">
-                        <CardHeader className="pb-3">
-                          <div className="flex items-start gap-2">
-                            <AlertCircle className="h-4 w-4 text-orange-600 mt-0.5" />
-                            <div>
-                              <CardTitle className="text-sm">Important</CardTitle>
-                              <CardDescription className="text-xs mt-1">
-                                Don&apos;t forget to add this authorized callback URL to your OAuth provider:
-                              </CardDescription>
+                    {/* Provider Configuration - Two Column Layout */}
+                    {config.bringOwnProvider && (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="space-y-4">
+                          <div>
+                            <Label htmlFor="socialProvider" className="text-sm">OAuth Provider</Label>
+                            <Select
+                              value={config.socialProvider}
+                              onValueChange={(value) => handleProviderChange(value as SocialProvider)}
+                            >
+                              <SelectTrigger className="mt-1">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="google">Google</SelectItem>
+                                <SelectItem value="microsoft">Microsoft</SelectItem>
+                                <SelectItem value="github">GitHub</SelectItem>
+                                <SelectItem value="facebook">Facebook</SelectItem>
+                                <SelectItem value="auth0">Auth0</SelectItem>
+                                <SelectItem value="other">Other</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label htmlFor="identityProviderDomain" className="text-sm">Identity Provider Domain</Label>
+                            <Input
+                              id="identityProviderDomain"
+                              placeholder="https://accounts.google.com"
+                              value={config.identityProviderDomain}
+                              onChange={(e) => updateConfig({ identityProviderDomain: e.target.value })}
+                              className="mt-1"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="identityProviderClientId" className="text-sm">Client ID</Label>
+                            <Input
+                              id="identityProviderClientId"
+                              placeholder="your-client-id"
+                              value={config.identityProviderClientId}
+                              onChange={(e) => updateConfig({ identityProviderClientId: e.target.value })}
+                              className="mt-1"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="identityProviderClientSecret" className="text-sm">Client Secret</Label>
+                            <Input
+                              id="identityProviderClientSecret"
+                              type="password"
+                              placeholder="your-client-secret"
+                              value={config.identityProviderClientSecret}
+                              onChange={(e) => updateConfig({ identityProviderClientSecret: e.target.value })}
+                              className="mt-1"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="tokenType" className="text-sm">Token Type</Label>
+                            <Select
+                              value={config.tokenType || 'apiblaze'}
+                              onValueChange={(value) => updateConfig({ tokenType: value as 'apiblaze' | 'thirdParty' })}
+                            >
+                              <SelectTrigger className="mt-1">
+                                <SelectValue>
+                                  {config.tokenType === 'apiblaze' 
+                                    ? 'APIBlaze' 
+                                    : `${config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} token`}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="apiblaze">APIBlaze</SelectItem>
+                                <SelectItem value="thirdParty">
+                                  {config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} token
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-sm">Authorized Scopes</Label>
+                            <p className="text-xs text-muted-foreground mb-2">Default mandatory scopes: email, openid, profile</p>
+                            <div className="flex flex-wrap gap-2 mb-2">
+                              {config.authorizedScopes.map((scope) => (
+                                <Badge key={scope} variant="secondary" className="text-xs">
+                                  {scope}
+                                  {!['email', 'openid', 'profile'].includes(scope) && (
+                                    <X className="ml-1 h-3 w-3 cursor-pointer" onClick={() => removeScope(scope)} />
+                                  )}
+                                </Badge>
+                              ))}
+                            </div>
+                            <div className="flex gap-2">
+                              <Input placeholder="Add custom scope" value={newScope} onChange={(e) => setNewScope(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addScope(); } }} />
+                              <Button type="button" size="sm" onClick={addScope}><Plus className="h-4 w-4" /></Button>
                             </div>
                           </div>
-                        </CardHeader>
-                        <CardContent>
-                          <code className="text-xs bg-white px-2 py-1 rounded border block">
-                            https://callback.apiblaze.com
-                          </code>
-                        </CardContent>
-                      </Card>
-
-                      {/* Setup Guide */}
-                      <Card>
-                        <CardHeader>
-                          <CardTitle className="text-sm">
-                            {config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} Setup Guide
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <ol className="text-xs space-y-2 list-decimal list-inside text-muted-foreground">
-                            {PROVIDER_SETUP_GUIDES[config.socialProvider].map((step, index) => (
-                              <li key={index}>{step}</li>
-                            ))}
-                          </ol>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </div>
+                        </div>
+                        <div className="space-y-4">
+                          <Card className="border-orange-200 bg-orange-50/50">
+                            <CardHeader className="pb-3">
+                              <div className="flex items-start gap-2">
+                                <AlertCircle className="h-4 w-4 text-orange-600 mt-0.5" />
+                                <div>
+                                  <CardTitle className="text-sm">Important</CardTitle>
+                                  <CardDescription className="text-xs mt-1">Don&apos;t forget to add this authorized callback URL to your OAuth provider:</CardDescription>
+                                </div>
+                              </div>
+                            </CardHeader>
+                            <CardContent>
+                              <code className="text-xs bg-white px-2 py-1 rounded border block">https://callback.apiblaze.com</code>
+                            </CardContent>
+                          </Card>
+                          <Card>
+                            <CardHeader>
+                              <CardTitle className="text-sm">{config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} Setup Guide</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              <ol className="text-xs space-y-2 list-decimal list-inside text-muted-foreground">
+                                {PROVIDER_SETUP_GUIDES[config.socialProvider].map((step, index) => (
+                                  <li key={index}>{step}</li>
+                                ))}
+                              </ol>
+                            </CardContent>
+                          </Card>
+                        </div>
+                      </div>
                     )}
-
-                    {/* Authorized Callback URLs - Moved after Bring My Own OAuth Provider section */}
                     <div className="space-y-2">
                       <Label className="text-sm">Authorized Callback URLs</Label>
                       <div className="flex gap-2 mb-2 mt-2">
-                        <Input
-                          value={newAuthorizedCallbackUrl}
-                          onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)}
-                          placeholder="https://example.com/callback"
-                          className="text-xs"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              const url = newAuthorizedCallbackUrl.trim();
-                              if (url && !authorizedCallbackUrls.includes(url)) {
-                                try {
-                                  const urlObj = new URL(url);
-                                  if (urlObj.protocol !== 'https:') {
-                                    alert('URL must use HTTPS protocol');
-                                    return;
-                                  }
-                                  updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]);
-                                  setNewAuthorizedCallbackUrl('');
-                                } catch {
-                                  alert('Invalid URL format');
-                                }
-                              }
-                            }
-                          }}
-                        />
-                        <Button 
-                          type="button" 
-                          size="sm" 
-                          onClick={() => {
-                            const url = newAuthorizedCallbackUrl.trim();
-                            if (!url) return;
-                            if (authorizedCallbackUrls.includes(url)) {
-                              alert('This URL is already in the list');
-                              return;
-                            }
-                            try {
-                              const urlObj = new URL(url);
-                              if (urlObj.protocol !== 'https:') {
-                                alert('URL must use HTTPS protocol');
-                                return;
-                              }
-                              updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]);
-                              setNewAuthorizedCallbackUrl('');
-                            } catch {
-                              alert('Invalid URL format');
-                            }
-                          }}
-                        >
-                          <Plus className="h-3 w-3" />
-                        </Button>
+                        <Input value={newAuthorizedCallbackUrl} onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)} placeholder="https://example.com/callback" className="text-xs" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const url = newAuthorizedCallbackUrl.trim(); if (url && !authorizedCallbackUrls.includes(url)) { try { const urlObj = new URL(url); if (urlObj.protocol !== 'https:') { alert('URL must use HTTPS protocol'); return; } updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]); setNewAuthorizedCallbackUrl(''); } catch { alert('Invalid URL format'); } } } }} />
+                        <Button type="button" size="sm" onClick={() => { const url = newAuthorizedCallbackUrl.trim(); if (!url) return; if (authorizedCallbackUrls.includes(url)) { alert('This URL is already in the list'); return; } try { const urlObj = new URL(url); if (urlObj.protocol !== 'https:') { alert('URL must use HTTPS protocol'); return; } updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]); setNewAuthorizedCallbackUrl(''); } catch { alert('Invalid URL format'); } }}><Plus className="h-3 w-3" /></Button>
                       </div>
                       <div className="flex flex-wrap gap-2 mb-4">
                         {authorizedCallbackUrls.map((url, index) => (
-                          <div
-                            key={url}
-                            className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs"
-                          >
-                            {index === 0 && (
-                              <Badge variant="secondary" className="mr-1 text-xs">
-                                <Star className="h-2 w-2 mr-1" />
-                                Default
-                              </Badge>
-                            )}
+                          <div key={url} className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs">
+                            {index === 0 && <Badge variant="secondary" className="mr-1 text-xs"><Star className="h-2 w-2 mr-1" />Default</Badge>}
                             <span>{url}</span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-4 w-4 p-0"
-                              onClick={() => updateAuthorizedCallbackUrls(authorizedCallbackUrls.filter((u) => u !== url))}
-                            >
-                              <X className="h-2 w-2" />
-                            </Button>
+                            <Button type="button" variant="ghost" size="sm" className="h-4 w-4 p-0" onClick={() => updateAuthorizedCallbackUrls(authorizedCallbackUrls.filter((u) => u !== url))}><X className="h-2 w-2" /></Button>
                           </div>
                         ))}
                       </div>
@@ -2377,6 +2277,184 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
             )}
           </div>
         )}
+
+        {/* Requests Authentication */}
+        <div className="flex flex-col gap-4 p-4 border rounded-lg">
+          <div>
+            <Label className="text-sm font-medium">Requests Authentication</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              How each request to {config.projectName || '{projectName}'}.apiblaze.com/{config.apiVersion || '{apiVersion}'} is authenticated
+            </p>
+          </div>
+          <Select
+            value={config.requestsAuthMode ?? 'passthrough'}
+            onValueChange={(v) => updateConfig({ requestsAuthMode: v as 'authenticate' | 'passthrough' })}
+          >
+            <SelectTrigger className="w-full max-w-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="authenticate">Authenticate every request</SelectItem>
+              <SelectItem value="passthrough">No Authentication. Passthrough traffic</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Authentication method subsection - when authenticate is selected */}
+          {config.requestsAuthMode === 'authenticate' && (
+            <div className="space-y-4 pl-4 border-l-2 border-muted">
+              <p className="text-xs text-muted-foreground">The way each request is authenticated</p>
+
+              {/* JWT tokens checkbox */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="requestsAuthJwt"
+                      checked={config.requestsAuthMethods?.includes('jwt') ?? true}
+                      onCheckedChange={(checked) => {
+                        const methods = config.requestsAuthMethods ?? ['jwt'];
+                        const next: ('jwt' | 'opaque')[] = checked
+                          ? (methods.includes('jwt') ? methods : [...methods, 'jwt'])
+                          : methods.filter((m) => m !== 'jwt') as ('jwt' | 'opaque')[];
+                        updateConfig({ requestsAuthMethods: next.length ? next : ['jwt'] });
+                      }}
+                    />
+                    <Label htmlFor="requestsAuthJwt" className="text-sm font-medium">Authenticate JWT tokens</Label>
+                  </div>
+                  {config.requestsAuthMethods?.includes('jwt') && (
+                    <div className="space-y-2 ml-6 mt-2">
+                      <div>
+                        <Label className="text-xs">Allowed issuers (iss)</Label>
+                        <div className="flex gap-2 mt-1">
+                          <Input
+                            value={newAllowedIssuer}
+                            onChange={(e) => setNewAllowedIssuer(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addAllowedIssuer();
+                              }
+                            }}
+                            className="text-sm"
+                          />
+                          <Button type="button" size="sm" onClick={addAllowedIssuer}><Plus className="h-3 w-3" /></Button>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {(config.allowedIssuers ?? []).map((iss) => (
+                            <span key={iss} className="inline-flex items-center gap-0.5 bg-muted px-2 py-0.5 rounded text-xs">
+                              {iss}
+                              <button type="button" onClick={() => removeAllowedIssuer(iss)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Allowed audience (aud)</Label>
+                        <div className="flex gap-2 mt-1">
+                          <Input
+                            value={newAllowedAudience}
+                            onChange={(e) => setNewAllowedAudience(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addAllowedAudience();
+                              }
+                            }}
+                            className="text-sm"
+                          />
+                          <Button type="button" size="sm" onClick={addAllowedAudience}><Plus className="h-3 w-3" /></Button>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {(config.allowedAudiences ?? []).map((aud) => (
+                            <span key={aud} className="inline-flex items-center gap-0.5 bg-muted px-2 py-0.5 rounded text-xs">
+                              {aud}
+                              <button type="button" onClick={() => removeAllowedAudience(aud)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Opaque tokens checkbox */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="requestsAuthOpaque"
+                      checked={config.requestsAuthMethods?.includes('opaque') ?? false}
+                      onCheckedChange={(checked) => {
+                        const methods = config.requestsAuthMethods ?? ['jwt'];
+                        const next: ('jwt' | 'opaque')[] = checked
+                          ? [...methods, 'opaque']
+                          : methods.filter((m) => m !== 'opaque') as ('jwt' | 'opaque')[];
+                        updateConfig({ requestsAuthMethods: next });
+                      }}
+                    />
+                    <Label htmlFor="requestsAuthOpaque" className="text-sm font-medium">Authenticate opaque tokens</Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground ml-6">
+                    We will send a request to verify the token (do NOT use Google, Facebook, … introspection endpoint), build your own
+                  </p>
+                  {config.requestsAuthMethods?.includes('opaque') && (
+                    <div className="space-y-2 ml-6 mt-2">
+                      <div>
+                        <Label className="text-xs">Token verification endpoint</Label>
+                        <Input
+                          placeholder="https://your-endpoint.com/introspect"
+                          value={config.opaqueTokenEndpoint ?? ''}
+                          onChange={(e) => updateConfig({ opaqueTokenEndpoint: e.target.value })}
+                          className="mt-1 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Method</Label>
+                        <Select
+                          value={config.opaqueTokenMethod ?? 'GET'}
+                          onValueChange={(v) => updateConfig({ opaqueTokenMethod: v as 'GET' | 'POST' })}
+                        >
+                          <SelectTrigger className="mt-1 w-32">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="GET">GET</SelectItem>
+                            <SelectItem value="POST">POST</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {config.opaqueTokenMethod === 'GET' ? (
+                        <div>
+                          <Label className="text-xs">Params</Label>
+                          <Input
+                            placeholder="?access_token={token}"
+                            value={config.opaqueTokenParams ?? '?access_token={token}'}
+                            onChange={(e) => updateConfig({ opaqueTokenParams: e.target.value })}
+                            className="mt-1 text-sm"
+                          />
+                        </div>
+                      ) : (
+                        <div>
+                          <Label className="text-xs">Body</Label>
+                          <Input
+                            placeholder="token={token}"
+                            value={config.opaqueTokenBody ?? 'token={token}'}
+                            onChange={(e) => updateConfig({ opaqueTokenBody: e.target.value })}
+                            className="mt-1 text-sm"
+                          />
+                        </div>
+                      )}
+                      <div className="rounded bg-muted/50 p-2 text-xs text-muted-foreground">
+                        Expected minimum response: {`{ "exp": 1419356238, "aud": "https://{projectName}.portal.apiblaze.com/{apiVersion}" }`}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <AuthConfigModal

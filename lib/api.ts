@@ -182,6 +182,12 @@ class ApiClient {
       proxyDailyQuota: number;
       accountMonthlyQuota: number;
     };
+    requests_auth?: {
+      mode: 'authenticate' | 'passthrough';
+      methods?: ('jwt' | 'opaque')[];
+      jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
+      opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
+    };
   }): Promise<Record<string, unknown>> {
     // Map frontend data to backend API format
     const backendData: Record<string, unknown> = {
@@ -226,6 +232,9 @@ class ApiClient {
     }
     if (data.throttling) {
       backendData.throttling = data.throttling;
+    }
+    if (data.requests_auth) {
+      backendData.requests_auth = data.requests_auth;
     }
 
     console.log('[API Client] Creating project:', data.name);

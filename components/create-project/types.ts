@@ -37,6 +37,15 @@ export interface ProjectConfig {
   userGroupName: string;
   enableApiKey: boolean;
   enableSocialAuth: boolean;
+  // Requests Authentication (how each proxy request is authenticated)
+  requestsAuthMode: 'authenticate' | 'passthrough';
+  requestsAuthMethods: ('jwt' | 'opaque')[];
+  allowedIssuers: string[];
+  allowedAudiences: string[];
+  opaqueTokenEndpoint: string;
+  opaqueTokenMethod: 'GET' | 'POST';
+  opaqueTokenParams: string;
+  opaqueTokenBody: string;
   useAuthConfig: boolean;
   authConfigId?: string;
   appClientId?: string;

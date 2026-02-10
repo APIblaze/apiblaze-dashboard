@@ -125,9 +125,17 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     userGroupName: '',
     enableApiKey: true,
     enableSocialAuth: false,
-        useAuthConfig: false,
-        authConfigId: undefined,
-        appClientId: undefined,
+    requestsAuthMode: 'passthrough' as const,
+    requestsAuthMethods: ['jwt'] as ('jwt' | 'opaque')[],
+    allowedIssuers: [],
+    allowedAudiences: [],
+    opaqueTokenEndpoint: '',
+    opaqueTokenMethod: 'GET' as const,
+    opaqueTokenParams: '?access_token={token}',
+    opaqueTokenBody: 'token={token}',
+    useAuthConfig: false,
+    authConfigId: undefined,
+    appClientId: undefined,
     bringOwnProvider: false,
     socialProvider: 'google',
     identityProviderDomain: 'https://accounts.google.com',
@@ -187,6 +195,14 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       userGroupName: (projectConfig?.auth_config_name as string) || '',
       enableApiKey: (projectConfig?.auth_type as string) !== 'none',
       enableSocialAuth: (projectConfig?.auth_type as string) === 'oauth' || !!(projectConfig?.auth_config_id as string),
+      requestsAuthMode: ((projectConfig?.requests_auth as Record<string, unknown>)?.mode as 'authenticate' | 'passthrough') || 'passthrough',
+      requestsAuthMethods: ((projectConfig?.requests_auth as Record<string, unknown>)?.methods as ('jwt' | 'opaque')[]) || ['jwt'],
+      allowedIssuers: ((projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown>)?.allowed_issuers as string[] || [],
+      allowedAudiences: ((projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown>)?.allowed_audiences as string[] || [],
+      opaqueTokenEndpoint: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.endpoint as string || '',
+      opaqueTokenMethod: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.method as 'GET' | 'POST' || 'GET',
+      opaqueTokenParams: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.params as string || '?access_token={token}',
+      opaqueTokenBody: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.body as string || 'token={token}',
       useAuthConfig: !!(projectConfig?.auth_config_id as string),
       authConfigId: projectConfig?.auth_config_id as string | undefined,
       appClientId: undefined, // Not stored in config - selected at deployment time from database
@@ -352,11 +368,15 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     return null;
   };
 
-  const validationError = getValidationError();
+    const validationError = getValidationError();
 
   const handleDeploy = async () => {
     setIsDeploying(true);
     isDeployingRef.current = true; // Prevent config reset during deployment
+
+    // Track resources we create so we can rollback if /projects fails
+    let rollbackAuthConfigId: string | undefined;
+    let rollbackAppClient: { authConfigId: string; appClientId: string } | undefined;
     
     // CRITICAL: Log the config state BEFORE deployment starts
     console.log('[CreateProject] 🚀 DEPLOYMENT STARTING - Config state snapshot:', {
@@ -599,6 +619,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               });
               const newAuthConfigId = (authConfig as { id: string }).id;
               currentAuthConfigId = newAuthConfigId;
+              rollbackAuthConfigId = newAuthConfigId;
               console.log('[CreateProject] Created new AuthConfig:', {
                 id: currentAuthConfigId,
                 name: authConfigName,
@@ -630,6 +651,11 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             });
             const newAppClientId = (appClient as { id: string }).id;
             const createdAppClientClientId = (appClient as { clientId: string }).clientId;
+
+            // If we reused existing auth config, track app client for rollback (auth config cascades if we created it)
+            if (!rollbackAuthConfigId) {
+              rollbackAppClient = { authConfigId: currentAuthConfigId, appClientId: newAppClientId };
+            }
 
             // 3. Add Provider(s) to AppClient
             // Use providers array if available, otherwise fall back to legacy single provider
@@ -704,6 +730,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               enableApiKeyAuth: config.enableApiKey,
               bringMyOwnOAuth: config.bringOwnProvider,
             });
+
+            // Track for rollback (server creates auth config + app client + provider)
+            rollbackAuthConfigId = result.authConfigId;
 
             // Use the created AuthConfig and AppClient
             authConfigId = result.authConfigId;
@@ -787,6 +816,54 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         currentProjectAuthConfigId: currentProject ? (currentProject.config as Record<string, unknown>)?.auth_config_id : undefined,
       });
       
+      // Build requests_auth from config
+      const requestsAuthMode = config.requestsAuthMode ?? 'passthrough';
+      const requestsAuthMethods = config.requestsAuthMethods ?? ['jwt'];
+      const projectNameVal = config.projectName || '';
+      const apiVersionVal = config.apiVersion || '1.0.0';
+      const appClientIdVal = defaultAppClientId || appClientId || '';
+      const substitutePlaceholders = (s: string) =>
+        s
+          .replace(/\{projectName\}/g, projectNameVal)
+          .replace(/\{apiVersion\}/g, apiVersionVal)
+          .replace(/\{appClientId\}/g, appClientIdVal);
+
+      let requests_auth:
+        | {
+            mode: 'authenticate' | 'passthrough';
+            methods?: ('jwt' | 'opaque')[];
+            jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
+            opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
+          }
+        | undefined;
+      if (requestsAuthMode === 'passthrough') {
+        requests_auth = { mode: 'passthrough', methods: [] };
+      } else {
+        const jwtIssuers = (config.allowedIssuers ?? []).length > 0
+          ? config.allowedIssuers!.map(substitutePlaceholders)
+          : (appClientIdVal ? [`https://auth.apiblaze.com/${appClientIdVal}`] : []);
+        const jwtAudiences = (config.allowedAudiences ?? []).length > 0
+          ? config.allowedAudiences!.map(substitutePlaceholders)
+          : [
+              ...(projectNameVal ? [`https://${projectNameVal}.portal.apiblaze.com/${apiVersionVal}`] : []),
+              ...(appClientIdVal ? [appClientIdVal] : []),
+            ];
+        requests_auth = {
+          mode: 'authenticate',
+          methods: requestsAuthMethods,
+          jwt: { allowed_issuers: jwtIssuers, allowed_audiences: jwtAudiences },
+          opaque:
+            requestsAuthMethods.includes('opaque') && config.opaqueTokenEndpoint
+              ? {
+                  endpoint: config.opaqueTokenEndpoint,
+                  method: config.opaqueTokenMethod ?? 'GET',
+                  params: config.opaqueTokenParams ?? '?access_token={token}',
+                  body: config.opaqueTokenBody ?? 'token={token}',
+                }
+              : undefined,
+        };
+      }
+
       // defaultAppClientId is tracked in the function scope (may have been set during app client creation)
       const projectData = {
         name: config.projectName,
@@ -805,6 +882,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
           proxyDailyQuota: 1000,
           accountMonthlyQuota: 30000,
         },
+        requests_auth,
       };
       
       console.log('[CreateProject] ⚠️ CRITICAL: Project data being sent to API:', {
@@ -846,15 +924,41 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     } catch (error) {
       console.error('Failed to create project:', error);
 
+      // Rollback: if /projects failed, delete any auth-config, app client, or provider we created
+      let rollbackSucceeded = false;
+      let rollbackFailed = false;
+      if (rollbackAuthConfigId || rollbackAppClient) {
+        try {
+          if (rollbackAppClient) {
+            console.log('[CreateProject] Rolling back: deleting created app client', rollbackAppClient);
+            await api.deleteAppClient(rollbackAppClient.authConfigId, rollbackAppClient.appClientId);
+          }
+          if (rollbackAuthConfigId) {
+            console.log('[CreateProject] Rolling back: deleting created auth config', rollbackAuthConfigId);
+            await api.deleteAuthConfig(rollbackAuthConfigId);
+          }
+          rollbackSucceeded = true;
+        } catch (rollbackError) {
+          console.error('[CreateProject] Rollback failed:', rollbackError);
+          rollbackFailed = true;
+        }
+      }
+
       const { message, details, suggestions } = extractProjectCreationContext(error);
       const detailMessage = details?.message ?? message;
+
+      const rollbackNote = rollbackSucceeded
+        ? ' Created resources (auth config, app client, provider) have been cleaned up.'
+        : rollbackFailed
+          ? ' Cleanup of created resources failed—you may need to manually delete them from Auth Configs.'
+          : '';
 
       toast({
         title: 'Deployment Failed',
         description: (
           <div className="space-y-3">
             <div>
-              <p className="font-medium">{detailMessage}</p>
+              <p className="font-medium">{detailMessage}{rollbackNote}</p>
               {details?.format && (
                 <p className="text-sm text-muted-foreground">
                   Format: {details.format.toUpperCase()}

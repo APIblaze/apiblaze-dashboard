@@ -433,6 +433,7 @@ export class APIBlazeClient {
       clientId: string;
       clientSecret: string;
       domain?: string;
+      tokenType?: 'apiblaze' | 'thirdParty';
     }
   ) {
     return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`, {

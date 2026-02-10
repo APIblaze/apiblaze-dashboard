@@ -61,11 +61,13 @@ export async function POST(
       jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
     });
     
+    console.log('[providers POST] tokenType received:', body.tokenType);
     const data = await client.addProvider(userClaims, authConfigId, clientId, {
       type: body.type,
       clientId: body.clientId,
       clientSecret: body.clientSecret,
       domain: body.domain,
+      tokenType: body.tokenType,
     });
     return NextResponse.json(data);
     
