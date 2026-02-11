@@ -352,6 +352,9 @@ class ApiClient {
     clientSecret: string;
     domain?: string;
     tokenType?: 'apiblaze' | 'thirdParty';
+    targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+    includeApiblazeAccessTokenHeader?: boolean;
+    includeApiblazeIdTokenHeader?: boolean;
   }) {
     return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`, {
       method: 'POST',
@@ -365,6 +368,9 @@ class ApiClient {
     clientSecret: string;
     domain?: string;
     tokenType?: 'apiblaze' | 'thirdParty';
+    targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+    includeApiblazeAccessTokenHeader?: boolean;
+    includeApiblazeIdTokenHeader?: boolean;
   }) {
     return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}`, {
       method: 'PATCH',

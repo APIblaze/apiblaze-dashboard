@@ -191,11 +191,26 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Token Type:</span>
+                    <span className="text-muted-foreground">Client side token type:</span>
                     <Badge variant="secondary">
-                      {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'apiblaze' ? 'APIBlaze' : 'Third Party'}
+                      {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'apiblaze' ? 'API Blaze token' : 'Third Party'}
                     </Badge>
                   </div>
+                  {(provider.tokenType ?? (provider as { token_type?: string }).token_type) !== 'thirdParty' && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Target server token type:</span>
+                    <Badge variant="secondary">
+                      {(() => {
+                        const v = provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token ?? 'apiblaze';
+                        const providerLabel = PROVIDER_TYPE_LABELS[provider.type];
+                        if (v === 'third_party_access_token') return `${providerLabel} access token`;
+                        if (v === 'third_party_id_token') return `${providerLabel} ID token`;
+                        if (v === 'none') return 'None';
+                        return 'API Blaze token';
+                      })()}
+                    </Badge>
+                  </div>
+                  )}
                   {provider.domain && (
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground">Domain:</span>

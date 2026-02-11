@@ -59,6 +59,9 @@ export interface ProjectConfig {
   authorizedScopes: string[];
   authorizedCallbackUrls?: string[]; // Authorized callback URLs for AppClient
   tokenType?: 'apiblaze' | 'thirdParty';
+  targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+  includeApiblazeAccessTokenHeader?: boolean;
+  includeApiblazeIdTokenHeader?: boolean;
   // Multiple providers for create mode (when bringOwnProvider is true)
   providers?: Array<{
     type: SocialProvider;

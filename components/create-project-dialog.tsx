@@ -143,6 +143,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     identityProviderClientSecret: '',
     authorizedScopes: ['email', 'openid', 'profile'],
     tokenType: 'apiblaze',
+    targetServerToken: 'apiblaze',
+    includeApiblazeAccessTokenHeader: false,
+    includeApiblazeIdTokenHeader: false,
     
     // Target Servers
     targetServers: [
@@ -214,6 +217,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       identityProviderClientSecret: '',
       authorizedScopes: ((projectConfig?.oauth_config as Record<string, unknown>)?.scopes as string)?.split(' ') || ['email', 'openid', 'profile'],
       tokenType: ((projectConfig?.oauth_config as Record<string, unknown>)?.token_type as 'apiblaze' | 'thirdParty') || 'apiblaze',
+      targetServerToken: ((projectConfig?.oauth_config as Record<string, unknown>)?.target_server_token as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none') || 'apiblaze',
+      includeApiblazeAccessTokenHeader: !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_access_token_header) || !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_token_header),
+      includeApiblazeIdTokenHeader: !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_id_token_header),
       
       // Target Servers
       targetServers: [
@@ -667,6 +673,10 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                       clientId: config.identityProviderClientId,
                       clientSecret: config.identityProviderClientSecret,
                       domain: config.identityProviderDomain || undefined,
+                      tokenType: config.tokenType || 'apiblaze',
+                      targetServerToken: config.targetServerToken || 'apiblaze',
+                      includeApiblazeAccessTokenHeader: config.includeApiblazeAccessTokenHeader ?? false,
+                      includeApiblazeIdTokenHeader: config.includeApiblazeIdTokenHeader ?? false,
                     }]
                   : []);
 
@@ -676,6 +686,10 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                 clientId: provider.clientId,
                 clientSecret: provider.clientSecret,
                 domain: provider.domain || undefined,
+                tokenType: ((provider as { tokenType?: string }).tokenType || config.tokenType || 'apiblaze') as 'apiblaze' | 'thirdParty',
+                targetServerToken: ((provider as { targetServerToken?: string }).targetServerToken || config.targetServerToken || 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none',
+                includeApiblazeAccessTokenHeader: (provider as { includeApiblazeAccessTokenHeader?: boolean }).includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header ?? config.includeApiblazeAccessTokenHeader ?? false,
+                includeApiblazeIdTokenHeader: (provider as { includeApiblazeIdTokenHeader?: boolean }).includeApiblazeIdTokenHeader ?? config.includeApiblazeIdTokenHeader ?? false,
               });
             }
 

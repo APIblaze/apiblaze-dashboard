@@ -45,6 +45,9 @@ export interface SocialProvider {
   clientSecret: string;
   domain?: string;
   tokenType?: 'apiblaze' | 'thirdParty';
+  targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+  includeApiblazeAccessTokenHeader?: boolean;
+  includeApiblazeIdTokenHeader?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -82,5 +85,8 @@ export interface CreateProviderRequest {
   clientSecret: string;
   domain?: string;
   tokenType?: 'apiblaze' | 'thirdParty';
+  targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+  includeApiblazeAccessTokenHeader?: boolean;
+  includeApiblazeIdTokenHeader?: boolean;
 }
 

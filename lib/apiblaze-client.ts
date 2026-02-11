@@ -41,6 +41,7 @@ export interface CreateProxyPayload {
     proxyDailyQuota: number;
     accountMonthlyQuota: number;
   };
+  requests_auth?: Record<string, unknown>;
 }
 
 interface APIBlazeClientOptions {
@@ -434,10 +435,36 @@ export class APIBlazeClient {
       clientSecret: string;
       domain?: string;
       tokenType?: 'apiblaze' | 'thirdParty';
+      targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+      includeApiblazeAccessTokenHeader?: boolean;
+      includeApiblazeIdTokenHeader?: boolean;
     }
   ) {
     return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`, {
       method: 'POST',
+      body: JSON.stringify(data),
+      userClaims,
+    });
+  }
+
+  async updateProvider(
+    userClaims: UserAssertionClaims,
+    authConfigId: string,
+    clientId: string,
+    providerId: string,
+    data: {
+      type: string;
+      clientId: string;
+      clientSecret: string;
+      domain?: string;
+      tokenType?: 'apiblaze' | 'thirdParty';
+      targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+      includeApiblazeAccessTokenHeader?: boolean;
+      includeApiblazeIdTokenHeader?: boolean;
+    }
+  ) {
+    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}`, {
+      method: 'PATCH',
       body: JSON.stringify(data),
       userClaims,
     });

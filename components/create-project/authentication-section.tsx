@@ -49,6 +49,15 @@ const PROVIDER_DOMAINS: Record<SocialProvider, string> = {
   other: '',
 };
 
+const PROVIDER_TYPE_LABELS: Record<SocialProvider, string> = {
+  google: 'Google',
+  github: 'GitHub',
+  microsoft: 'Microsoft',
+  facebook: 'Facebook',
+  auth0: 'Auth0',
+  other: 'Other',
+};
+
 const PROVIDER_SETUP_GUIDES: Record<SocialProvider, string[]> = {
   google: [
     'Go to Google Cloud Console (console.cloud.google.com)',
@@ -213,6 +222,9 @@ function EditModeManagementUI({
     clientSecret: string;
     domain: string;
     tokenType: 'apiblaze' | 'thirdParty';
+    targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+    includeApiblazeAccessTokenHeader?: boolean;
+    includeApiblazeIdTokenHeader?: boolean;
   }>>({});
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState<Record<string, boolean>>({});
@@ -505,6 +517,9 @@ function EditModeManagementUI({
       clientSecret: '',
       domain: PROVIDER_DOMAINS.google,
       tokenType: 'apiblaze' as const,
+      targetServerToken: 'apiblaze' as const,
+      includeApiblazeAccessTokenHeader: false,
+      includeApiblazeIdTokenHeader: false,
     };
     if (!provider.clientId || !provider.clientSecret) {
       alert('Please provide Client ID and Client Secret');
@@ -518,6 +533,9 @@ function EditModeManagementUI({
         clientSecret: provider.clientSecret,
         domain: provider.domain || PROVIDER_DOMAINS[provider.type],
         tokenType: provider.tokenType || 'apiblaze',
+        targetServerToken: provider.targetServerToken ?? 'apiblaze',
+        includeApiblazeAccessTokenHeader: provider.includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_access_token_header?: boolean }).include_apiblaze_access_token_header ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header ?? false,
+        includeApiblazeIdTokenHeader: provider.includeApiblazeIdTokenHeader ?? (provider as { include_apiblaze_id_token_header?: boolean }).include_apiblaze_id_token_header ?? false,
       });
       
       await invalidateAndRefetch(teamId);
@@ -1352,7 +1370,7 @@ function EditModeManagementUI({
                                   onChange={(e) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze' }),
+                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
                                       domain: e.target.value
                                     }
                                   }))}
@@ -1368,7 +1386,7 @@ function EditModeManagementUI({
                                   onChange={(e) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze' }),
+                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
                                       clientId: e.target.value
                                     }
                                   }))}
@@ -1385,7 +1403,7 @@ function EditModeManagementUI({
                                   onChange={(e) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze' }),
+                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
                                       clientSecret: e.target.value
                                     }
                                   }))}
@@ -1394,13 +1412,18 @@ function EditModeManagementUI({
                                 />
                               </div>
                               <div>
-                                <Label htmlFor={`providerTokenType-${client.id}`} className="text-xs">Token Type</Label>
+                                <Label htmlFor={`providerTokenType-${client.id}`} className="text-xs">Client side token type</Label>
+                                <p className="text-xs text-muted-foreground">
+                                  {(newProvider[client.id]?.tokenType || 'apiblaze') === 'thirdParty'
+                                    ? 'Tokens the API users will see and that will be forwarded to your target servers'
+                                    : 'Tokens the API users will see'}
+                                </p>
                                 <Select
                                   value={newProvider[client.id]?.tokenType || 'apiblaze'}
                                   onValueChange={(value) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze' }),
+                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
                                       tokenType: value as 'apiblaze' | 'thirdParty'
                                     }
                                   }))}
@@ -1408,18 +1431,80 @@ function EditModeManagementUI({
                                   <SelectTrigger className="mt-1">
                                     <SelectValue>
                                       {newProvider[client.id]?.tokenType === 'apiblaze' 
-                                        ? 'APIBlaze' 
-                                        : `${(newProvider[client.id]?.type || 'google').charAt(0).toUpperCase() + (newProvider[client.id]?.type || 'google').slice(1)} token`}
+                                        ? 'API Blaze token' 
+                                        : `${PROVIDER_TYPE_LABELS[newProvider[client.id]?.type || 'google']} token`}
                                     </SelectValue>
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="apiblaze">APIBlaze</SelectItem>
+                                    <SelectItem value="apiblaze">API Blaze token</SelectItem>
                                     <SelectItem value="thirdParty">
                                       {(newProvider[client.id]?.type || 'google').charAt(0).toUpperCase() + (newProvider[client.id]?.type || 'google').slice(1)} token
                                     </SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
+                              {(newProvider[client.id]?.tokenType || 'apiblaze') !== 'thirdParty' && (
+                              <div>
+                                <Label htmlFor={`providerTargetServerToken-${client.id}`} className="text-xs">Target server token type</Label>
+                                <p className="text-xs text-muted-foreground">What to send in the Authorization header when forwarding to your target servers</p>
+                                <Select
+                                  value={newProvider[client.id]?.targetServerToken || 'apiblaze'}
+                                  onValueChange={(value) => setNewProvider(prev => ({
+                                    ...prev,
+                                    [client.id]: {
+                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
+                                      targetServerToken: value as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none'
+                                    }
+                                  }))}
+                                >
+                                  <SelectTrigger className="mt-1">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                                    <SelectItem value="third_party_access_token">{PROVIDER_TYPE_LABELS[newProvider[client.id]?.type || 'google']} access token</SelectItem>
+                                    <SelectItem value="third_party_id_token">{PROVIDER_TYPE_LABELS[newProvider[client.id]?.type || 'google']} ID token</SelectItem>
+                                    <SelectItem value="none">None</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {(newProvider[client.id]?.targetServerToken === 'third_party_access_token' || newProvider[client.id]?.targetServerToken === 'third_party_id_token') && (
+                                  <div className="space-y-2 mt-2">
+                                    <div className="flex items-center gap-2">
+                                      <Switch
+                                        id={`providerIncludeApiblazeAccess-${client.id}`}
+                                        checked={newProvider[client.id]?.includeApiblazeAccessTokenHeader ?? false}
+                                        onCheckedChange={(checked) => setNewProvider(prev => ({
+                                          ...prev,
+                                          [client.id]: {
+                                            ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
+                                            includeApiblazeAccessTokenHeader: checked
+                                          }
+                                        }))}
+                                      />
+                                      <Label htmlFor={`providerIncludeApiblazeAccess-${client.id}`} className="text-xs">
+                                        Include APIBlaze access token in x-apiblaze-access-token header
+                                      </Label>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Switch
+                                        id={`providerIncludeApiblazeId-${client.id}`}
+                                        checked={newProvider[client.id]?.includeApiblazeIdTokenHeader ?? false}
+                                        onCheckedChange={(checked) => setNewProvider(prev => ({
+                                          ...prev,
+                                          [client.id]: {
+                                            ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
+                                            includeApiblazeIdTokenHeader: checked
+                                          }
+                                        }))}
+                                      />
+                                      <Label htmlFor={`providerIncludeApiblazeId-${client.id}`} className="text-xs">
+                                        Include APIBlaze ID token in x-apiblaze-id-token header
+                                      </Label>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                              )}
                               <div className="flex gap-2">
                                 <Button
                                   type="button"
@@ -1914,6 +1999,10 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           socialProvider: (provider.type || 'google') as 'github' | 'google' | 'microsoft' | 'facebook' | 'auth0' | 'other',
           identityProviderDomain: provider.domain || 'https://accounts.google.com',
           identityProviderClientId: (provider as { client_id?: string }).client_id || provider.clientId || '',
+          tokenType: ((provider.tokenType ?? (provider as { token_type?: string }).token_type) ?? 'apiblaze') as 'apiblaze' | 'thirdParty',
+          targetServerToken: ((provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token) ?? 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none',
+          includeApiblazeAccessTokenHeader: provider.includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_access_token_header?: boolean }).include_apiblaze_access_token_header ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header ?? false,
+          includeApiblazeIdTokenHeader: provider.includeApiblazeIdTokenHeader ?? (provider as { include_apiblaze_id_token_header?: boolean }).include_apiblaze_id_token_header ?? false,
         });
       } else {
         setThirdPartyProvider(null);
@@ -2186,7 +2275,12 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                             />
                           </div>
                           <div>
-                            <Label htmlFor="tokenType" className="text-sm">Token Type</Label>
+                            <Label htmlFor="tokenType" className="text-sm">Client side token type</Label>
+                            <p className="text-xs text-muted-foreground">
+                              {(config.tokenType || 'apiblaze') === 'thirdParty'
+                                ? 'Tokens the API users will see and that will be forwarded to your target servers'
+                                : 'Tokens the API users will see'}
+                            </p>
                             <Select
                               value={config.tokenType || 'apiblaze'}
                               onValueChange={(value) => updateConfig({ tokenType: value as 'apiblaze' | 'thirdParty' })}
@@ -2194,18 +2288,60 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                               <SelectTrigger className="mt-1">
                                 <SelectValue>
                                   {config.tokenType === 'apiblaze' 
-                                    ? 'APIBlaze' 
-                                    : `${config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} token`}
+                                    ? 'API Blaze token' 
+                                    : `${PROVIDER_TYPE_LABELS[config.socialProvider]} token`}
                                 </SelectValue>
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="apiblaze">APIBlaze</SelectItem>
+                                <SelectItem value="apiblaze">API Blaze token</SelectItem>
                                 <SelectItem value="thirdParty">
                                   {config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} token
                                 </SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
+                          {(config.tokenType || 'apiblaze') !== 'thirdParty' && (
+                          <div>
+                            <Label htmlFor="targetServerToken" className="text-sm">Target server token type</Label>
+                            <p className="text-xs text-muted-foreground">What to send in the Authorization header when forwarding to your target servers</p>
+                            <Select
+                              value={config.targetServerToken || 'apiblaze'}
+                              onValueChange={(value) => updateConfig({ targetServerToken: value as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none' })}
+                            >
+                              <SelectTrigger className="mt-1">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                                <SelectItem value="third_party_access_token">{PROVIDER_TYPE_LABELS[config.socialProvider]} access token</SelectItem>
+                                <SelectItem value="third_party_id_token">{PROVIDER_TYPE_LABELS[config.socialProvider]} ID token</SelectItem>
+                                <SelectItem value="none">None</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {(config.targetServerToken === 'third_party_access_token' || config.targetServerToken === 'third_party_id_token') && (
+                              <div className="space-y-2 mt-2">
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    checked={config.includeApiblazeAccessTokenHeader ?? false}
+                                    onCheckedChange={(checked) => updateConfig({ includeApiblazeAccessTokenHeader: checked })}
+                                  />
+                                  <Label className="text-xs">
+                                    Include APIBlaze access token in x-apiblaze-access-token header
+                                  </Label>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    checked={config.includeApiblazeIdTokenHeader ?? false}
+                                    onCheckedChange={(checked) => updateConfig({ includeApiblazeIdTokenHeader: checked })}
+                                  />
+                                  <Label className="text-xs">
+                                    Include APIBlaze ID token in x-apiblaze-id-token header
+                                  </Label>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          )}
                           <div>
                             <Label className="text-sm">Authorized Scopes</Label>
                             <p className="text-xs text-muted-foreground mb-2">Default mandatory scopes: email, openid, profile</p>

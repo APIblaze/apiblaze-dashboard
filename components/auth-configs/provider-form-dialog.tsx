@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import { Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
@@ -59,6 +60,9 @@ export function ProviderFormDialog({
   const [clientSecret, setClientSecret] = useState('');
   const [domain, setDomain] = useState('');
   const [tokenType, setTokenType] = useState<'apiblaze' | 'thirdParty'>('apiblaze');
+  const [targetServerToken, setTargetServerToken] = useState<'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none'>('apiblaze');
+  const [includeApiblazeAccessTokenHeader, setIncludeApiblazeAccessTokenHeader] = useState(false);
+  const [includeApiblazeIdTokenHeader, setIncludeApiblazeIdTokenHeader] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -69,12 +73,18 @@ export function ProviderFormDialog({
         setClientSecret(provider.clientSecret ?? (provider as { client_secret?: string }).client_secret ?? '');
         setDomain(provider.domain || '');
         setTokenType(((provider.tokenType ?? (provider as { token_type?: string }).token_type) ?? 'apiblaze') as 'apiblaze' | 'thirdParty');
+        setTargetServerToken((provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token ?? 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none');
+        setIncludeApiblazeAccessTokenHeader(provider.includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_access_token_header?: boolean }).include_apiblaze_access_token_header ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header ?? false);
+        setIncludeApiblazeIdTokenHeader(provider.includeApiblazeIdTokenHeader ?? (provider as { include_apiblaze_id_token_header?: boolean }).include_apiblaze_id_token_header ?? false);
       } else {
         setType('google');
         setClientIdValue('');
         setClientSecret('');
         setDomain(PROVIDER_DOMAINS.google);
         setTokenType('apiblaze');
+        setTargetServerToken('apiblaze');
+        setIncludeApiblazeAccessTokenHeader(false);
+        setIncludeApiblazeIdTokenHeader(false);
       }
     }
   }, [open, provider]);
@@ -106,6 +116,9 @@ export function ProviderFormDialog({
         clientSecret: clientSecret.trim(),
         domain: domain.trim() || undefined,
         tokenType,
+        targetServerToken,
+        includeApiblazeAccessTokenHeader,
+        includeApiblazeIdTokenHeader,
       };
       
       if (provider) {
@@ -202,17 +215,66 @@ export function ProviderFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="tokenType">Token Type</Label>
+              <Label htmlFor="tokenType">Client side token type</Label>
+              <p className="text-xs text-muted-foreground">
+                {tokenType === 'thirdParty'
+                  ? 'Tokens the API users will see and that will be forwarded to your target servers'
+                  : 'Tokens the API users will see'}
+              </p>
               <Select value={tokenType} onValueChange={(value) => setTokenType(value as 'apiblaze' | 'thirdParty')} disabled={submitting}>
                 <SelectTrigger id="tokenType">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="apiblaze">APIBlaze</SelectItem>
+                  <SelectItem value="apiblaze">API Blaze token</SelectItem>
                   <SelectItem value="thirdParty">Third Party</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {tokenType !== 'thirdParty' && (
+            <div className="space-y-2">
+              <Label htmlFor="targetServerToken">Target server token type</Label>
+              <p className="text-xs text-muted-foreground">What to send in the Authorization header when forwarding to your target servers</p>
+              <Select value={targetServerToken} onValueChange={(value) => setTargetServerToken(value as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none')} disabled={submitting}>
+                <SelectTrigger id="targetServerToken">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                  <SelectItem value="third_party_access_token">{PROVIDER_TYPES.find(p => p.value === type)?.label ?? type} access token</SelectItem>
+                  <SelectItem value="third_party_id_token">{PROVIDER_TYPES.find(p => p.value === type)?.label ?? type} ID token</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
+                </SelectContent>
+              </Select>
+              {(targetServerToken === 'third_party_access_token' || targetServerToken === 'third_party_id_token') && (
+                <div className="space-y-2 mt-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="includeApiblazeAccessTokenHeader"
+                      checked={includeApiblazeAccessTokenHeader}
+                      onCheckedChange={setIncludeApiblazeAccessTokenHeader}
+                      disabled={submitting}
+                    />
+                    <Label htmlFor="includeApiblazeAccessTokenHeader" className="text-sm">
+                      Include APIBlaze access token in x-apiblaze-access-token header
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="includeApiblazeIdTokenHeader"
+                      checked={includeApiblazeIdTokenHeader}
+                      onCheckedChange={setIncludeApiblazeIdTokenHeader}
+                      disabled={submitting}
+                    />
+                    <Label htmlFor="includeApiblazeIdTokenHeader" className="text-sm">
+                      Include APIBlaze ID token in x-apiblaze-id-token header
+                    </Label>
+                  </div>
+                </div>
+              )}
+            </div>
+            )}
           </div>
           <DialogFooter>
             <Button

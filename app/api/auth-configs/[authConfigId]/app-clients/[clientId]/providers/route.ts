@@ -68,6 +68,9 @@ export async function POST(
       clientSecret: body.clientSecret,
       domain: body.domain,
       tokenType: body.tokenType,
+      targetServerToken: body.targetServerToken,
+      includeApiblazeAccessTokenHeader: body.includeApiblazeAccessTokenHeader,
+      includeApiblazeIdTokenHeader: body.includeApiblazeIdTokenHeader,
     });
     return NextResponse.json(data);
     

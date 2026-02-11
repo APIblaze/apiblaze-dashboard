@@ -16,6 +16,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
 import { 
   Plus, 
   X, 
@@ -84,6 +85,9 @@ export function AuthConfigModal({
     clientSecret: '',
     domain: 'https://accounts.google.com',
     tokenType: 'apiblaze',
+    targetServerToken: 'apiblaze',
+    includeApiblazeAccessTokenHeader: false,
+    includeApiblazeIdTokenHeader: false,
   });
   const [isAddingProvider, setIsAddingProvider] = useState(false);
   const [newRedirectUri, setNewRedirectUri] = useState('');
@@ -217,6 +221,9 @@ export function AuthConfigModal({
         clientSecret: newProvider.clientSecret,
         domain: newProvider.domain || PROVIDER_DOMAINS[newProvider.type],
         tokenType: newProvider.tokenType ?? 'apiblaze',
+        targetServerToken: newProvider.targetServerToken ?? 'apiblaze',
+        includeApiblazeAccessTokenHeader: newProvider.includeApiblazeAccessTokenHeader ?? false,
+        includeApiblazeIdTokenHeader: newProvider.includeApiblazeIdTokenHeader ?? false,
       });
       await invalidateAndRefetch();
       setNewProvider({
@@ -225,6 +232,9 @@ export function AuthConfigModal({
         clientSecret: '',
         domain: 'https://accounts.google.com',
         tokenType: 'apiblaze',
+        targetServerToken: 'apiblaze',
+        includeApiblazeAccessTokenHeader: false,
+    includeApiblazeIdTokenHeader: false,
       });
       setShowAddProvider(false);
       toast({
@@ -660,6 +670,76 @@ export function AuthConfigModal({
                         placeholder="Provider Client Secret"
                       />
                     </div>
+                    <div>
+                      <Label>Client side token type</Label>
+                      <p className="text-xs text-muted-foreground">
+                        {(newProvider.tokenType ?? 'apiblaze') === 'thirdParty'
+                          ? 'Tokens the API users will see and that will be forwarded to your target servers'
+                          : 'Tokens the API users will see'}
+                      </p>
+                      <Select
+                        value={newProvider.tokenType ?? 'apiblaze'}
+                        onValueChange={(value) =>
+                          setNewProvider({ ...newProvider, tokenType: value as 'apiblaze' | 'thirdParty' })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                          <SelectItem value="thirdParty">Third Party</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {(newProvider.tokenType ?? 'apiblaze') !== 'thirdParty' && (
+                    <div>
+                      <Label>Target server token type</Label>
+                      <p className="text-xs text-muted-foreground">What to send in the Authorization header when forwarding to your target servers</p>
+                      <Select
+                        value={newProvider.targetServerToken ?? 'apiblaze'}
+                        onValueChange={(value) =>
+                          setNewProvider({ ...newProvider, targetServerToken: value as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none' })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                          <SelectItem value="third_party_access_token">{PROVIDER_TYPES.find(p => p.value === newProvider.type)?.label ?? newProvider.type} access token</SelectItem>
+                          <SelectItem value="third_party_id_token">{PROVIDER_TYPES.find(p => p.value === newProvider.type)?.label ?? newProvider.type} ID token</SelectItem>
+                          <SelectItem value="none">None</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {(newProvider.targetServerToken === 'third_party_access_token' || newProvider.targetServerToken === 'third_party_id_token') && (
+                        <div className="space-y-2 mt-2">
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              checked={newProvider.includeApiblazeAccessTokenHeader ?? false}
+                              onCheckedChange={(checked) =>
+                                setNewProvider({ ...newProvider, includeApiblazeAccessTokenHeader: checked })
+                              }
+                            />
+                            <Label className="text-sm">
+                              Include APIBlaze access token in x-apiblaze-access-token header
+                            </Label>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              checked={newProvider.includeApiblazeIdTokenHeader ?? false}
+                              onCheckedChange={(checked) =>
+                                setNewProvider({ ...newProvider, includeApiblazeIdTokenHeader: checked })
+                              }
+                            />
+                            <Label className="text-sm">
+                              Include APIBlaze ID token in x-apiblaze-id-token header
+                            </Label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    )}
                     <div className="flex gap-2">
                       <Button
                         size="sm"
@@ -684,6 +764,9 @@ export function AuthConfigModal({
                             clientSecret: '',
                             domain: 'https://accounts.google.com',
                             tokenType: 'apiblaze',
+                            targetServerToken: 'apiblaze',
+                            includeApiblazeAccessTokenHeader: false,
+                            includeApiblazeIdTokenHeader: false,
                           });
                         }}
                       >

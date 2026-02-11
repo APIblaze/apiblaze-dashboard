@@ -190,14 +190,47 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm font-medium">Token Type</CardTitle>
+              <CardTitle className="text-sm font-medium">Client side token type</CardTitle>
+              <CardDescription>
+                {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'thirdParty'
+                  ? 'Tokens the API users will see and that will be forwarded to your target servers'
+                  : 'Tokens the API users will see'}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <Badge variant="secondary">
-                {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'apiblaze' ? 'APIBlaze' : 'Third Party'}
+                {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'apiblaze' ? 'API Blaze token' : 'Third Party'}
               </Badge>
             </CardContent>
           </Card>
+
+          {(provider.tokenType ?? (provider as { token_type?: string }).token_type) !== 'thirdParty' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Target server token type</CardTitle>
+              <CardDescription>What to send in the Authorization header when forwarding to your target servers</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Badge variant="secondary">
+                {(() => {
+                  const v = provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token ?? 'apiblaze';
+                  const providerLabel = PROVIDER_TYPE_LABELS[provider.type];
+                  if (v === 'third_party_access_token') return `${providerLabel} access token`;
+                  if (v === 'third_party_id_token') return `${providerLabel} ID token`;
+                  if (v === 'none') return 'None';
+                  return 'APIBlaze';
+                })()}
+              </Badge>
+              {(provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token) === 'third_party_access_token' ||
+               (provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token) === 'third_party_id_token' ? (
+                <p className="text-xs text-muted-foreground mt-2 space-y-1">
+                  Include APIBlaze access token in x-apiblaze-access-token: {(provider.includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_access_token_header?: boolean }).include_apiblaze_access_token_header ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header) ? 'Yes' : 'No'}<br />
+                  Include APIBlaze ID token in x-apiblaze-id-token: {(provider.includeApiblazeIdTokenHeader ?? (provider as { include_apiblaze_id_token_header?: boolean }).include_apiblaze_id_token_header) ? 'Yes' : 'No'}
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+          )}
 
           <Card>
             <CardHeader>
