@@ -2153,7 +2153,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         <div className="flex items-center justify-between p-4 border rounded-lg">
           <div className="space-y-1">
             <Label htmlFor="enableSocialAuth" className="text-sm font-medium">
-              Create a login page for this API
+              Host a login page for this API (oAuth)
             </Label>
             <p className="text-xs text-muted-foreground">
               Users will be able to authenticate using OAuth tokens (GitHub default)
@@ -2182,7 +2182,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
             <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
               <div className="space-y-1">
                 <Label htmlFor="bringOwnProvider" className="text-sm font-medium">
-                  Bring My Own OAuth Provider
+                  Bring My Own login Provider (oAuth)
                 </Label>
                 <p className="text-xs text-muted-foreground">
                   Use your own Google, Auth0, or other OAuth provider
