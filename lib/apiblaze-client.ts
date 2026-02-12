@@ -346,6 +346,8 @@ export class APIBlazeClient {
     authConfigId: string,
     data: {
       name: string;
+      projectName: string;
+      apiVersion: string;
       refreshTokenExpiry?: number;
       idTokenExpiry?: number;
       accessTokenExpiry?: number;

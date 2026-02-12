@@ -61,6 +61,8 @@ export interface CreateAuthConfigRequest {
 
 export interface CreateAppClientRequest {
   name: string;
+  projectName: string;
+  apiVersion: string;
   refreshTokenExpiry?: number;
   idTokenExpiry?: number;
   accessTokenExpiry?: number;

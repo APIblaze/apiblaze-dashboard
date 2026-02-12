@@ -307,6 +307,8 @@ class ApiClient {
 
   async createAppClient(authConfigId: string, data: {
     name: string;
+    projectName: string;
+    apiVersion: string;
     refreshTokenExpiry?: number;
     idTokenExpiry?: number;
     accessTokenExpiry?: number;
@@ -396,6 +398,8 @@ class ApiClient {
   async createAuthConfigWithDefaultGitHub(data: {
     authConfigName: string;
     appClientName: string;
+    projectName: string;
+    apiVersion: string;
     scopes?: string[];
     enableSocialAuth?: boolean;
     enableApiKeyAuth?: boolean;

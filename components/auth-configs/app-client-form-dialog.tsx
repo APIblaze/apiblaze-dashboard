@@ -28,6 +28,8 @@ interface AppClientFormDialogProps {
   onSuccess: () => void;
   authConfigId: string;
   appClient?: AppClient | null;
+  projectName?: string;
+  apiVersion?: string;
 }
 
 export function AppClientFormDialog({
@@ -36,9 +38,13 @@ export function AppClientFormDialog({
   onSuccess,
   authConfigId,
   appClient,
+  projectName: initialProjectName,
+  apiVersion: initialApiVersion,
 }: AppClientFormDialogProps) {
   const { toast } = useToast();
   const [name, setName] = useState('');
+  const [projectName, setProjectName] = useState(initialProjectName ?? '');
+  const [apiVersion, setApiVersion] = useState(initialApiVersion ?? '1.0.0');
   const [refreshTokenExpiry, setRefreshTokenExpiry] = useState(2592000); // 30 days
   const [idTokenExpiry, setIdTokenExpiry] = useState(3600); // 1 hour
   const [accessTokenExpiry, setAccessTokenExpiry] = useState(3600); // 1 hour
@@ -64,6 +70,8 @@ export function AppClientFormDialog({
         setClientSecret(null);
       } else {
         setName('');
+        setProjectName(initialProjectName ?? '');
+        setApiVersion(initialApiVersion ?? '1.0.0');
         setRefreshTokenExpiry(2592000);
         setIdTokenExpiry(3600);
         setAccessTokenExpiry(3600);
@@ -73,7 +81,7 @@ export function AppClientFormDialog({
         setClientSecret(null);
       }
     }
-  }, [open, appClient]);
+  }, [open, appClient, initialProjectName, initialApiVersion]);
 
   const validateHttpsUrl = (url: string): { valid: boolean; error?: string } => {
     try {
@@ -152,27 +160,45 @@ export function AppClientFormDialog({
       return;
     }
 
+    if (!appClient && (!projectName.trim() || !apiVersion.trim())) {
+      toast({
+        title: 'Validation Error',
+        description: 'Project name and API version are required when creating an app client',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
       setSubmitting(true);
       
-      const data: CreateAppClientRequest = {
-        name: name.trim(),
-        refreshTokenExpiry,
-        idTokenExpiry,
-        accessTokenExpiry,
-        authorizedCallbackUrls,
-        signoutUris,
-        scopes,
-      };
-      
       if (appClient) {
-        await api.updateAppClient(authConfigId, appClient.id, data);
+        await api.updateAppClient(authConfigId, appClient.id, {
+          name: name.trim(),
+          refreshTokenExpiry,
+          idTokenExpiry,
+          accessTokenExpiry,
+          authorizedCallbackUrls,
+          signoutUris,
+          scopes,
+        });
         toast({
           title: 'Success',
           description: 'App client updated successfully',
         });
       } else {
-        const result = await api.createAppClient(authConfigId, data) as CreateAppClientResponse;
+        const createData: CreateAppClientRequest = {
+          name: name.trim(),
+          projectName: projectName.trim(),
+          apiVersion: apiVersion.trim(),
+          refreshTokenExpiry,
+          idTokenExpiry,
+          accessTokenExpiry,
+          authorizedCallbackUrls,
+          signoutUris,
+          scopes,
+        };
+        const result = await api.createAppClient(authConfigId, createData) as CreateAppClientResponse;
         if (result.clientSecret) {
           setClientSecret(result.clientSecret);
           toast({
@@ -281,6 +307,31 @@ export function AppClientFormDialog({
                     disabled={submitting}
                   />
                 </div>
+
+                {!appClient && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="projectName">Project Name</Label>
+                      <Input
+                        id="projectName"
+                        value={projectName}
+                        onChange={(e) => setProjectName(e.target.value)}
+                        placeholder="my-project"
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="apiVersion">API Version</Label>
+                      <Input
+                        id="apiVersion"
+                        value={apiVersion}
+                        onChange={(e) => setApiVersion(e.target.value)}
+                        placeholder="1.0.0"
+                        disabled={submitting}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">

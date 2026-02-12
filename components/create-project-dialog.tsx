@@ -654,6 +654,8 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               name: `${config.projectName}-appclient`,
               scopes: config.authorizedScopes,
               authorizedCallbackUrls: finalCallbackUrls,
+              projectName: config.projectName,
+              apiVersion: config.apiVersion || '1.0.0',
             });
             const newAppClientId = (appClient as { id: string }).id;
             const createdAppClientClientId = (appClient as { clientId: string }).clientId;
@@ -743,6 +745,8 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               enableSocialAuth: config.enableSocialAuth,
               enableApiKeyAuth: config.enableApiKey,
               bringMyOwnOAuth: config.bringOwnProvider,
+              projectName: config.projectName,
+              apiVersion: config.apiVersion || '1.0.0',
             });
 
             // Track for rollback (server creates auth config + app client + provider)

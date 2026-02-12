@@ -12,11 +12,18 @@ export async function POST(request: NextRequest) {
   try {
     const userClaims = await getUserClaims();
     const body = await request.json();
-    const { authConfigName, appClientName, scopes, enableSocialAuth, enableApiKeyAuth, bringMyOwnOAuth } = body;
+    const { authConfigName, appClientName, scopes, enableSocialAuth, enableApiKeyAuth, bringMyOwnOAuth, projectName, apiVersion } = body;
 
     if (!authConfigName || !appClientName) {
       return NextResponse.json(
         { error: 'authConfigName and appClientName are required' },
+        { status: 400 }
+      );
+    }
+
+    if (!projectName || !apiVersion) {
+      return NextResponse.json(
+        { error: 'projectName and apiVersion are required' },
         { status: 400 }
       );
     }
@@ -73,6 +80,8 @@ export async function POST(request: NextRequest) {
     // 2. Create AppClient
     const appClient = await client.createAppClient(userClaims, authConfigId, {
       name: appClientName,
+      projectName: String(projectName).trim(),
+      apiVersion: String(apiVersion).trim(),
       scopes: scopes || ['email', 'openid', 'profile'],
     });
     const appClientId = (appClient as { id: string }).id;

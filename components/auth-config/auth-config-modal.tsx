@@ -36,6 +36,8 @@ interface AuthConfigModalProps {
   onOpenChange: (open: boolean) => void;
   onSelect?: (appClient: AppClient & { authConfigId: string }) => void;
   mode?: 'select' | 'manage'; // 'select' for project creation, 'manage' for standalone management
+  projectName?: string;
+  apiVersion?: string;
 }
 
 const PROVIDER_TYPES: Array<{ value: SocialProvider['type']; label: string }> = [
@@ -60,7 +62,9 @@ export function AuthConfigModal({
   open, 
   onOpenChange, 
   onSelect,
-  mode = 'select'
+  mode = 'select',
+  projectName,
+  apiVersion,
 }: AuthConfigModalProps) {
   const { toast } = useToast();
   const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
@@ -166,11 +170,22 @@ export function AuthConfigModal({
       return;
     }
 
+    if (!projectName?.trim() || !apiVersion?.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Project name and API version are required. Please use the project authentication section to create app clients.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsCreatingAppClient(true);
     try {
       const data = await api.createAppClient(selectedAuthConfigId, {
         name: newAppClientName.trim(),
         scopes: ['email', 'openid', 'profile'],
+        projectName: projectName.trim(),
+        apiVersion: apiVersion.trim(),
       });
       const appClient = data as AppClient;
       setNewAppClientId(appClient.clientId);

@@ -55,10 +55,26 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    if (!body.projectName || body.projectName.trim().length === 0) {
+      return NextResponse.json(
+        { error: 'Validation error', details: 'projectName is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!body.apiVersion || body.apiVersion.trim().length === 0) {
+      return NextResponse.json(
+        { error: 'Validation error', details: 'apiVersion is required' },
+        { status: 400 }
+      );
+    }
     
     // Set safe defaults for token expiries
     const appClientData = {
       name: body.name,
+      projectName: body.projectName.trim(),
+      apiVersion: body.apiVersion.trim(),
       refreshTokenExpiry: body.refreshTokenExpiry ?? 2592000, // 30 days
       idTokenExpiry: body.idTokenExpiry ?? 3600, // 1 hour
       accessTokenExpiry: body.accessTokenExpiry ?? 3600, // 1 hour

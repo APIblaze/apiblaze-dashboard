@@ -440,6 +440,8 @@ function EditModeManagementUI({
         name: newAppClientName,
         scopes: ['email', 'openid', 'profile'],
         authorizedCallbackUrls: finalCallbackUrls,
+        projectName: config.projectName || project?.project_id || 'project',
+        apiVersion: config.apiVersion || project?.api_version || '1.0.0',
       });
       
       // Add the new client to the state immediately so it appears right away
@@ -2598,6 +2600,8 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         onOpenChange={setAuthConfigModalOpen}
         mode="select"
         onSelect={handleUseExistingAuthConfig}
+        projectName={config.projectName || project?.project_id}
+        apiVersion={config.apiVersion || project?.api_version || '1.0.0'}
       />
 
       {/* Simple Auth Config Name Selection Modal */}
