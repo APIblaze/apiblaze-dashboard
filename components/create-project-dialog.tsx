@@ -22,6 +22,8 @@ import { PrePostProcessingSection } from './create-project/preprocessing-section
 import { DomainsSection } from './create-project/domains-section';
 import { ProjectConfig, type SocialProvider } from './create-project/types';
 import { api } from '@/lib/api';
+import { getDefaultTargetServers } from './create-project/default-environments';
+import type { TargetServer } from './create-project/types';
 import { useToast } from '@/hooks/use-toast';
 import { fetchGitHubAPI } from '@/lib/github-api';
 import { deleteProject } from '@/lib/api/projects';
@@ -148,11 +150,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     includeApiblazeIdTokenHeader: false,
     
     // Target Servers
-    targetServers: [
-      { stage: 'dev', targetUrl: '', config: [] },
-      { stage: 'test', targetUrl: '', config: [] },
-      { stage: 'prod', targetUrl: '', config: [] },
-    ],
+    targetServers: getDefaultTargetServers(),
     
     // Portal
     createPortal: true,
@@ -221,12 +219,19 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       includeApiblazeAccessTokenHeader: !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_access_token_header) || !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_token_header),
       includeApiblazeIdTokenHeader: !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_id_token_header),
       
-      // Target Servers
-      targetServers: [
-        { stage: 'dev', targetUrl: '', config: [] },
-        { stage: 'test', targetUrl: '', config: [] },
-        { stage: 'prod', targetUrl: '', config: [] },
-      ],
+      // Target Servers - from project environments or default
+      targetServers: (() => {
+        const targetUrl = (projectConfig?.target_url as string) || (projectConfig?.target as string) || '';
+        const envs = projectConfig?.environments as Record<string, { target?: string }> | undefined;
+        if (envs && Object.keys(envs).length > 0) {
+          return Object.entries(envs).map(([stage, env]) => ({
+            stage,
+            targetUrl: env.target || targetUrl,
+            config: [],
+          })) as TargetServer[];
+        }
+        return getDefaultTargetServers(targetUrl);
+      })(),
       
       // Portal
       createPortal: true,
