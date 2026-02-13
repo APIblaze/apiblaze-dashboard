@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ArrowLeft, Settings, Trash2, Copy, Check, Eye } from 'lucide-react';
+import { Loader2, ArrowLeft, Pencil, Trash2, Copy, Check, Eye } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
@@ -154,7 +154,7 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
-              <Settings className="mr-2 h-4 w-4" />
+              <Pencil className="mr-2 h-4 w-4" />
               Edit
             </Button>
             <Button variant="outline" onClick={() => setDeleteDialogOpen(true)}>

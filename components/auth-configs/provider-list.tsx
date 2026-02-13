@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Plus, Settings, Trash2, MoreVertical, ExternalLink } from 'lucide-react';
+import { Loader2, Plus, Settings, Trash2, MoreVertical, ExternalLink, Pencil } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -162,19 +162,28 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
                         {(provider.clientId ?? (provider as { client_id?: string }).client_id ?? '').substring(0, 30)}...
                       </CardDescription>
                     </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm">
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleViewDetails(provider)}>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEdit(provider)}
+                        title="Edit provider"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleViewDetails(provider)}>
                           <ExternalLink className="mr-2 h-4 w-4" />
                           View Details
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleEdit(provider)}>
-                          <Settings className="mr-2 h-4 w-4" />
+                          <Pencil className="mr-2 h-4 w-4" />
                           Edit
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
@@ -186,7 +195,8 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
                           Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>
-                    </DropdownMenu>
+                      </DropdownMenu>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">

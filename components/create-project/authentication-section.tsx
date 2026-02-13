@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { AlertCircle, Plus, X, Users, Key, Copy, Check, Trash2, Search, ChevronDown, Star, ExternalLink, Loader2 } from 'lucide-react';
+import { AlertCircle, Plus, X, Users, Key, Copy, Check, Trash2, Search, ChevronDown, Star, ExternalLink, Loader2, Pencil } from 'lucide-react';
 import { ProjectConfig, SocialProvider } from './types';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { AuthConfigModal } from '@/components/auth-config/auth-config-modal';
@@ -235,6 +235,33 @@ function EditModeManagementUI({
   }>>({});
   const [newCallbackUrlByClient, setNewCallbackUrlByClient] = useState<Record<string, string>>({});
   const [savingCallbackUrlsForClient, setSavingCallbackUrlsForClient] = useState<string | null>(null);
+  const [editingAppClientId, setEditingAppClientId] = useState<string | null>(null);
+  const [editAppClientForm, setEditAppClientForm] = useState<{
+    name: string;
+    authorizedCallbackUrls: string[];
+    newUrl: string;
+    refreshTokenExpiry: number;
+    idTokenExpiry: number;
+    accessTokenExpiry: number;
+    signoutUris: string[];
+    newSignoutUri: string;
+    scopes: string[];
+    newScope: string;
+  } | null>(null);
+  const [savingAppClientEdit, setSavingAppClientEdit] = useState(false);
+  const [editingProviderKey, setEditingProviderKey] = useState<string | null>(null);
+  const [editProviderForm, setEditProviderForm] = useState<{
+    type: SocialProvider;
+    clientId: string;
+    clientSecret: string;
+    domain: string;
+    tokenType: 'apiblaze' | 'thirdParty';
+    targetServerToken: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+    includeApiblazeAccessTokenHeader: boolean;
+    includeApiblazeIdTokenHeader: boolean;
+  } | null>(null);
+  const [savingProviderEdit, setSavingProviderEdit] = useState(false);
+  const [loadingProviderSecret, setLoadingProviderSecret] = useState(false);
 
   const validateHttpsUrlForEdit = (url: string): { valid: boolean; error?: string } => {
     try {
@@ -566,6 +593,116 @@ function EditModeManagementUI({
     }
   };
 
+  const startEditAppClient = (client: AppClient) => {
+    const details = appClientDetails[client.id] as AppClientResponse | undefined;
+    const urls = (details?.authorizedCallbackUrls ?? details?.authorized_callback_urls ?? []) as string[];
+    setEditingAppClientId(client.id);
+    setEditAppClientForm({
+      name: client.name,
+      authorizedCallbackUrls: urls,
+      newUrl: '',
+      refreshTokenExpiry: details?.refreshTokenExpiry ?? 2592000,
+      idTokenExpiry: details?.idTokenExpiry ?? 3600,
+      accessTokenExpiry: details?.accessTokenExpiry ?? 3600,
+      signoutUris: (details?.signoutUris ?? details?.signout_uris ?? []) as string[],
+      newSignoutUri: '',
+      scopes: (details?.scopes ?? ['email', 'openid', 'profile']) as string[],
+      newScope: '',
+    });
+  };
+
+  const saveAppClientEdit = async () => {
+    if (!currentAuthConfigId || !editingAppClientId || !editAppClientForm) return;
+    if (!editAppClientForm.name.trim()) {
+      alert('Name is required');
+      return;
+    }
+    setSavingAppClientEdit(true);
+    try {
+      await api.updateAppClient(currentAuthConfigId, editingAppClientId, {
+        name: editAppClientForm.name.trim(),
+        authorizedCallbackUrls: editAppClientForm.authorizedCallbackUrls,
+        refreshTokenExpiry: editAppClientForm.refreshTokenExpiry,
+        idTokenExpiry: editAppClientForm.idTokenExpiry,
+        accessTokenExpiry: editAppClientForm.accessTokenExpiry,
+        signoutUris: editAppClientForm.signoutUris,
+        scopes: editAppClientForm.scopes,
+      });
+      await invalidateAndRefetch(teamId);
+      setEditingAppClientId(null);
+      setEditAppClientForm(null);
+    } catch (err) {
+      console.error('Error updating app client:', err);
+      alert(err instanceof Error ? err.message : 'Failed to update app client');
+    } finally {
+      setSavingAppClientEdit(false);
+    }
+  };
+
+  const cancelAppClientEdit = () => {
+    setEditingAppClientId(null);
+    setEditAppClientForm(null);
+  };
+
+  const startEditProvider = async (clientId: string, provider: SocialProviderResponse) => {
+    setEditingProviderKey(`${clientId}:${provider.id}`);
+    setLoadingProviderSecret(true);
+    let secret = '';
+    try {
+      const res = await api.getProviderSecret(currentAuthConfigId!, clientId, provider.id);
+      secret = res.clientSecret ?? '';
+    } catch {
+      // Leave empty if we can't fetch
+    } finally {
+      setLoadingProviderSecret(false);
+    }
+    setEditProviderForm({
+      type: provider.type,
+      clientId: provider.clientId ?? (provider as { client_id?: string }).client_id ?? '',
+      clientSecret: secret,
+      domain: provider.domain ?? PROVIDER_DOMAINS[provider.type],
+      tokenType: ((provider.tokenType ?? (provider as { token_type?: string }).token_type) ?? 'apiblaze') as 'apiblaze' | 'thirdParty',
+      targetServerToken: (provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token ?? 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none',
+      includeApiblazeAccessTokenHeader: provider.includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_access_token_header?: boolean }).include_apiblaze_access_token_header ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header ?? false,
+      includeApiblazeIdTokenHeader: provider.includeApiblazeIdTokenHeader ?? (provider as { include_apiblaze_id_token_header?: boolean }).include_apiblaze_id_token_header ?? false,
+    });
+  };
+
+  const saveProviderEdit = async () => {
+    if (!currentAuthConfigId || !editingProviderKey || !editProviderForm) return;
+    const [clientId, providerId] = editingProviderKey.split(':');
+    if (!editProviderForm.clientId.trim() || !editProviderForm.clientSecret.trim()) {
+      alert('Client ID and Client Secret are required');
+      return;
+    }
+    setSavingProviderEdit(true);
+    try {
+      await api.updateProvider(currentAuthConfigId, clientId, providerId, {
+        type: editProviderForm.type,
+        clientId: editProviderForm.clientId.trim(),
+        clientSecret: editProviderForm.clientSecret.trim(),
+        domain: editProviderForm.domain.trim() || undefined,
+        tokenType: editProviderForm.tokenType,
+        targetServerToken: editProviderForm.targetServerToken,
+        includeApiblazeAccessTokenHeader: editProviderForm.includeApiblazeAccessTokenHeader,
+        includeApiblazeIdTokenHeader: editProviderForm.includeApiblazeIdTokenHeader,
+      });
+      await invalidateAndRefetch(teamId);
+      setEditingProviderKey(null);
+      setEditProviderForm(null);
+    } catch (err) {
+      console.error('Error updating provider:', err);
+      alert(err instanceof Error ? err.message : 'Failed to update provider');
+    } finally {
+      setSavingProviderEdit(false);
+    }
+  };
+
+  const cancelProviderEdit = () => {
+    setEditingProviderKey(null);
+    setEditProviderForm(null);
+  };
+
   const copyToClipboard = async (text: string, field: string) => {
     if (!text || text.trim() === '') {
       console.warn('No text to copy');
@@ -773,7 +910,140 @@ function EditModeManagementUI({
                 const isShowingAddProvider = showAddProvider[client.id];
                 return (
                   <div key={client.id} className="space-y-4">
-                    {/* App Client Card - More prominent styling */}
+                    {/* App Client Card - Inline edit form when editing */}
+                    {editingAppClientId === client.id && editAppClientForm ? (
+                      <Card className="border-2 border-blue-200 bg-blue-50/50">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm">Edit AppClient</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div>
+                            <Label htmlFor={`editAppClientName-${client.id}`} className="text-xs">Name</Label>
+                            <Input
+                              id={`editAppClientName-${client.id}`}
+                              value={editAppClientForm.name}
+                              onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, name: e.target.value } : null)}
+                              placeholder="my-app-client"
+                              className="mt-1"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-xs">Authorized Callback URLs</Label>
+                            <div className="flex gap-2">
+                              <Input
+                                value={editAppClientForm.newUrl}
+                                onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, newUrl: e.target.value } : null)}
+                                placeholder="https://example.com/callback"
+                                className="text-xs"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (editAppClientForm.newUrl.trim()) {
+                                      setEditAppClientForm(prev => prev ? { ...prev, authorizedCallbackUrls: [...prev.authorizedCallbackUrls, prev.newUrl.trim()], newUrl: '' } : null);
+                                    }
+                                  }
+                                }}
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={() => {
+                                  if (editAppClientForm.newUrl.trim()) {
+                                    setEditAppClientForm(prev => prev ? { ...prev, authorizedCallbackUrls: [...prev.authorizedCallbackUrls, prev.newUrl.trim()], newUrl: '' } : null);
+                                  }
+                                }}
+                              >
+                                <Plus className="h-3 w-3" />
+                              </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {editAppClientForm.authorizedCallbackUrls.map((url, index) => (
+                                <div key={url} className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs">
+                                  {index === 0 && (
+                                    <Badge variant="secondary" className="mr-1 text-xs">
+                                      <Star className="h-2 w-2 mr-1" />
+                                      Default
+                                    </Badge>
+                                  )}
+                                  <span>{url}</span>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-4 w-4 p-0"
+                                    onClick={() => setEditAppClientForm(prev => prev ? { ...prev, authorizedCallbackUrls: prev.authorizedCallbackUrls.filter(u => u !== url) } : null)}
+                                  >
+                                    <X className="h-2 w-2" />
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="pt-2 border-t border-blue-100">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setShowAdvancedSettings(prev => ({ ...prev, [client.id]: !prev[client.id] }))}
+                              className="w-full justify-between h-8 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-blue-50"
+                            >
+                              <span className="flex items-center gap-2">
+                                <ChevronDown className={`h-3 w-3 transition-transform ${showAdvancedSettings[client.id] ? 'rotate-180' : ''}`} />
+                                Advanced Settings
+                              </span>
+                            </Button>
+                            {showAdvancedSettings[client.id] && (
+                              <div className="space-y-2 mt-3">
+                                <Label className="text-xs">Token Expiry (seconds)</Label>
+                                <div className="grid grid-cols-3 gap-2">
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">Refresh</Label>
+                                    <Input
+                                      type="number"
+                                      value={editAppClientForm.refreshTokenExpiry}
+                                      onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, refreshTokenExpiry: parseInt(e.target.value, 10) || 2592000 } : null)}
+                                      className="mt-1"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">ID Token</Label>
+                                    <Input
+                                      type="number"
+                                      value={editAppClientForm.idTokenExpiry}
+                                      onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, idTokenExpiry: parseInt(e.target.value, 10) || 3600 } : null)}
+                                      className="mt-1"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">Access</Label>
+                                    <Input
+                                      type="number"
+                                      value={editAppClientForm.accessTokenExpiry}
+                                      onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, accessTokenExpiry: parseInt(e.target.value, 10) || 3600 } : null)}
+                                      className="mt-1"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={saveAppClientEdit}
+                              disabled={savingAppClientEdit || !editAppClientForm.name.trim()}
+                            >
+                              {savingAppClientEdit ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                              Save
+                            </Button>
+                            <Button type="button" variant="ghost" size="sm" onClick={cancelAppClientEdit}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ) : (
                     <Card className="border-2 border-blue-200 bg-blue-50/30 shadow-sm">
                       <CardContent className="p-4">
                         <div className="space-y-4">
@@ -782,11 +1052,11 @@ function EditModeManagementUI({
                               <Key className="h-4 w-4 text-blue-600" />
                               <div>
                                 <div className="font-semibold text-base">{client.name}</div>
-                                {/* JWKS Display */}
-                                {clientDetails?.jwks && (() => {
-                                  const clientId = clientDetails?.client_id || clientDetails?.clientId;
+                                {/* JWKS Display - shown for all app clients (client_id from list) */}
+                                {(() => {
+                                  const clientId = clientDetails?.client_id || clientDetails?.clientId || client.clientId || client.id;
+                                  if (!clientId) return null;
                                   const jwksUrl = `https://auth.apiblaze.com/${clientId}/.well-known/jwks.json`;
-                                  
                                   return (
                                     <div className="flex items-center gap-2 mt-0.5">
                                       <div className="text-xs text-muted-foreground">
@@ -878,6 +1148,16 @@ function EditModeManagementUI({
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => startEditAppClient(client)}
+                                className="h-8 w-8 p-0 text-muted-foreground hover:text-blue-600 hover:bg-blue-50"
+                                title="Edit app client"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -1303,6 +1583,7 @@ function EditModeManagementUI({
                         </div>
                       </CardContent>
                     </Card>
+                    )}
                     
                     {/* Providers nested under each app client - Clearly indented with visual connection */}
                     <div className="ml-8 pl-4 border-l-2 border-gray-200 space-y-3">
@@ -1582,37 +1863,185 @@ function EditModeManagementUI({
                         <div className="text-xs text-muted-foreground italic py-2">No providers configured. The default APIBlaze Github login will be used.</div>
                       ) : (
                         <div className="space-y-2">
-                          {clientProviders.map((provider) => (
-                            <div
-                              key={provider.id}
-                              className="flex items-center justify-between p-2.5 bg-gray-50/50 border border-gray-200 rounded-md hover:bg-gray-100/50 transition-colors"
-                            >
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className="text-xs font-medium capitalize">
-                                    {provider.type}
-                                  </Badge>
+                          {clientProviders.map((provider) => {
+                            const providerEditKey = `${client.id}:${provider.id}`;
+                            const isEditingProvider = editingProviderKey === providerEditKey && editProviderForm;
+                            return isEditingProvider ? (
+                              <Card key={provider.id} className="border-green-200 bg-green-50/50">
+                                <CardHeader className="pb-3">
+                                  <CardTitle className="text-sm">Edit OAuth Provider</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-3">
+                                  {loadingProviderSecret ? (
+                                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                      Loading provider secret...
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div>
+                                        <Label className="text-xs">Provider Type</Label>
+                                        <Select
+                                          value={editProviderForm.type}
+                                          onValueChange={(value) => setEditProviderForm(prev => prev ? { ...prev, type: value as SocialProvider } : null)}
+                                        >
+                                          <SelectTrigger className="mt-1">
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="google">Google</SelectItem>
+                                            <SelectItem value="microsoft">Microsoft</SelectItem>
+                                            <SelectItem value="github">GitHub</SelectItem>
+                                            <SelectItem value="facebook">Facebook</SelectItem>
+                                            <SelectItem value="auth0">Auth0</SelectItem>
+                                            <SelectItem value="other">Other</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs">Domain</Label>
+                                        <Input
+                                          value={editProviderForm.domain}
+                                          onChange={(e) => setEditProviderForm(prev => prev ? { ...prev, domain: e.target.value } : null)}
+                                          placeholder="https://accounts.google.com"
+                                          className="mt-1"
+                                        />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs">Client ID</Label>
+                                        <Input
+                                          value={editProviderForm.clientId}
+                                          onChange={(e) => setEditProviderForm(prev => prev ? { ...prev, clientId: e.target.value } : null)}
+                                          placeholder="your-client-id"
+                                          className="mt-1"
+                                        />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs">Client Secret</Label>
+                                        <Input
+                                          type="password"
+                                          value={editProviderForm.clientSecret}
+                                          onChange={(e) => setEditProviderForm(prev => prev ? { ...prev, clientSecret: e.target.value } : null)}
+                                          placeholder="your-client-secret"
+                                          className="mt-1"
+                                        />
+                                      </div>
+                                      <div>
+                                        <Label className="text-xs">Client side token type</Label>
+                                        <Select
+                                          value={editProviderForm.tokenType}
+                                          onValueChange={(value) => setEditProviderForm(prev => prev ? { ...prev, tokenType: value as 'apiblaze' | 'thirdParty' } : null)}
+                                        >
+                                          <SelectTrigger className="mt-1">
+                                            <SelectValue>
+                                              {editProviderForm.tokenType === 'apiblaze' ? 'API Blaze token' : `${PROVIDER_TYPE_LABELS[editProviderForm.type]} token`}
+                                            </SelectValue>
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                                            <SelectItem value="thirdParty">{PROVIDER_TYPE_LABELS[editProviderForm.type]} token</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      {editProviderForm.tokenType !== 'thirdParty' && (
+                                        <div>
+                                          <Label className="text-xs">Target server token type</Label>
+                                          <Select
+                                            value={editProviderForm.targetServerToken}
+                                            onValueChange={(value) => setEditProviderForm(prev => prev ? { ...prev, targetServerToken: value as typeof prev.targetServerToken } : null)}
+                                          >
+                                            <SelectTrigger className="mt-1">
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                                              <SelectItem value="third_party_access_token">{PROVIDER_TYPE_LABELS[editProviderForm.type]} access token</SelectItem>
+                                              <SelectItem value="third_party_id_token">{PROVIDER_TYPE_LABELS[editProviderForm.type]} ID token</SelectItem>
+                                              <SelectItem value="none">None</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                          {(editProviderForm.targetServerToken === 'third_party_access_token' || editProviderForm.targetServerToken === 'third_party_id_token') && (
+                                            <div className="space-y-2 mt-2">
+                                              <div className="flex items-center gap-2">
+                                                <Switch
+                                                  checked={editProviderForm.includeApiblazeAccessTokenHeader}
+                                                  onCheckedChange={(checked) => setEditProviderForm(prev => prev ? { ...prev, includeApiblazeAccessTokenHeader: checked } : null)}
+                                                />
+                                                <Label className="text-xs">Include APIBlaze access token in x-apiblaze-access-token header</Label>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <Switch
+                                                  checked={editProviderForm.includeApiblazeIdTokenHeader}
+                                                  onCheckedChange={(checked) => setEditProviderForm(prev => prev ? { ...prev, includeApiblazeIdTokenHeader: checked } : null)}
+                                                />
+                                                <Label className="text-xs">Include APIBlaze ID token in x-apiblaze-id-token header</Label>
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                      <div className="flex gap-2">
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          onClick={saveProviderEdit}
+                                          disabled={savingProviderEdit || !editProviderForm.clientId.trim() || !editProviderForm.clientSecret.trim()}
+                                        >
+                                          {savingProviderEdit ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                                          Save
+                                        </Button>
+                                        <Button type="button" variant="ghost" size="sm" onClick={cancelProviderEdit}>
+                                          Cancel
+                                        </Button>
+                                      </div>
+                                    </>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            ) : (
+                              <div
+                                key={provider.id}
+                                className="flex items-center justify-between p-2.5 bg-gray-50/50 border border-gray-200 rounded-md hover:bg-gray-100/50 transition-colors"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className="text-xs font-medium capitalize">
+                                      {provider.type}
+                                    </Badge>
+                                  </div>
+                                  <div className="text-xs text-muted-foreground mt-1.5 space-y-0.5">
+                                    <div className="truncate">
+                                      <span className="font-medium">Domain:</span> {provider.domain}
+                                    </div>
+                                    <div className="truncate">
+                                      <span className="font-medium">Client ID:</span> {provider.client_id || provider.clientId}
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="text-xs text-muted-foreground mt-1.5 space-y-0.5">
-                                  <div className="truncate">
-                                    <span className="font-medium">Domain:</span> {provider.domain}
-                                  </div>
-                                  <div className="truncate">
-                                    <span className="font-medium">Client ID:</span> {provider.client_id || provider.clientId}
-                                  </div>
+                                <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => startEditProvider(client.id, provider)}
+                                    className="h-7 w-7 p-0 text-muted-foreground hover:text-blue-600 hover:bg-blue-50"
+                                    title="Edit provider"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleDeleteProvider(client.id, provider.id)}
+                                    className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </Button>
                                 </div>
                               </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteProvider(client.id, provider.id)}
-                                className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 flex-shrink-0 ml-2"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
