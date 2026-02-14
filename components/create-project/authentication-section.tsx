@@ -131,6 +131,8 @@ function EditModeManagementUI({
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
   const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
   const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
+  const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
   // Save config changes immediately to backend (without redeployment)
@@ -138,10 +140,13 @@ function EditModeManagementUI({
     if (!project) return; // Only save if we're in edit mode with an existing project
     
     try {
-      // Extract only the defaultAppClient to save
+      // Extract fields to save (defaultAppClient, automaticAppRegistration)
       const configToSave: Record<string, unknown> = {};
       if ('defaultAppClient' in updates) {
         configToSave.default_app_client_id = updates.defaultAppClient || null;
+      }
+      if ('automaticAppRegistration' in updates) {
+        configToSave.automatic_app_registration = updates.automaticAppRegistration ?? 'allow_once_verified';
       }
       
       if (Object.keys(configToSave).length > 0) {
@@ -202,6 +207,20 @@ function EditModeManagementUI({
       setSelectedAuthConfigId(authConfigId);
     }
   }, [authConfigId, selectedAuthConfigId]);
+
+  useEffect(() => {
+    if (!isBootstrapping && currentAuthConfigId) {
+      fetchAppClientsForConfig(currentAuthConfigId);
+    }
+  }, [currentAuthConfigId, isBootstrapping, fetchAppClientsForConfig]);
+
+  useEffect(() => {
+    if (!isBootstrapping && currentAuthConfigId) {
+      for (const client of appClients) {
+        fetchProvidersForClient(currentAuthConfigId, client.id);
+      }
+    }
+  }, [currentAuthConfigId, appClients, isBootstrapping, fetchProvidersForClient]);
 
   const [appClientDetails, setAppClientDetails] = useState<Record<string, AppClientResponse>>({});
   const [loadingAppClientDetails, setLoadingAppClientDetails] = useState<Record<string, boolean>>({});
@@ -1051,7 +1070,28 @@ function EditModeManagementUI({
                             <div className="flex items-center gap-2">
                               <Key className="h-4 w-4 text-blue-600" />
                               <div>
-                                <div className="font-semibold text-base">{client.name}</div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-semibold text-base">{client.name}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    {config.defaultAppClient === client.id && (
+                                      <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600 text-xs">
+                                        <Star className="h-3 w-3 mr-1" />
+                                        Default
+                                      </Badge>
+                                    )}
+                                    {config.automaticAppRegistration === 'allow_once_verified' && (
+                                      (clientDetails?.verified ?? client?.verified) === false ? (
+                                        <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-xs">
+                                          Unverified
+                                        </Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
+                                          Verified
+                                        </Badge>
+                                      )
+                                    )}
+                                  </div>
+                                </div>
                                 {/* JWKS Display - shown for all app clients (client_id from list) */}
                                 {(() => {
                                   const clientId = clientDetails?.client_id || clientDetails?.clientId || client.clientId || client.id;
@@ -1118,12 +1158,7 @@ function EditModeManagementUI({
                                       >
                                         <ExternalLink className="h-3 w-3" />
                                       </a>
-                                      {isDefault ? (
-                                        <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600 text-xs ml-1">
-                                          <Star className="h-3 w-3 mr-1" />
-                                          Default
-                                        </Badge>
-                                      ) : (
+                                      {isDefault ? null : (
                                         <Button
                                           type="button"
                                           variant="ghost"
@@ -1148,6 +1183,28 @@ function EditModeManagementUI({
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
+                              {config.automaticAppRegistration === 'allow_once_verified' &&
+                                (clientDetails?.verified ?? client?.verified) === false && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={async () => {
+                                      if (!selectedAuthConfigId) return;
+                                      try {
+                                        await api.updateAppClient(selectedAuthConfigId, client.id, { verified: true });
+                                        await invalidateAndRefetch(teamId);
+                                      } catch (err) {
+                                        console.error('Failed to verify app client:', err);
+                                        alert('Failed to verify app client');
+                                      }
+                                    }}
+                                    className="h-8 text-xs"
+                                    title="Mark as verified"
+                                  >
+                                    Verify
+                                  </Button>
+                                )}
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -2067,6 +2124,30 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   const loadingAuthConfigs = isBootstrapping;
 
   const [newScope, setNewScope] = useState('');
+  // Save config changes immediately to backend (for edit mode, e.g. automaticAppRegistration)
+  const saveProjectConfigImmediately = async (updates: { automatic_app_registration?: string; default_app_client_id?: string | null }) => {
+    if (!project) return;
+    try {
+      const configToSave: Record<string, unknown> = {};
+      if (updates.automatic_app_registration !== undefined) {
+        configToSave.automatic_app_registration = updates.automatic_app_registration;
+      }
+      if (updates.default_app_client_id !== undefined) {
+        configToSave.default_app_client_id = updates.default_app_client_id;
+      }
+      if (Object.keys(configToSave).length > 0) {
+        await updateProjectConfig(project.project_id, project.api_version, configToSave);
+        const updatedConfig = project.config
+          ? { ...(project.config as Record<string, unknown>), ...configToSave }
+          : configToSave;
+        if (onProjectUpdate) {
+          onProjectUpdate({ ...project, config: updatedConfig });
+        }
+      }
+    } catch (error) {
+      console.error('Error saving project config:', error);
+    }
+  };
   // Helper to get default callback URL based on current project name
   const getDefaultCallbackUrl = () => {
     const projectName = config.projectName || 'project';
@@ -2842,6 +2923,37 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                 )}
               </div>
             )}
+
+            {/* Automatic App registration - below all app clients */}
+            <div className="flex flex-col gap-2 p-4 border rounded-lg">
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">
+                  Automatic App registration
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Allow third party Apps to create a login page dedicated to them with the same access scopes as your default App Client.
+                </p>
+              </div>
+              <Select
+                value={config.automaticAppRegistration ?? 'allow_once_verified'}
+                onValueChange={(value) => {
+                  const v = value as 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow';
+                  updateConfig({ automaticAppRegistration: v });
+                  if (project) {
+                    saveProjectConfigImmediately({ automatic_app_registration: v });
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="allow_without_verification">Allow without verification</SelectItem>
+                  <SelectItem value="allow_once_verified">Allow once verified</SelectItem>
+                  <SelectItem value="do_not_allow">Do not allow</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         )}
 

@@ -37,7 +37,17 @@ export interface DashboardCacheActions {
   getAuthConfig: (id: string) => AuthConfig | undefined;
   getAppClients: (authConfigId: string) => AppClient[];
   getAppClient: (authConfigId: string, clientId: string) => AppClient | undefined;
+  /** Find app client by client id across all auth configs. Returns authConfigId and appClient. */
+  getAppClientWithAuthConfig: (clientId: string) => { authConfigId: string; appClient: AppClient } | undefined;
   getProviders: (authConfigId: string, clientId: string) => SocialProvider[];
+  /** Update a single app client in cache (e.g. after verify). Avoids full invalidateAndRefetch. */
+  updateAppClientInCache: (authConfigId: string, clientId: string, patch: Partial<AppClient>) => void;
+  /** Set app clients for a config (e.g. from lookup or lazy fetch). */
+  setAppClientsForConfig: (authConfigId: string, clients: AppClient[]) => void;
+  /** Lazy-load app clients for a config. No-op if already loaded. */
+  fetchAppClientsForConfig: (authConfigId: string) => Promise<void>;
+  /** Lazy-load providers for an app client. No-op if already loaded. */
+  fetchProvidersForClient: (authConfigId: string, clientId: string) => Promise<void>;
 }
 
 const initialState: DashboardCacheState = {
@@ -57,71 +67,24 @@ async function fetchBootstrapImpl(
 ): Promise<void> {
   set({ isBootstrapping: true, error: null });
   try {
-    const limit = 50;
-    const allProjects: Project[] = [];
-    let page = 1;
-    let totalPages = 1;
-
-    const fetchProjects = async () => {
-      do {
-        const res = await listProjects({
-          team_id: teamId,
-          page,
-          limit,
-          status: 'active',
-        });
-        allProjects.push(...res.projects);
-        totalPages = res.pagination.total_pages;
-        page++;
-      } while (page <= totalPages && totalPages > 0);
-    };
-
-    const fetchAuthConfigs = () => api.listAuthConfigs();
-
-    const [configs] = await Promise.all([
-      fetchAuthConfigs() as Promise<AuthConfig[]>,
-      fetchProjects(),
+    // Bootstrap: max 2 requests. App clients and providers are lazy-loaded when user drills down.
+    const [configs, projectsRes] = await Promise.all([
+      api.listAuthConfigs() as Promise<AuthConfig[]>,
+      listProjects({
+        team_id: teamId,
+        page: 1,
+        limit: 50,
+        status: 'active',
+      }),
     ]);
     const authConfigs = Array.isArray(configs) ? configs : [];
-
-    const appClientsByConfig: Record<string, AppClient[]> = {};
-    await Promise.all(
-      authConfigs.map(async (c) => {
-        try {
-          const clients = await api.listAppClients(c.id);
-          appClientsByConfig[c.id] = Array.isArray(clients) ? clients : [];
-        } catch {
-          appClientsByConfig[c.id] = [];
-        }
-      })
-    );
-
-    const providersByConfigClient: Record<string, SocialProvider[]> = {};
-    const providerPromises: Promise<void>[] = [];
-    for (const config of authConfigs) {
-      const clients = appClientsByConfig[config.id] ?? [];
-      for (const client of clients) {
-        providerPromises.push(
-          (async () => {
-            try {
-              const providers = await api.listProviders(config.id, client.id);
-              providersByConfigClient[`${config.id}-${client.id}`] = Array.isArray(providers)
-                ? providers
-                : [];
-            } catch {
-              providersByConfigClient[`${config.id}-${client.id}`] = [];
-            }
-          })()
-        );
-      }
-    }
-    await Promise.all(providerPromises);
+    const allProjects = projectsRes.projects ?? [];
 
     set({
       projects: allProjects,
       authConfigs,
-      appClientsByConfig,
-      providersByConfigClient,
+      appClientsByConfig: {},
+      providersByConfigClient: {},
       lastTeamId: teamId,
       isBootstrapping: false,
       error: null,
@@ -166,6 +129,76 @@ export const useDashboardCacheStore = create<DashboardCacheState & DashboardCach
   getAppClients: (authConfigId) => get().appClientsByConfig[authConfigId] ?? [],
   getAppClient: (authConfigId, clientId) =>
     (get().appClientsByConfig[authConfigId] ?? []).find((c) => c.id === clientId),
+  getAppClientWithAuthConfig: (clientId) => {
+    for (const [authConfigId, clients] of Object.entries(get().appClientsByConfig)) {
+      const appClient = clients.find((c) => c.id === clientId);
+      if (appClient) return { authConfigId, appClient };
+    }
+    return undefined;
+  },
   getProviders: (authConfigId, clientId) =>
     get().providersByConfigClient[`${authConfigId}-${clientId}`] ?? [],
+
+  updateAppClientInCache: (authConfigId, clientId, patch) => {
+    const clients = get().appClientsByConfig[authConfigId] ?? [];
+    const idx = clients.findIndex((c) => c.id === clientId);
+    if (idx < 0) return;
+    const updated = { ...clients[idx], ...patch };
+    set({
+      appClientsByConfig: {
+        ...get().appClientsByConfig,
+        [authConfigId]: [...clients.slice(0, idx), updated, ...clients.slice(idx + 1)],
+      },
+    });
+  },
+
+  setAppClientsForConfig: (authConfigId, clients) => {
+    set({
+      appClientsByConfig: {
+        ...get().appClientsByConfig,
+        [authConfigId]: Array.isArray(clients) ? clients : [],
+      },
+    });
+  },
+
+  fetchAppClientsForConfig: async (authConfigId) => {
+    if (authConfigId in get().appClientsByConfig) return;
+    try {
+      const clients = await api.listAppClients(authConfigId);
+      set({
+        appClientsByConfig: {
+          ...get().appClientsByConfig,
+          [authConfigId]: Array.isArray(clients) ? clients : [],
+        },
+      });
+    } catch {
+      set({
+        appClientsByConfig: {
+          ...get().appClientsByConfig,
+          [authConfigId]: [],
+        },
+      });
+    }
+  },
+
+  fetchProvidersForClient: async (authConfigId, clientId) => {
+    const key = `${authConfigId}-${clientId}`;
+    if (key in get().providersByConfigClient) return;
+    try {
+      const providers = await api.listProviders(authConfigId, clientId);
+      set({
+        providersByConfigClient: {
+          ...get().providersByConfigClient,
+          [key]: Array.isArray(providers) ? providers : [],
+        },
+      });
+    } catch {
+      set({
+        providersByConfigClient: {
+          ...get().providersByConfigClient,
+          [key]: [],
+        },
+      });
+    }
+  },
 }));

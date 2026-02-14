@@ -50,6 +50,8 @@ export interface ProjectConfig {
   authConfigId?: string;
   appClientId?: string;
   defaultAppClient?: string; // ID of the default app client for this project
+  /** Automatic app registration: allow_without_verification | allow_once_verified | do_not_allow */
+  automaticAppRegistration?: 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow';
   // Legacy OAuth fields (deprecated, use AuthConfig instead)
   bringOwnProvider: boolean;
   socialProvider: SocialProvider;

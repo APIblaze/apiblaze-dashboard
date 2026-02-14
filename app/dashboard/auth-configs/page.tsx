@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { Zap, ArrowLeft, Loader2 } from 'lucide-react';
@@ -11,16 +11,32 @@ import { AuthConfigDetail } from '@/components/auth-configs/auth-config-detail';
 import { AppClientDetail } from '@/components/auth-configs/app-client-detail';
 import { ProviderDetail } from '@/components/auth-configs/provider-detail';
 import { BreadcrumbNav } from '@/components/auth-configs/breadcrumb-nav';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
+import { api } from '@/lib/api';
 
 function AuthConfigsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session, status } = useSession();
   const [mounted, setMounted] = useState(false);
+  const [lookupAuthConfigId, setLookupAuthConfigId] = useState<string | null>(null);
+  const [lookupFailed, setLookupFailed] = useState(false);
+  const lookupInProgressRef = useRef<string | null>(null);
+  const getAppClientWithAuthConfig = useDashboardCacheStore((s) => s.getAppClientWithAuthConfig);
+  const setAppClientsForConfig = useDashboardCacheStore((s) => s.setAppClientsForConfig);
+  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
 
-  const authConfigId = searchParams.get('authConfig');
+  const authConfigIdFromUrl = searchParams.get('authConfig');
   const clientId = searchParams.get('client');
   const providerId = searchParams.get('provider');
+  const verify = searchParams.get('verify');
+
+  // Resolve authConfigId: URL > cache > lookup result
+  const authConfigId =
+    authConfigIdFromUrl ??
+    (clientId ? getAppClientWithAuthConfig(clientId)?.authConfigId : null) ??
+    lookupAuthConfigId ??
+    null;
 
   useEffect(() => {
     setMounted(true);
@@ -28,9 +44,51 @@ function AuthConfigsContent() {
 
   useEffect(() => {
     if (status === 'unauthenticated') {
-      router.push('/auth/login?returnUrl=/dashboard/auth-configs');
+      const returnPath = typeof window !== 'undefined'
+        ? window.location.pathname + window.location.search
+        : '/dashboard/auth-configs';
+      router.push(`/auth/login?returnUrl=${encodeURIComponent(returnPath)}`);
     }
   }, [status, router]);
+
+  // When clientId in URL but not in cache, try direct lookup (e.g. verify link, newly registered client).
+  // Run lookup immediately—don't wait for bootstrap. Lookup is a single fast request; bootstrap does 30+.
+  useEffect(() => {
+    if (!clientId || authConfigIdFromUrl || lookupAuthConfigId || lookupFailed) return;
+    // If bootstrap is done and we have the client in cache, use it (no lookup needed)
+    if (!loading) {
+      const fromCache = useDashboardCacheStore.getState().getAppClientWithAuthConfig(clientId);
+      if (fromCache) return;
+    }
+    // Avoid duplicate lookups when effect re-runs before first completes
+    if (lookupInProgressRef.current === clientId) return;
+
+    let cancelled = false;
+    lookupInProgressRef.current = clientId;
+    setLookupFailed(false);
+    (async () => {
+      try {
+        const res = await api.lookupAppClient(clientId);
+        if (cancelled) return;
+        setLookupAuthConfigId(res.authConfigId);
+        setAppClientsForConfig(res.authConfigId, [res.client]);
+        router.replace(
+          `/dashboard/auth-configs?authConfig=${encodeURIComponent(res.authConfigId)}&client=${encodeURIComponent(clientId)}${verify === '1' ? '&verify=1' : ''}`,
+          { scroll: false }
+        );
+      } catch {
+        if (!cancelled) {
+          setLookupAuthConfigId(null);
+          setLookupFailed(true);
+        }
+      } finally {
+        lookupInProgressRef.current = null;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, loading, authConfigIdFromUrl, lookupAuthConfigId, lookupFailed, verify, router, setAppClientsForConfig]); // loading: re-check cache when bootstrap completes
 
   if (status === 'loading' || !mounted) {
     return null;
@@ -119,7 +177,20 @@ function AuthConfigsContent() {
             authConfigId={authConfigId}
             clientId={clientId}
             onBack={handleBack}
+            verifyFromUrl={verify === '1'}
           />
+        ) : clientId && !authConfigId && lookupFailed ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-3">
+            <p className="text-muted-foreground">App client not found</p>
+            <Button variant="outline" onClick={() => router.push('/dashboard/auth-configs')}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Auth Configs
+            </Button>
+          </div>
+        ) : clientId && !authConfigId ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
         ) : authConfigId ? (
           <AuthConfigDetail
             authConfigId={authConfigId}

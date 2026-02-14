@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import Image from 'next/image';
 import { Project } from '@/types/project';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,7 +29,20 @@ function useProjectAuth(project: Project) {
   const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
+  const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
+  const appClientsByConfig = useDashboardCacheStore((s) => s.appClientsByConfig);
+
+  const authConfigIdFromConfig = useMemo(() => {
+    const projectConfig = project.config as Record<string, unknown> | undefined;
+    return (projectConfig?.auth_config_id || projectConfig?.user_pool_id) as string | undefined;
+  }, [project.config]);
+
+  useEffect(() => {
+    if (!isBootstrapping && authConfigIdFromConfig) {
+      fetchAppClientsForConfig(authConfigIdFromConfig);
+    }
+  }, [authConfigIdFromConfig, isBootstrapping, fetchAppClientsForConfig]);
 
   return useMemo(() => {
     const projectConfig = project.config as Record<string, unknown> | undefined;
@@ -61,7 +74,7 @@ function useProjectAuth(project: Project) {
       bringMyOwnOAuth,
       loadingAppClients: isBootstrapping && !!authConfigId,
     };
-  }, [project.config, getAuthConfigs, getAuthConfig, getAppClients, isBootstrapping]);
+  }, [project.config, getAuthConfigs, getAuthConfig, getAppClients, isBootstrapping, appClientsByConfig]);
 }
 
 export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardProps) {

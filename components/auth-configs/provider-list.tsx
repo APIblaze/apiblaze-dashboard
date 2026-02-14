@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -47,8 +47,19 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
   const { toast } = useToast();
   const getProviders = useDashboardCacheStore((s) => s.getProviders);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
+  const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
+  const providersByConfigClient = useDashboardCacheStore((s) => s.providersByConfigClient);
   const providers = getProviders(authConfigId, clientId);
-  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
+  const bootstrapLoading = useDashboardCacheStore((s) => s.isBootstrapping);
+  const providersKey = `${authConfigId}-${clientId}`;
+  const providersLoaded = providersKey in providersByConfigClient;
+  const loading = bootstrapLoading || !providersLoaded;
+
+  useEffect(() => {
+    if (!bootstrapLoading && authConfigId && clientId) {
+      fetchProvidersForClient(authConfigId, clientId);
+    }
+  }, [authConfigId, clientId, bootstrapLoading, fetchProvidersForClient]);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);

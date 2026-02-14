@@ -35,6 +35,7 @@ export interface CreateProxyPayload {
   auth_config_id?: string;
   app_client_id?: string;
   default_app_client_id?: string;
+  automatic_app_registration?: 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow';
   environments?: Record<string, { target: string; description?: string }>;
   throttling?: {
     userRateLimit: number;
@@ -370,6 +371,17 @@ export class APIBlazeClient {
     });
   }
 
+  /** Look up app client by client_id across all auth configs the user owns. */
+  async lookupAppClient(
+    userClaims: UserAssertionClaims,
+    clientId: string
+  ): Promise<{ authConfigId: string; client: Record<string, unknown> }> {
+    return this.request(`/auth-configs/lookup-client/${encodeURIComponent(clientId)}`, {
+      method: 'GET',
+      userClaims,
+    });
+  }
+
   async getAppClient(
     userClaims: UserAssertionClaims,
     authConfigId: string,
@@ -404,6 +416,7 @@ export class APIBlazeClient {
       authorizedCallbackUrls?: string[];
       signoutUris?: string[];
       scopes?: string[];
+      verified?: boolean;
     }
   ) {
     return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {

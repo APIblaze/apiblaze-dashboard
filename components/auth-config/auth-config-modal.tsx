@@ -71,6 +71,8 @@ export function AuthConfigModal({
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
   const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
   const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
+  const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
 
@@ -118,6 +120,18 @@ export function AuthConfigModal({
   useEffect(() => {
     if (!selectedAuthConfigId) setSelectedAppClientId('');
   }, [selectedAuthConfigId]);
+
+  useEffect(() => {
+    if (open && !isBootstrapping && selectedAuthConfigId) {
+      fetchAppClientsForConfig(selectedAuthConfigId);
+    }
+  }, [open, selectedAuthConfigId, isBootstrapping, fetchAppClientsForConfig]);
+
+  useEffect(() => {
+    if (open && !isBootstrapping && selectedAuthConfigId && selectedAppClientId) {
+      fetchProvidersForClient(selectedAuthConfigId, selectedAppClientId);
+    }
+  }, [open, selectedAuthConfigId, selectedAppClientId, isBootstrapping, fetchProvidersForClient]);
 
   const handleCreateAuthConfig = async () => {
     if (!newAuthConfigName.trim()) {

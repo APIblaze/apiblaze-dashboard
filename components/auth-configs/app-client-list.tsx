@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -38,9 +38,19 @@ export function AppClientList({ authConfigId, onRefresh }: AppClientListProps) {
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
+  const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
+  const appClientsByConfig = useDashboardCacheStore((s) => s.appClientsByConfig);
   const appClients = getAppClients(authConfigId);
   const authConfig = getAuthConfig(authConfigId) ?? null;
-  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
+  const bootstrapLoading = useDashboardCacheStore((s) => s.isBootstrapping);
+  const clientsLoaded = authConfigId in appClientsByConfig;
+  const loading = bootstrapLoading || !clientsLoaded;
+
+  useEffect(() => {
+    if (!bootstrapLoading && authConfigId) {
+      fetchAppClientsForConfig(authConfigId);
+    }
+  }, [authConfigId, bootstrapLoading, fetchAppClientsForConfig]);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -152,14 +162,26 @@ export function AppClientList({ authConfigId, onRefresh }: AppClientListProps) {
                   <CardHeader>
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <CardTitle className="text-lg">{client.name}</CardTitle>
-                          {isDefault && (
-                            <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600">
-                              <Star className="h-3 w-3 mr-1" />
-                              Default
-                            </Badge>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            {isDefault && (
+                              <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600 text-xs">
+                                <Star className="h-3 w-3 mr-1" />
+                                Default
+                              </Badge>
+                            )}
+                            {client.verified === false && (
+                              <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-xs">
+                                Unverified
+                              </Badge>
+                            )}
+                            {client.verified === true && (
+                              <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
+                                Verified
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                         <CardDescription className="font-mono text-xs break-all">
                           {client.clientId}

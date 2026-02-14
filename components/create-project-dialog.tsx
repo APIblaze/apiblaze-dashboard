@@ -138,6 +138,8 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     useAuthConfig: false,
     authConfigId: undefined,
     appClientId: undefined,
+    defaultAppClient: undefined,
+    automaticAppRegistration: 'allow_once_verified',
     bringOwnProvider: false,
     socialProvider: 'google',
     identityProviderDomain: 'https://accounts.google.com',
@@ -208,6 +210,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       authConfigId: projectConfig?.auth_config_id as string | undefined,
       appClientId: undefined, // Not stored in config - selected at deployment time from database
       defaultAppClient: (projectConfig?.default_app_client_id || projectConfig?.defaultAppClient) as string | undefined,
+      automaticAppRegistration: (projectConfig?.automatic_app_registration as 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow') || 'allow_once_verified',
       bringOwnProvider: !!(projectConfig?.oauth_config as Record<string, unknown>),
       socialProvider: (((projectConfig?.oauth_config as Record<string, unknown>)?.provider as string) || 'google') as SocialProvider,
       identityProviderDomain: (projectConfig?.oauth_config as Record<string, unknown>)?.domain as string || 'https://accounts.google.com',
@@ -899,6 +902,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         auth_config_id: authConfigId,
         app_client_id: appClientId, // AppClient selected at deployment time (not stored in config)
         default_app_client_id: defaultAppClientId, // Default app client ID stored in project config
+        automatic_app_registration: config.automaticAppRegistration ?? 'allow_once_verified',
         environments: Object.keys(environments).length > 0 ? environments : undefined,
         throttling: config.throttling || {
           userRateLimit: 10,

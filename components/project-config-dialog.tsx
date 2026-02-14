@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Project } from '@/types/project';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -30,6 +31,8 @@ export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConf
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
   const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
   const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
+  const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
 
   const config = project?.config as Record<string, unknown> | undefined;
@@ -38,6 +41,16 @@ export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConf
   const appClientId = defaultAppClientId || (config?.app_client_id as string | undefined);
 
   const hasAuthConfigIds = !!(open && project && authConfigId && appClientId);
+
+  useEffect(() => {
+    if (open && !isBootstrapping && authConfigId) {
+      fetchAppClientsForConfig(authConfigId);
+      if (appClientId) {
+        fetchProvidersForClient(authConfigId, appClientId);
+      }
+    }
+  }, [open, authConfigId, appClientId, isBootstrapping, fetchAppClientsForConfig, fetchProvidersForClient]);
+
   const authConfig = hasAuthConfigIds ? (getAuthConfig(authConfigId!) ?? null) : null;
   const appClient = hasAuthConfigIds ? (getAppClient(authConfigId!, appClientId!) as AppClientResponse | undefined ?? null) : null;
   const providers = hasAuthConfigIds ? (getProviders(authConfigId!, appClientId!) as SocialProviderResponse[]) : [];

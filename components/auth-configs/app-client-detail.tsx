@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -27,13 +27,18 @@ interface AppClientDetailProps {
   authConfigId: string;
   clientId: string;
   onBack: () => void;
+  verifyFromUrl?: boolean;
 }
 
-export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDetailProps) {
+export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl }: AppClientDetailProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
+  const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
+  const updateAppClientInCache = useDashboardCacheStore((s) => s.updateAppClientInCache);
+  const authConfig = getAuthConfig(authConfigId) ?? null;
   const appClient = getAppClient(authConfigId, clientId) as AppClient | undefined ?? null;
   const loading = useDashboardCacheStore((s) => s.isBootstrapping);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -42,6 +47,37 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
   const [copied, setCopied] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [loadingReveal, setLoadingReveal] = useState(false);
+  const [justVerified, setJustVerified] = useState(false);
+  const autoVerifyAttempted = useRef(false);
+
+  // Auto-verify when landing from unverified error page link
+  useEffect(() => {
+    if (!verifyFromUrl || !appClient || appClient.verified !== false || autoVerifyAttempted.current || loading) return;
+    autoVerifyAttempted.current = true;
+    (async () => {
+      try {
+        await api.updateAppClient(authConfigId, appClient.id, { verified: true });
+        updateAppClientInCache(authConfigId, appClient.id, { verified: true });
+        setJustVerified(true);
+        toast({
+          title: 'App verified',
+          description: 'This app client has been verified. Users can now sign in.',
+        });
+        // Remove verify param from URL
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete('verify');
+        const qs = params.toString();
+        router.replace(qs ? `/dashboard/auth-configs?${qs}` : '/dashboard/auth-configs', { scroll: false });
+      } catch (error) {
+        autoVerifyAttempted.current = false;
+        toast({
+          title: 'Error',
+          description: error instanceof Error ? error.message : 'Failed to verify app client',
+          variant: 'destructive',
+        });
+      }
+    })();
+  }, [verifyFromUrl, appClient, loading, authConfigId, updateAppClientInCache, toast, router, searchParams]);
 
   const handleCopy = async (text: string) => {
     try {
@@ -138,13 +174,62 @@ export function AppClientDetail({ authConfigId, clientId, onBack }: AppClientDet
   return (
     <>
       <div className="space-y-6">
+        {justVerified && (
+          <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/50 p-4 text-sm text-green-800 dark:text-green-200">
+            <strong>App verified successfully.</strong> This app client is now verified. Users can sign in.
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold">{appClient.name}</h2>
-            <p className="text-muted-foreground mt-1 font-mono text-sm">{appClient.id}</p>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-2xl font-bold">{appClient.name}</h2>
+              <div className="flex items-center gap-1.5">
+                {authConfig?.default_app_client_id === appClient.id && (
+                  <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600 text-xs">
+                    <Star className="h-3 w-3 mr-1" />
+                    Default
+                  </Badge>
+                )}
+                {appClient.verified === false && (
+                  <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-xs">
+                    Unverified
+                  </Badge>
+                )}
+                {appClient.verified === true && (
+                  <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
+                    Verified
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <p className="text-muted-foreground font-mono text-sm">{appClient.id}</p>
           </div>
           <div className="flex items-center gap-2">
+            {appClient.verified === false && (
+              <Button
+                variant="default"
+                onClick={async () => {
+                  try {
+                    await api.updateAppClient(authConfigId, appClient.id, { verified: true });
+                    updateAppClientInCache(authConfigId, appClient.id, { verified: true });
+                    toast({
+                      title: 'Success',
+                      description: 'App client verified successfully',
+                    });
+                  } catch (error) {
+                    console.error('Failed to verify app client:', error);
+                    toast({
+                      title: 'Error',
+                      description: error instanceof Error ? error.message : 'Failed to verify app client',
+                      variant: 'destructive',
+                    });
+                  }
+                }}
+              >
+                Verify
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
               <Pencil className="mr-2 h-4 w-4" />
               Edit

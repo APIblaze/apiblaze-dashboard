@@ -36,6 +36,7 @@ export interface AppClient {
   created_at: string;
   updated_at: string;
   providers_count?: number;
+  verified?: boolean;
 }
 
 export interface SocialProvider {
@@ -79,6 +80,7 @@ export interface UpdateAppClientRequest {
   authorizedCallbackUrls?: string[];
   signoutUris?: string[];
   scopes?: string[];
+  verified?: boolean;
 }
 
 export interface CreateProviderRequest {

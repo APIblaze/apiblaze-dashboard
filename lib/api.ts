@@ -176,6 +176,7 @@ class ApiClient {
     auth_config_id?: string;
     app_client_id?: string;
     default_app_client_id?: string;
+    automatic_app_registration?: 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow';
     environments?: Record<string, { target: string }>;
     throttling?: {
       userRateLimit: number;
@@ -226,6 +227,9 @@ class ApiClient {
     }
     if (data.default_app_client_id) {
       backendData.default_app_client_id = data.default_app_client_id;
+    }
+    if (data.automatic_app_registration) {
+      backendData.automatic_app_registration = data.automatic_app_registration;
     }
     if (data.environments) {
       backendData.environments = data.environments;
@@ -300,6 +304,13 @@ class ApiClient {
     return this.request<AppClientResponse>(`/auth-configs/${authConfigId}/app-clients/${clientId}`);
   }
 
+  /** Look up app client by client_id when authConfigId is unknown (e.g. verify link). */
+  async lookupAppClient(clientId: string): Promise<{ authConfigId: string; client: AppClient }> {
+    return this.request<{ authConfigId: string; client: AppClient }>(
+      `/auth-configs/lookup-client/${encodeURIComponent(clientId)}`
+    );
+  }
+
   /** Reveal (decrypt) app client secret for dashboard. Use only when user clicks Reveal. */
   async getAppClientSecret(authConfigId: string, clientId: string): Promise<{ clientSecret: string }> {
     return this.request<{ clientSecret: string }>(`/auth-configs/${authConfigId}/app-clients/${clientId}/secret`);
@@ -330,6 +341,7 @@ class ApiClient {
     authorizedCallbackUrls?: string[];
     signoutUris?: string[];
     scopes?: string[];
+    verified?: boolean;
   }) {
     return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
       method: 'PATCH',
