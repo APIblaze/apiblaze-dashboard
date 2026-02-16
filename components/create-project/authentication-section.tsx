@@ -131,8 +131,10 @@ function EditModeManagementUI({
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
   const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
   const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const getProvidersError = useDashboardCacheStore((s) => s.getProvidersError);
   const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
   const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
+  const clearProvidersForRetry = useDashboardCacheStore((s) => s.clearProvidersForRetry);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
   // Save config changes immediately to backend (without redeployment)
@@ -925,6 +927,9 @@ function EditModeManagementUI({
               {appClients.map((client) => {
                 const clientDetails = appClientDetails[client.id];
                 const clientProviders = providers[client.id] || [];
+                const providersError = currentAuthConfigId
+                  ? getProvidersError(currentAuthConfigId, client.id)
+                  : null;
                 const isLoadingProviders = false;
                 const isShowingAddProvider = showAddProvider[client.id];
                 return (
@@ -1914,7 +1919,25 @@ function EditModeManagementUI({
                         </div>
                       )}
 
-                      {isLoadingProviders && clientProviders.length === 0 ? (
+                      {providersError ? (
+                        <div className="text-xs text-amber-700 dark:text-amber-400 py-2 flex items-center gap-2">
+                          <span>Failed to load providers: {providersError}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={() => {
+                              if (currentAuthConfigId) {
+                                clearProvidersForRetry(currentAuthConfigId, client.id);
+                                fetchProvidersForClient(currentAuthConfigId, client.id);
+                              }
+                            }}
+                          >
+                            Retry
+                          </Button>
+                        </div>
+                      ) : isLoadingProviders && clientProviders.length === 0 ? (
                         <div className="text-xs text-muted-foreground py-2">Loading providers...</div>
                       ) : clientProviders.length === 0 ? (
                         <div className="text-xs text-muted-foreground italic py-2">No providers configured. The default APIBlaze Github login will be used.</div>
