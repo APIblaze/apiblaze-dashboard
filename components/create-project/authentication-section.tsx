@@ -2676,11 +2676,9 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
             checked={config.enableSocialAuth}
             onCheckedChange={(checked) => {
               const updates: Partial<ProjectConfig> = { enableSocialAuth: checked };
-              if (checked) {
+              if (checked && !isEditMode) {
                 updates.requestsAuthMode = 'authenticate';
-                updates.requestsAuthMethods = config.requestsAuthMethods?.includes('jwt')
-                  ? config.requestsAuthMethods
-                  : ['jwt', ...(config.requestsAuthMethods ?? []).filter((m) => m !== 'jwt')];
+                updates.requestsAuthMethods = ['jwt'];
               }
               updateConfig(updates);
             }}
@@ -2795,7 +2793,15 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                             </p>
                             <Select
                               value={config.tokenType || 'apiblaze'}
-                              onValueChange={(value) => updateConfig({ tokenType: value as 'apiblaze' | 'thirdParty' })}
+                              onValueChange={(value) => {
+                                const updates: Partial<ProjectConfig> = { tokenType: value as 'apiblaze' | 'thirdParty' };
+                                if (value === 'thirdParty') {
+                                  updates.requestsAuthMode = 'passthrough';
+                                } else if (value === 'apiblaze') {
+                                  updates.requestsAuthMode = 'authenticate';
+                                }
+                                updateConfig(updates);
+                              }}
                             >
                               <SelectTrigger className="mt-1">
                                 <SelectValue>
@@ -2967,7 +2973,13 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           </div>
           <Select
             value={config.requestsAuthMode ?? 'passthrough'}
-            onValueChange={(v) => updateConfig({ requestsAuthMode: v as 'authenticate' | 'passthrough' })}
+            onValueChange={(v) => {
+              const updates: Partial<ProjectConfig> = { requestsAuthMode: v as 'authenticate' | 'passthrough' };
+              if (v === 'authenticate' && !isEditMode && !config.enableSocialAuth) {
+                updates.requestsAuthMethods = ['jwt', 'opaque'];
+              }
+              updateConfig(updates);
+            }}
           >
             <SelectTrigger className="w-full max-w-xs">
               <SelectValue />
@@ -3000,7 +3012,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                     />
                     <Label htmlFor="requestsAuthJwt" className="text-sm font-medium">Authenticate JWT tokens</Label>
                   </div>
-                  {config.requestsAuthMethods?.includes('jwt') && (
+                  {config.requestsAuthMethods?.includes('jwt') && isEditMode && (
                     <div className="space-y-2 ml-6 mt-2">
                       <div>
                         <Label className="text-xs">Allowed issuers (iss)</Label>
@@ -3072,7 +3084,9 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                         updateConfig({ requestsAuthMethods: next });
                       }}
                     />
-                    <Label htmlFor="requestsAuthOpaque" className="text-sm font-medium">Authenticate opaque tokens</Label>
+                    <Label htmlFor="requestsAuthOpaque" className="text-sm font-medium">
+                      {(config.requestsAuthMethods?.includes('jwt') && config.requestsAuthMethods?.includes('opaque')) ? 'or ' : ''}Authenticate opaque tokens
+                    </Label>
                   </div>
                   <p className="text-xs text-muted-foreground ml-6">
                     We will send a request to verify the token (do NOT use Google, Facebook, … introspection endpoint), build your own
