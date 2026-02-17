@@ -42,6 +42,15 @@ export interface CreateProxyPayload {
     accountMonthlyQuota: number;
   };
   requests_auth?: Record<string, unknown>;
+  routes?: Array<{
+    path: string;
+    method: string;
+    description: string;
+    require_authentication: boolean;
+    pre_request_auth_template: string;
+    post_response_policy_template: string;
+    cache_rules: string;
+  }>;
 }
 
 interface APIBlazeClientOptions {

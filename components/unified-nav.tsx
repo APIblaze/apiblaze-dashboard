@@ -206,7 +206,7 @@ export function UnifiedNav({
           <div className="w-6 h-6 rounded-md bg-gradient-to-b from-purple-400 to-purple-700 flex items-center justify-center shrink-0">
             <Zap className="h-3 w-3 text-white" />
           </div>
-          <span className={cn(segmentClass, 'max-w-[140px] cursor-default')}>{selectorValue.project.display_name}</span>
+          <span className={cn(segmentClass, 'max-w-[200px] cursor-default')}>{selectorValue.project.display_name} <span className="text-muted-foreground">v{selectorValue.project.api_version}</span></span>
         </>
       );
     }

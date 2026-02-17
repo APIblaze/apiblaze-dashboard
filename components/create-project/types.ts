@@ -21,6 +21,16 @@ export interface CustomDomain {
   verified: boolean;
 }
 
+export interface RouteEntry {
+  path: string;
+  method: string;
+  description: string;
+  require_authentication: boolean;
+  pre_request_auth_template: string;
+  post_response_policy_template: string;
+  cache_rules: string;
+}
+
 export interface ProjectConfig {
   // General
   projectName: string;
@@ -95,5 +105,10 @@ export interface ProjectConfig {
   
   // Domains
   customDomains: CustomDomain[];
+
+  // Routes (per-route config from OpenAPI spec)
+  routeConfig?: {
+    routes: RouteEntry[];
+  };
 }
 

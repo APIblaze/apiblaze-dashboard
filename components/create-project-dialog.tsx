@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, Rocket } from 'lucide-react';
+import { Loader2, Rocket, Save } from 'lucide-react';
 import { GeneralSection } from './create-project/general-section';
 import { AuthenticationSection } from './create-project/authentication-section';
 import { TargetServersSection } from './create-project/target-servers-section';
@@ -27,9 +27,11 @@ import { getDefaultTargetServers } from './create-project/default-environments';
 import type { TargetServer } from './create-project/types';
 import { useToast } from '@/hooks/use-toast';
 import { fetchGitHubAPI } from '@/lib/github-api';
-import { deleteProject } from '@/lib/api/projects';
+import { deleteProject, updateProjectConfig } from '@/lib/api/projects';
 import type { Project } from '@/types/project';
+import type { RouteEntry } from './create-project/types';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
+import { cn } from '@/lib/utils';
 
 type ProjectCreationSuggestions = string[];
 
@@ -102,8 +104,11 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('general');
   const [isDeploying, setIsDeploying] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(project || null);
   const isDeployingRef = useRef(false); // Track deployment state to prevent config reset
+  const routesRef = useRef<RouteEntry[]>([]);
   const [preloadedGitHubRepos, setPreloadedGitHubRepos] = useState<Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>>([]);
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
@@ -932,6 +937,12 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       
       console.log('[CreateProject] Success:', response);
 
+      const routesToPersist = routesRef.current?.length ? routesRef.current : (config.routeConfig?.routes ?? []);
+      if (routesToPersist.length > 0 && config.projectName && config.apiVersion) {
+        const { putRouteConfig } = await import('@/lib/api/route-configs');
+        await putRouteConfig(config.projectName, config.apiVersion, routesToPersist);
+      }
+
       // Success!
       const isUpdate = !!currentProject;
       toast({
@@ -1025,6 +1036,84 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     }
   };
 
+  const handleSaveConfig = useCallback(async () => {
+    if (!currentProject) return;
+    setIsSavingConfig(true);
+    try {
+      const projectNameVal = config.projectName || '';
+      const apiVersionVal = config.apiVersion || '1.0.0';
+      const appClientIdVal = config.defaultAppClient || (currentProject.config as Record<string, unknown>)?.default_app_client_id as string || '';
+      const substitutePlaceholders = (s: string) =>
+        s.replace(/\{projectName\}/g, projectNameVal).replace(/\{apiVersion\}/g, apiVersionVal).replace(/\{appClientId\}/g, appClientIdVal);
+
+      const requestsAuthMode = config.requestsAuthMode ?? 'passthrough';
+      const requestsAuthMethods = config.requestsAuthMethods ?? ['jwt'];
+      let requests_auth: {
+        mode: 'authenticate' | 'passthrough';
+        methods?: ('jwt' | 'opaque' | 'api_key')[];
+        jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
+        opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
+      } | undefined;
+      if (requestsAuthMode === 'passthrough') {
+        requests_auth = { mode: 'passthrough', methods: [] };
+      } else {
+        const jwtIssuers = (config.allowedIssuers ?? []).length > 0 ? config.allowedIssuers!.map(substitutePlaceholders) : (appClientIdVal ? [`https://auth.apiblaze.com/${appClientIdVal}`] : []);
+        const jwtAudiences = (config.allowedAudiences ?? []).length > 0 ? config.allowedAudiences!.map(substitutePlaceholders) : [...(projectNameVal ? [`https://${projectNameVal}.portal.apiblaze.com/${apiVersionVal}`] : []), ...(appClientIdVal ? [appClientIdVal] : [])];
+        requests_auth = {
+          mode: 'authenticate',
+          methods: requestsAuthMethods,
+          jwt: { allowed_issuers: jwtIssuers, allowed_audiences: jwtAudiences },
+          opaque: requestsAuthMethods.includes('opaque') && config.opaqueTokenEndpoint
+            ? { endpoint: config.opaqueTokenEndpoint, method: config.opaqueTokenMethod ?? 'GET', params: config.opaqueTokenParams ?? '?access_token={token}', body: config.opaqueTokenBody ?? 'token={token}' }
+            : undefined,
+        };
+      }
+
+      const payload: Record<string, unknown> = {
+        default_app_client_id: config.defaultAppClient || null,
+        requests_auth,
+      };
+      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
+      toast({ title: 'Config Saved', description: 'Project configuration has been updated successfully.' });
+      const updatedConfig = { ...(currentProject.config as Record<string, unknown>), ...payload };
+      const updatedProject = { ...currentProject, config: updatedConfig };
+      setCurrentProject(updatedProject);
+      onProjectUpdate?.(updatedProject);
+    } catch (error) {
+      console.error('Failed to save config:', error);
+      toast({
+        title: 'Failed to Save Config',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingConfig(false);
+    }
+  }, [currentProject, config, onProjectUpdate]);
+
+  const handleDelete = useCallback(async () => {
+    if (!currentProject) return;
+    setIsDeleting(true);
+    try {
+      await deleteProject(currentProject.project_id, currentProject.api_version);
+      toast({ title: 'Project Deleted', description: `${currentProject.display_name || currentProject.project_id} has been deleted.` });
+      setCurrentProject(null);
+      onOpenChange(false);
+      onSuccess?.();
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+      toast({
+        title: 'Failed to Delete Project',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [currentProject, onOpenChange, onSuccess]);
+
+  const isEditMode = !!currentProject;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-7xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -1034,19 +1123,19 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
           </DialogTitle>
           <DialogDescription>
             {project 
-              ? 'Update your API proxy configuration. Changes will be applied on the next deployment.'
+              ? 'Update your API proxy configuration. Save changes without redeploying, or use the Danger Zone for delete/redeploy.'
               : 'Configure your API proxy with sensible defaults. Deploy instantly or customize settings across all sections.'}
           </DialogDescription>
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 overflow-hidden flex flex-col">
-          <TabsList className="grid grid-cols-8 w-full">
+          <TabsList className={cn('grid w-full', currentProject ? 'grid-cols-8' : 'grid-cols-7')}>
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="auth">Auth</TabsTrigger>
             <TabsTrigger value="targets">Targets</TabsTrigger>
             <TabsTrigger value="portal">Portal</TabsTrigger>
             <TabsTrigger value="throttling">Throttling</TabsTrigger>
-            <TabsTrigger value="routes">Routes</TabsTrigger>
+            {currentProject && <TabsTrigger value="routes">Routes</TabsTrigger>}
             <TabsTrigger value="preprocessing">Processing</TabsTrigger>
             <TabsTrigger value="domains">Domains</TabsTrigger>
           </TabsList>
@@ -1060,6 +1149,10 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                 preloadedGitHubRepos={preloadedGitHubRepos}
                 onProjectNameCheckResult={(blockDeploy) => setProjectNameCheckBlockDeploy(blockDeploy)}
                 editingProject={currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null}
+                onDeleteAndRedeploy={currentProject ? handleDeploy : undefined}
+                onDelete={currentProject ? handleDelete : undefined}
+                isDeploying={isDeploying}
+                isDeleting={isDeleting}
               />
             </TabsContent>
 
@@ -1089,9 +1182,17 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               <ThrottlingSection config={config} updateConfig={updateConfig} />
             </TabsContent>
 
-            <TabsContent value="routes" className="mt-0">
-              <RoutesSection config={config} updateConfig={updateConfig} />
-            </TabsContent>
+            {currentProject && (
+              <TabsContent value="routes" className="mt-0">
+                <RoutesSection
+                  config={config}
+                  updateConfig={updateConfig}
+                  onGoToGeneral={() => setActiveTab('general')}
+                  project={{ project_id: currentProject.project_id, api_version: currentProject.api_version }}
+                  routesRef={routesRef}
+                />
+              </TabsContent>
+            )}
 
             <TabsContent value="preprocessing" className="mt-0">
               <PrePostProcessingSection config={config} updateConfig={updateConfig} />
@@ -1105,7 +1206,11 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
 
         <DialogFooter className="flex items-center justify-between border-t pt-4">
           <div className="flex-1">
-            {!isSourceConfigured() ? (
+            {isEditMode ? (
+              <p className="text-sm text-muted-foreground">
+                Save your configuration changes without redeploying.
+              </p>
+            ) : !isSourceConfigured() ? (
               <p className="text-sm text-orange-600">
                 {validationError === 'github-source' && 'Select a GitHub repository to continue'}
                 {validationError === 'target-url' && 'Enter a target URL to continue'}
@@ -1124,26 +1229,45 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             )}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isDeploying}>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isDeploying || isSavingConfig || isDeleting}>
               Cancel
             </Button>
-            <Button 
-              onClick={handleDeploy} 
-              disabled={isDeploying || !isSourceConfigured() || projectNameCheckBlockDeploy}
-              className={!isSourceConfigured() || projectNameCheckBlockDeploy ? 'opacity-50 cursor-not-allowed' : ''}
-            >
-              {isDeploying ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Deploying...
-                </>
-              ) : (
-                <>
-                  <Rocket className="mr-2 h-4 w-4" />
-                  Deploy API
-                </>
-              )}
-            </Button>
+            {isEditMode ? (
+              <Button
+                onClick={handleSaveConfig}
+                disabled={isSavingConfig || isDeploying || isDeleting}
+              >
+                {isSavingConfig ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Save Updated Config
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button 
+                onClick={handleDeploy} 
+                disabled={isDeploying || !isSourceConfigured() || projectNameCheckBlockDeploy}
+                className={!isSourceConfigured() || projectNameCheckBlockDeploy ? 'opacity-50 cursor-not-allowed' : ''}
+              >
+                {isDeploying ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Deploying...
+                  </>
+                ) : (
+                  <>
+                    <Rocket className="mr-2 h-4 w-4" />
+                    Deploy API
+                  </>
+                )}
+              </Button>
+            )}
           </div>
         </DialogFooter>
       </DialogContent>

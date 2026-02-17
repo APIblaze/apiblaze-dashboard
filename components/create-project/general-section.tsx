@@ -6,13 +6,16 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { GitBranch, Upload, Globe, Check, X, Loader2, Github, AlertCircle } from 'lucide-react';
+import { GitBranch, Upload, Globe, Check, X, Loader2, Github, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { ProjectConfig, SourceType } from './types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { GitHubRepoSelectorModal } from './github-repo-selector-modal';
 import { GitHubAppInstallModal } from './github-app-install-modal';
 import { fetchGitHubAPI } from '@/lib/github-api';
 import { api } from '@/lib/api';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+
+const REDEPLOY_TOOLTIP = "Project name and API version cannot be changed without a full redeploy. Use 'Delete and Redeploy' in the Danger Zone to change these.";
 
 interface GeneralSectionProps {
   config: ProjectConfig;
@@ -23,11 +26,19 @@ interface GeneralSectionProps {
   onProjectNameCheckResult?: (blockDeploy: boolean, message?: string) => void;
   /** When editing an existing project, pass its project_id and api_version so "already exists" for this project is treated as valid. */
   editingProject?: { project_id: string; api_version: string } | null;
+  /** Danger Zone: called when user clicks Delete and Redeploy (edit mode only) */
+  onDeleteAndRedeploy?: () => void;
+  /** Danger Zone: called when user clicks Delete (edit mode only) */
+  onDelete?: () => void;
+  /** Whether deploy/delete-and-redeploy is in progress */
+  isDeploying?: boolean;
+  /** Whether delete is in progress */
+  isDeleting?: boolean;
 }
 
 const PROJECT_NAME_CHECK_DEBOUNCE_MS = 400;
 
-export function GeneralSection({ config, updateConfig, validationError, preloadedGitHubRepos, onProjectNameCheckResult, editingProject }: GeneralSectionProps) {
+export function GeneralSection({ config, updateConfig, validationError, preloadedGitHubRepos, onProjectNameCheckResult, editingProject, onDeleteAndRedeploy, onDelete, isDeploying, isDeleting }: GeneralSectionProps) {
   const [checkingName, setCheckingName] = useState(false);
   const [nameAvailable, setNameAvailable] = useState<boolean | null>(null);
   const [projectNameCheckMessage, setProjectNameCheckMessage] = useState<string | null>(null);
@@ -242,8 +253,18 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
   }, [config.projectName, config.apiVersion, editingProject?.project_id, editingProject?.api_version]);
 
   const handleSourceTypeChange = (type: SourceType) => {
+    // Target URL and Upload are disabled for now (not code-based)
+    if (type === 'targetUrl' || type === 'upload') return;
     updateConfig({ sourceType: type });
   };
+
+  // Force GitHub when Target URL or Upload would be selected (those options are disabled)
+  useEffect(() => {
+    if (config.sourceType === 'targetUrl' || config.sourceType === 'upload') {
+      updateConfig({ sourceType: 'github' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateConfig is stable; only reset when sourceType is disabled
+  }, [config.sourceType]);
 
   return (
     <div className="space-y-6">
@@ -278,15 +299,14 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
           </Card>
 
           <Card 
-            className={`cursor-pointer transition-all ${
-              config.sourceType === 'targetUrl' 
-                ? 'border-blue-600 ring-2 ring-blue-600 ring-offset-2' 
-                : 'hover:border-blue-400'
-            }`}
-            onClick={() => handleSourceTypeChange('targetUrl')}
+            className="cursor-not-allowed opacity-60 transition-all"
+            aria-disabled="true"
           >
             <CardHeader className="pb-3">
-              <Globe className="h-5 w-5 text-purple-600" />
+              <div className="flex items-center justify-between">
+                <Globe className="h-5 w-5 text-purple-600" />
+                <Badge variant="outline" className="text-xs">Coming soon</Badge>
+              </div>
               <CardTitle className="text-sm">Target URL</CardTitle>
             </CardHeader>
             <CardContent>
@@ -297,15 +317,14 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
           </Card>
 
           <Card 
-            className={`cursor-pointer transition-all ${
-              config.sourceType === 'upload' 
-                ? 'border-blue-600 ring-2 ring-blue-600 ring-offset-2' 
-                : 'hover:border-blue-400'
-            }`}
-            onClick={() => handleSourceTypeChange('upload')}
+            className="cursor-not-allowed opacity-60 transition-all"
+            aria-disabled="true"
           >
             <CardHeader className="pb-3">
-              <Upload className="h-5 w-5 text-green-600" />
+              <div className="flex items-center justify-between">
+                <Upload className="h-5 w-5 text-green-600" />
+                <Badge variant="outline" className="text-xs">Coming soon</Badge>
+              </div>
               <CardTitle className="text-sm">Upload</CardTitle>
             </CardHeader>
             <CardContent>
@@ -491,31 +510,70 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
         
         <div className="flex items-center gap-2">
           <div className="flex-1 relative">
-            <Input
-              id="projectName"
-              placeholder="myawesomeapi"
-              value={config.projectName}
-              onChange={(e) => updateConfig({ projectName: e.target.value })}
-              className={`pr-10 ${validationError === 'project-name' || nameAvailable === false ? 'border-red-500 ring-2 ring-red-500 ring-offset-2' : ''}`}
-            />
-            {checkingName && (
-              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
-            )}
-            {!checkingName && nameAvailable === true && (
-              <Check className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-600" />
-            )}
-            {!checkingName && nameAvailable === false && (
-              <X className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-red-600" />
+            {editingProject ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-block w-full">
+                    <Input
+                      id="projectName"
+                      placeholder="myawesomeapi"
+                      value={config.projectName}
+                      readOnly
+                      className="pr-10 bg-muted cursor-not-allowed opacity-90"
+                    />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p>{REDEPLOY_TOOLTIP}</p>
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <>
+                <Input
+                  id="projectName"
+                  placeholder="myawesomeapi"
+                  value={config.projectName}
+                  onChange={(e) => updateConfig({ projectName: e.target.value })}
+                  className={`pr-10 ${validationError === 'project-name' || nameAvailable === false ? 'border-red-500 ring-2 ring-red-500 ring-offset-2' : ''}`}
+                />
+                {checkingName && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                )}
+                {!checkingName && nameAvailable === true && (
+                  <Check className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-600" />
+                )}
+                {!checkingName && nameAvailable === false && (
+                  <X className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-red-600" />
+                )}
+              </>
             )}
           </div>
           <span className="text-muted-foreground">.apiblaze.com</span>
           <span className="text-muted-foreground">/</span>
-          <Input
-            placeholder="1.0.0"
-            value={config.apiVersion}
-            onChange={(e) => updateConfig({ apiVersion: e.target.value })}
-            className="w-32"
-          />
+          {editingProject ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-block">
+                  <Input
+                    placeholder="1.0.0"
+                    value={config.apiVersion}
+                    readOnly
+                    className="w-32 bg-muted cursor-not-allowed opacity-90"
+                  />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs">
+                <p>{REDEPLOY_TOOLTIP}</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <Input
+              placeholder="1.0.0"
+              value={config.apiVersion}
+              onChange={(e) => updateConfig({ apiVersion: e.target.value })}
+              className="w-32"
+            />
+          )}
         </div>
         
         {config.projectName && (
@@ -532,6 +590,84 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
           </p>
         )}
       </div>
+
+      {/* Danger Zone - edit mode only */}
+      {editingProject && (onDeleteAndRedeploy || onDelete) && (
+        <DangerZone
+          onDeleteAndRedeploy={onDeleteAndRedeploy}
+          onDelete={onDelete}
+          isDeploying={isDeploying}
+          isDeleting={isDeleting}
+        />
+      )}
+    </div>
+  );
+}
+
+function DangerZone({
+  onDeleteAndRedeploy,
+  onDelete,
+  isDeploying,
+  isDeleting,
+}: {
+  onDeleteAndRedeploy?: () => void;
+  onDelete?: () => void;
+  isDeploying?: boolean;
+  isDeleting?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const busy = isDeploying || isDeleting;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2 py-3 text-left text-foreground font-medium hover:text-foreground/80 transition-colors"
+      >
+        {open ? (
+          <ChevronDown className="h-4 w-4 shrink-0" />
+        ) : (
+          <ChevronRight className="h-4 w-4 shrink-0" />
+        )}
+        Danger Zone
+      </button>
+      {open && (
+        <div className="flex flex-col items-start gap-3 pt-1">
+          {onDeleteAndRedeploy && (
+            <Button
+              variant="destructive"
+              onClick={onDeleteAndRedeploy}
+              disabled={busy}
+            >
+              {isDeploying ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting and redeploying...
+                </>
+              ) : (
+                'Delete and Redeploy'
+              )}
+            </Button>
+          )}
+          {onDelete && (
+            <Button
+              variant="destructive"
+              onClick={onDelete}
+              disabled={busy}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete project'
+              )}
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -64,12 +64,12 @@ function DashboardContent() {
     }
   }, []);
 
-  // When entering new project flow, always start on General tab
+  // When entering new project flow, redirect off Routes tab if it was selected (Routes hidden for new projects)
   useEffect(() => {
-    if (selectorValue.type === 'new') {
+    if (selectorValue.type === 'new' && projectActiveTab === 'routes') {
       setProjectActiveTab('general');
     }
-  }, [selectorValue.type]);
+  }, [selectorValue.type, projectActiveTab]);
 
   // Preload GitHub repos when in project scope
   useEffect(() => {
@@ -149,7 +149,10 @@ function DashboardContent() {
         hasProjects={false}
       >
         <main className="w-full px-4 py-8">
-          <div className="container mx-auto max-w-6xl">
+          <div className={cn(
+            'container mx-auto',
+            projectActiveTab === 'routes' ? 'max-w-[80vw]' : 'max-w-6xl'
+          )}>
             {showCreateForm ? (
               <ProjectConfigPanel
                 project={null}
@@ -232,7 +235,10 @@ function DashboardContent() {
         projectSubmenu={isProjectScope && selectorValue.type === 'project' ? { activeTab: projectActiveTab, onTabChange: setProjectActiveTab } : undefined}
     >
       <main className={cn('w-full px-4 pb-8', isProjectScope ? 'pt-4' : 'pt-8')}>
-        <div className="container mx-auto max-w-6xl">
+        <div className={cn(
+          'container mx-auto',
+          isProjectScope && projectActiveTab === 'routes' ? 'max-w-[80vw]' : 'max-w-6xl'
+        )}>
           {isTeamScope ? (
             <>
               {tab === 'settings' && (

@@ -204,7 +204,7 @@ export function ProjectSelector({
               <div className="w-6 h-6 rounded-md bg-gradient-to-b from-purple-400 to-purple-700 flex items-center justify-center shrink-0">
                 <Zap className="h-3 w-3 text-white" />
               </div>
-              <span className="text-sm font-medium truncate max-w-[280px]">{value.project.display_name}</span>
+              <span className="text-sm font-medium truncate max-w-[320px]">{value.project.display_name} <span className="text-muted-foreground font-normal">v{value.project.api_version}</span></span>
               <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
             </button>
           </PopoverTrigger>

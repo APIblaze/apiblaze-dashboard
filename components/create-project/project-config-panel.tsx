@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
-import { Loader2, Rocket, ChevronRight } from 'lucide-react';
+import { Loader2, Rocket, ChevronRight, Save } from 'lucide-react';
 import { GeneralSection } from './general-section';
 import { AuthenticationSection } from './authentication-section';
 import { TargetServersSection } from './target-servers-section';
@@ -13,11 +13,12 @@ import { RoutesSection } from './routes-section';
 import { PrePostProcessingSection } from './preprocessing-section';
 import { DomainsSection } from './domains-section';
 import { ProjectConfig, type SocialProvider } from './types';
+import type { RouteEntry } from './types';
 import { api } from '@/lib/api';
 import { getDefaultTargetServers } from './default-environments';
 import type { TargetServer } from './types';
 import { useToast } from '@/hooks/use-toast';
-import { deleteProject } from '@/lib/api/projects';
+import { deleteProject, updateProjectConfig } from '@/lib/api/projects';
 import type { Project } from '@/types/project';
 import type { ProjectConfigTab } from '@/components/dashboard-shell';
 import { cn } from '@/lib/utils';
@@ -27,7 +28,6 @@ const NEW_PROJECT_STEPS: { id: ProjectConfigTab; label: string }[] = [
   { id: 'auth', label: 'Auth' },
   { id: 'targets', label: 'Targets' },
   { id: 'portal', label: 'Portal' },
-  { id: 'routes', label: 'Routes' },
   { id: 'throttling', label: 'Throttling' },
   { id: 'preprocessing', label: 'Processing' },
   { id: 'domains', label: 'Domains' },
@@ -217,8 +217,11 @@ export function ProjectConfigPanel({
   const activeTab = activeTabProp ?? internalActiveTab;
   const setActiveTab = onTabChangeProp ?? setInternalActiveTab;
   const [isDeploying, setIsDeploying] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(project);
   const isDeployingRef = useRef(false);
+  const routesRef = useRef<RouteEntry[]>([]);
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
 
@@ -532,6 +535,12 @@ export function ProjectConfigPanel({
       };
 
       await api.createProject(projectData);
+
+      const routesToPersist = routesRef.current?.length ? routesRef.current : (config.routeConfig?.routes ?? []);
+      if (routesToPersist.length > 0 && config.projectName && config.apiVersion) {
+        const { putRouteConfig } = await import('@/lib/api/route-configs');
+        await putRouteConfig(config.projectName, config.apiVersion, routesToPersist);
+      }
       const isUpdate = !!currentProject;
       toast({ title: isUpdate ? 'Project Updated!' : 'Project Created!', description: `${config.projectName} has been successfully ${isUpdate ? 'updated' : 'deployed'}.` });
       setCurrentProject(null);
@@ -564,6 +573,81 @@ export function ProjectConfigPanel({
       isDeployingRef.current = false;
     }
   };
+
+  const handleSaveConfig = useCallback(async () => {
+    if (!currentProject) return;
+    setIsSavingConfig(true);
+    try {
+      const projectNameVal = config.projectName || '';
+      const apiVersionVal = config.apiVersion || '1.0.0';
+      const appClientIdVal = config.defaultAppClient || (currentProject.config as Record<string, unknown>)?.default_app_client_id as string || '';
+      const substitutePlaceholders = (s: string) =>
+        s.replace(/\{projectName\}/g, projectNameVal).replace(/\{apiVersion\}/g, apiVersionVal).replace(/\{appClientId\}/g, appClientIdVal);
+
+      const requestsAuthMode = config.requestsAuthMode ?? 'passthrough';
+      const requestsAuthMethods = config.requestsAuthMethods ?? ['jwt'];
+      let requests_auth: {
+        mode: 'authenticate' | 'passthrough';
+        methods?: ('jwt' | 'opaque' | 'api_key')[];
+        jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
+        opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
+      } | undefined;
+      if (requestsAuthMode === 'passthrough') {
+        requests_auth = { mode: 'passthrough', methods: [] };
+      } else {
+        const jwtIssuers = (config.allowedIssuers ?? []).length > 0 ? config.allowedIssuers!.map(substitutePlaceholders) : (appClientIdVal ? [`https://auth.apiblaze.com/${appClientIdVal}`] : []);
+        const jwtAudiences = (config.allowedAudiences ?? []).length > 0 ? config.allowedAudiences!.map(substitutePlaceholders) : [...(projectNameVal ? [`https://${projectNameVal}.portal.apiblaze.com/${apiVersionVal}`] : []), ...(appClientIdVal ? [appClientIdVal] : [])];
+        requests_auth = {
+          mode: 'authenticate',
+          methods: requestsAuthMethods,
+          jwt: { allowed_issuers: jwtIssuers, allowed_audiences: jwtAudiences },
+          opaque: requestsAuthMethods.includes('opaque') && config.opaqueTokenEndpoint
+            ? { endpoint: config.opaqueTokenEndpoint, method: config.opaqueTokenMethod ?? 'GET', params: config.opaqueTokenParams ?? '?access_token={token}', body: config.opaqueTokenBody ?? 'token={token}' }
+            : undefined,
+        };
+      }
+
+      const payload: Record<string, unknown> = {
+        default_app_client_id: config.defaultAppClient || null,
+        requests_auth,
+      };
+      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
+      toast({ title: 'Config Saved', description: 'Project configuration has been updated successfully.' });
+      const updatedConfig = { ...(currentProject.config as Record<string, unknown>), ...payload };
+      const updatedProject = { ...currentProject, config: updatedConfig };
+      setCurrentProject(updatedProject);
+      onProjectUpdate?.(updatedProject);
+    } catch (error) {
+      console.error('Failed to save config:', error);
+      toast({
+        title: 'Failed to Save Config',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingConfig(false);
+    }
+  }, [currentProject, config, onProjectUpdate]);
+
+  const handleDelete = useCallback(async () => {
+    if (!currentProject) return;
+    setIsDeleting(true);
+    try {
+      await deleteProject(currentProject.project_id, currentProject.api_version);
+      toast({ title: 'Project Deleted', description: `${currentProject.display_name || currentProject.project_id} has been deleted.` });
+      setCurrentProject(null);
+      onDeploySuccess?.();
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+      toast({
+        title: 'Failed to Delete Project',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [currentProject, onDeploySuccess]);
 
   const isNewProject = !currentProject;
   const currentStepIndex = NEW_PROJECT_STEPS.findIndex((s) => s.id === activeTab);
@@ -605,6 +689,10 @@ export function ProjectConfigPanel({
               preloadedGitHubRepos={preloadedGitHubRepos}
               onProjectNameCheckResult={(blockDeploy) => setProjectNameCheckBlockDeploy(blockDeploy)}
               editingProject={currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null}
+              onDeleteAndRedeploy={currentProject ? handleDeploy : undefined}
+              onDelete={currentProject ? handleDelete : undefined}
+              isDeploying={isDeploying}
+              isDeleting={isDeleting}
             />
           )}
           {activeTab === 'auth' && (
@@ -629,8 +717,14 @@ export function ProjectConfigPanel({
           {activeTab === 'throttling' && (
             <ThrottlingSection config={config} updateConfig={updateConfig} />
           )}
-          {activeTab === 'routes' && (
-            <RoutesSection config={config} updateConfig={updateConfig} />
+          {activeTab === 'routes' && currentProject && (
+            <RoutesSection
+              config={config}
+              updateConfig={updateConfig}
+              onGoToGeneral={() => setActiveTab('general')}
+              project={{ project_id: currentProject.project_id, api_version: currentProject.api_version }}
+              routesRef={routesRef}
+            />
           )}
           {activeTab === 'preprocessing' && (
             <PrePostProcessingSection config={config} updateConfig={updateConfig} />
@@ -642,23 +736,27 @@ export function ProjectConfigPanel({
 
       <div className="flex items-center justify-between border-t pt-6">
         <div className="flex-1">
-          {!isSourceConfigured() ? (
-            <p className="text-sm text-orange-600">
-              {validationError === 'github-source' && 'Select a GitHub repository to continue'}
-              {validationError === 'target-url' && 'Enter a target URL to continue'}
-              {validationError === 'upload-file' && 'Upload an OpenAPI spec to continue'}
-              {validationError === 'project-name' && 'Enter a project name to continue'}
-              {!validationError && 'Configure a source to deploy'}
-            </p>
-          ) : projectNameCheckBlockDeploy ? (
-            <p className="text-sm text-red-600">Change project name or API version to continue.</p>
+          {isNewProject ? (
+            !isSourceConfigured() ? (
+              <p className="text-sm text-orange-600">
+                {validationError === 'github-source' && 'Select a GitHub repository to continue'}
+                {validationError === 'target-url' && 'Enter a target URL to continue'}
+                {validationError === 'upload-file' && 'Upload an OpenAPI spec to continue'}
+                {validationError === 'project-name' && 'Enter a project name to continue'}
+                {!validationError && 'Configure a source to deploy'}
+              </p>
+            ) : projectNameCheckBlockDeploy ? (
+              <p className="text-sm text-red-600">Change project name or API version to continue.</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">Ready to deploy! Customize other sections or deploy now.</p>
+            )
           ) : (
-            <p className="text-sm text-muted-foreground">Ready to deploy! Customize other sections or deploy now.</p>
+            <p className="text-sm text-muted-foreground">Save your configuration changes without redeploying.</p>
           )}
         </div>
         <div className="flex items-center gap-2">
           {onCancel && (
-            <Button variant="outline" onClick={onCancel} disabled={isDeploying}>
+            <Button variant="outline" onClick={onCancel} disabled={isDeploying || isSavingConfig || isDeleting}>
               Cancel
             </Button>
           )}
@@ -672,22 +770,41 @@ export function ProjectConfigPanel({
               <ChevronRight className="ml-1 h-4 w-4" />
             </Button>
           )}
-          <Button
-          onClick={handleDeploy}
-          disabled={isDeploying || !isSourceConfigured() || projectNameCheckBlockDeploy}
-        >
-          {isDeploying ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Deploying...
-            </>
+          {isNewProject ? (
+            <Button
+              onClick={handleDeploy}
+              disabled={isDeploying || !isSourceConfigured() || projectNameCheckBlockDeploy}
+            >
+              {isDeploying ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deploying...
+                </>
+              ) : (
+                <>
+                  <Rocket className="mr-2 h-4 w-4" />
+                  Deploy API
+                </>
+              )}
+            </Button>
           ) : (
-            <>
-              <Rocket className="mr-2 h-4 w-4" />
-              Deploy API
-            </>
+            <Button
+              onClick={handleSaveConfig}
+              disabled={isSavingConfig || isDeploying || isDeleting}
+            >
+              {isSavingConfig ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  Save Updated Config
+                </>
+              )}
+            </Button>
           )}
-        </Button>
         </div>
       </div>
     </div>
