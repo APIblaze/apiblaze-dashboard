@@ -2712,28 +2712,6 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                 </div>
               </div>
 
-              {/* API key checkbox */}
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="requestsAuthApiKey"
-                      checked={config.requestsAuthMethods?.includes('api_key') ?? true}
-                      onCheckedChange={(checked) => {
-                        const methods = config.requestsAuthMethods ?? ['jwt'];
-                        const next: ('jwt' | 'opaque' | 'api_key')[] = checked
-                          ? (methods.includes('api_key') ? methods : [...methods, 'api_key'])
-                          : methods.filter((m) => m !== 'api_key') as ('jwt' | 'opaque' | 'api_key')[];
-                        updateConfig({ requestsAuthMethods: next.length ? next : ['jwt'] });
-                      }}
-                    />
-                    <Label htmlFor="requestsAuthApiKey" className="text-sm font-medium">
-                      {(config.requestsAuthMethods?.includes('jwt') && config.requestsAuthMethods?.includes('api_key')) ? 'or ' : ''}Authenticate by API key
-                    </Label>
-                  </div>
-                </div>
-              </div>
-
               {/* Opaque tokens checkbox */}
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 space-y-2">
@@ -2750,7 +2728,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                       }}
                     />
                     <Label htmlFor="requestsAuthOpaque" className="text-sm font-medium">
-                      {(config.requestsAuthMethods?.includes('jwt') && config.requestsAuthMethods?.includes('opaque')) ? 'or ' : ''}Authenticate opaque tokens
+                      {(config.requestsAuthMethods?.includes('jwt') && config.requestsAuthMethods?.includes('opaque')) ? 'and ' : ''}Authenticate opaque tokens
                     </Label>
                   </div>
                   <p className="text-xs text-muted-foreground ml-6">
@@ -2800,6 +2778,28 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+
+              {/* API key checkbox */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="requestsAuthApiKey"
+                      checked={config.requestsAuthMethods?.includes('api_key') ?? true}
+                      onCheckedChange={(checked) => {
+                        const methods = config.requestsAuthMethods ?? ['jwt'];
+                        const next: ('jwt' | 'opaque' | 'api_key')[] = checked
+                          ? (methods.includes('api_key') ? methods : [...methods, 'api_key'])
+                          : methods.filter((m) => m !== 'api_key') as ('jwt' | 'opaque' | 'api_key')[];
+                        updateConfig({ requestsAuthMethods: next.length ? next : ['jwt'] });
+                      }}
+                    />
+                    <Label htmlFor="requestsAuthApiKey" className="text-sm font-medium">
+                      {(config.requestsAuthMethods?.includes('jwt') && config.requestsAuthMethods?.includes('api_key')) ? 'or ' : ''}Authenticate by API key
+                    </Label>
+                  </div>
                 </div>
               </div>
             </div>
