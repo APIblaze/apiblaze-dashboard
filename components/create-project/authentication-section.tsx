@@ -2545,75 +2545,79 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
 
   return (
     <div className="space-y-6">
-      {/* Auth Config Name */}
-      <div>
-        <Label htmlFor="userGroupName" className="text-base font-semibold">
-          Auth Config Name
-        </Label>
-        <p className="text-sm text-muted-foreground mb-3">
-          Give a name to your Auth Config if its new or Search for an existing Auth Config to reuse
-        </p>
-        <div className="relative">
-          <Input
-            id="userGroupName"
-            placeholder={
-              loadingAuthConfigs
-                ? "Loading..."
-                : config.projectName
-                  ? `Enter a unique name (e.g., ${config.projectName}-authConfig)`
-                  : "Enter a unique name (e.g., my-project-authConfig)"
-            }
-            value={config.userGroupName}
-            onChange={(e) => updateConfig({ userGroupName: e.target.value })}
-            className="pr-10"
-            disabled={loadingAuthConfigs}
-          />
-          {loadingAuthConfigs ? (
-            <div className="absolute right-10 top-1/2 -translate-y-1/2">
-              <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
-            </div>
-          ) : null}
-          <DropdownMenu
-            onOpenChange={() => {
-              // Don't load here - use preloaded data or existing data
-              // create-project-dialog already handles preloading
-            }}
-          >
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                title="Select existing auth config"
+      {/* Auth Config Name - only in edit mode (existing project) */}
+      {isEditMode && (
+        <>
+          <div>
+            <Label htmlFor="userGroupName" className="text-base font-semibold">
+              Auth Config Name
+            </Label>
+            <p className="text-sm text-muted-foreground mb-3">
+              Give a name to your Auth Config if its new or Search for an existing Auth Config to reuse
+            </p>
+            <div className="relative">
+              <Input
+                id="userGroupName"
+                placeholder={
+                  loadingAuthConfigs
+                    ? "Loading..."
+                    : config.projectName
+                      ? `Enter a unique name (e.g., ${config.projectName}-authConfig)`
+                      : "Enter a unique name (e.g., my-project-authConfig)"
+                }
+                value={config.userGroupName}
+                onChange={(e) => updateConfig({ userGroupName: e.target.value })}
+                className="pr-10"
+                disabled={loadingAuthConfigs}
+              />
+              {loadingAuthConfigs ? (
+                <div className="absolute right-10 top-1/2 -translate-y-1/2">
+                  <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+                </div>
+              ) : null}
+              <DropdownMenu
+                onOpenChange={() => {
+                  // Don't load here - use preloaded data or existing data
+                  // create-project-dialog already handles preloading
+                }}
               >
-                <Search className="h-4 w-4 text-muted-foreground" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-[200px] max-w-[400px]">
-              {loadingAuthConfigs && existingAuthConfigs.length === 0 ? (
-                <DropdownMenuItem disabled>Loading...</DropdownMenuItem>
-              ) : existingAuthConfigs.length === 0 ? (
-                <DropdownMenuItem disabled>No auth configs found</DropdownMenuItem>
-              ) : (
-                existingAuthConfigs.map((pool) => (
-                  <DropdownMenuItem
-                    key={pool.id}
-                    onClick={() => {
-                      updateConfig({ userGroupName: pool.name, authConfigId: pool.id, useAuthConfig: true });
-                      setSelectedAuthConfigId(pool.id);
-                    }}
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                    title="Select existing auth config"
                   >
-                    {pool.name}
-                  </DropdownMenuItem>
-                ))
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
+                    <Search className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[200px] max-w-[400px]">
+                  {loadingAuthConfigs && existingAuthConfigs.length === 0 ? (
+                    <DropdownMenuItem disabled>Loading...</DropdownMenuItem>
+                  ) : existingAuthConfigs.length === 0 ? (
+                    <DropdownMenuItem disabled>No auth configs found</DropdownMenuItem>
+                  ) : (
+                    existingAuthConfigs.map((pool) => (
+                      <DropdownMenuItem
+                        key={pool.id}
+                        onClick={() => {
+                          updateConfig({ userGroupName: pool.name, authConfigId: pool.id, useAuthConfig: true });
+                          setSelectedAuthConfigId(pool.id);
+                        }}
+                      >
+                        {pool.name}
+                      </DropdownMenuItem>
+                    ))
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
 
-      <Separator />
+          <Separator />
+        </>
+      )}
 
       {/* Authentication Methods */}
       <div className="space-y-4">
