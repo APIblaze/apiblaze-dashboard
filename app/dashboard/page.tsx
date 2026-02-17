@@ -64,6 +64,13 @@ function DashboardContent() {
     }
   }, []);
 
+  // When entering new project flow, always start on General tab
+  useEffect(() => {
+    if (selectorValue.type === 'new') {
+      setProjectActiveTab('general');
+    }
+  }, [selectorValue.type]);
+
   // Preload GitHub repos when in project scope
   useEffect(() => {
     const isProjectScope = selectorValue.type === 'project' || selectorValue.type === 'new';
@@ -139,6 +146,7 @@ function DashboardContent() {
         teamId={teamId}
         userId={(session?.user as { id?: string })?.id}
         projectSubmenu={undefined}
+        hasProjects={false}
       >
         <main className="w-full px-4 py-8">
           <div className="container mx-auto max-w-6xl">

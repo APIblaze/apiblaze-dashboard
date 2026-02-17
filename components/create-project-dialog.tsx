@@ -14,7 +14,6 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, Rocket } from 'lucide-react';
 import { GeneralSection } from './create-project/general-section';
-import { ApiKeySection } from './create-project/api-key-section';
 import { AuthenticationSection } from './create-project/authentication-section';
 import { TargetServersSection } from './create-project/target-servers-section';
 import { PortalSection } from './create-project/portal-section';
@@ -127,10 +126,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     
     // Authentication
     userGroupName: '',
-    enableApiKey: true,
-    enableSocialAuth: false,
-    requestsAuthMode: 'passthrough' as const,
-    requestsAuthMethods: ['jwt'] as ('jwt' | 'opaque')[],
+    enableSocialAuth: true,
+    requestsAuthMode: 'authenticate' as const,
+    requestsAuthMethods: ['jwt', 'api_key'] as ('jwt' | 'opaque' | 'api_key')[],
     allowedIssuers: [],
     allowedAudiences: [],
     opaqueTokenEndpoint: '',
@@ -141,7 +139,6 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     authConfigId: undefined,
     appClientId: undefined,
     defaultAppClient: undefined,
-    automaticAppRegistration: 'allow_once_verified',
     bringOwnProvider: false,
     socialProvider: 'google',
     identityProviderDomain: 'https://accounts.google.com',
@@ -198,10 +195,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       
       // Authentication - extract from config
       userGroupName: (projectConfig?.auth_config_name as string) || '',
-      enableApiKey: (projectConfig?.auth_type as string) !== 'none',
-      enableSocialAuth: (projectConfig?.auth_type as string) === 'oauth' || !!(projectConfig?.auth_config_id as string),
+      enableSocialAuth: true,
       requestsAuthMode: ((projectConfig?.requests_auth as Record<string, unknown>)?.mode as 'authenticate' | 'passthrough') || 'passthrough',
-      requestsAuthMethods: ((projectConfig?.requests_auth as Record<string, unknown>)?.methods as ('jwt' | 'opaque')[]) || ['jwt'],
+      requestsAuthMethods: ((projectConfig?.requests_auth as Record<string, unknown>)?.methods as ('jwt' | 'opaque' | 'api_key')[]) || ['jwt'],
       allowedIssuers: ((projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown>)?.allowed_issuers as string[] || [],
       allowedAudiences: ((projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown>)?.allowed_audiences as string[] || [],
       opaqueTokenEndpoint: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.endpoint as string || '',
@@ -212,7 +208,6 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       authConfigId: projectConfig?.auth_config_id as string | undefined,
       appClientId: undefined, // Not stored in config - selected at deployment time from database
       defaultAppClient: (projectConfig?.default_app_client_id || projectConfig?.defaultAppClient) as string | undefined,
-      automaticAppRegistration: (projectConfig?.automatic_app_registration as 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow') || 'allow_once_verified',
       bringOwnProvider: !!(projectConfig?.oauth_config as Record<string, unknown>),
       socialProvider: (((projectConfig?.oauth_config as Record<string, unknown>)?.provider as string) || 'google') as SocialProvider,
       identityProviderDomain: (projectConfig?.oauth_config as Record<string, unknown>)?.domain as string || 'https://accounts.google.com',
@@ -499,7 +494,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       });
 
       // Prepare auth config
-      const authType = config.enableSocialAuth ? 'oauth' : (config.enableApiKey ? 'api_key' : 'none');
+      const authType = config.enableSocialAuth ? 'oauth' : 'none';
 
       // Handle AuthConfig creation/selection
       // Defensive check: if authType is oauth, we MUST have a AuthConfig
@@ -630,7 +625,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               const authConfig = await api.createAuthConfig({ 
                 name: authConfigName,
                 enableSocialAuth: config.enableSocialAuth,
-                enableApiKeyAuth: config.enableApiKey,
+                enableApiKeyAuth: config.requestsAuthMethods?.includes('api_key'),
                 bringMyOwnOAuth: config.bringOwnProvider,
               });
               const newAuthConfigId = (authConfig as { id: string }).id;
@@ -640,7 +635,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                 id: currentAuthConfigId,
                 name: authConfigName,
                 enable_social_auth: config.enableSocialAuth,
-                enable_api_key_auth: config.enableApiKey,
+                enable_api_key_auth: config.requestsAuthMethods?.includes('api_key'),
               });
             }
 
@@ -753,7 +748,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               appClientName,
               scopes: config.authorizedScopes,
               enableSocialAuth: config.enableSocialAuth,
-              enableApiKeyAuth: config.enableApiKey,
+              enableApiKeyAuth: config.requestsAuthMethods?.includes('api_key'),
               bringMyOwnOAuth: config.bringOwnProvider,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
@@ -859,7 +854,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       let requests_auth:
         | {
             mode: 'authenticate' | 'passthrough';
-            methods?: ('jwt' | 'opaque')[];
+            methods?: ('jwt' | 'opaque' | 'api_key')[];
             jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
             opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
           }
@@ -904,7 +899,6 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         auth_config_id: authConfigId,
         app_client_id: appClientId, // AppClient selected at deployment time (not stored in config)
         default_app_client_id: defaultAppClientId, // Default app client ID stored in project config
-        automatic_app_registration: config.automaticAppRegistration ?? 'allow_once_verified',
         environments: Object.keys(environments).length > 0 ? environments : undefined,
         throttling: config.throttling || {
           userRateLimit: 10,
@@ -1046,9 +1040,8 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 overflow-hidden flex flex-col">
-          <TabsList className="grid grid-cols-9 w-full">
+          <TabsList className="grid grid-cols-8 w-full">
             <TabsTrigger value="general">General</TabsTrigger>
-            <TabsTrigger value="api_key">API Keys</TabsTrigger>
             <TabsTrigger value="auth">Auth</TabsTrigger>
             <TabsTrigger value="targets">Targets</TabsTrigger>
             <TabsTrigger value="portal">Portal</TabsTrigger>
@@ -1067,15 +1060,6 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                 preloadedGitHubRepos={preloadedGitHubRepos}
                 onProjectNameCheckResult={(blockDeploy) => setProjectNameCheckBlockDeploy(blockDeploy)}
                 editingProject={currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null}
-              />
-            </TabsContent>
-
-            <TabsContent value="api_key" className="mt-0">
-              <ApiKeySection
-                config={config}
-                updateConfig={updateConfig}
-                isEditMode={!!currentProject}
-                project={currentProject}
               />
             </TabsContent>
 

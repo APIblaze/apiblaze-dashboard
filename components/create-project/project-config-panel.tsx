@@ -5,7 +5,6 @@ import { useSession } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Loader2, Rocket, ChevronRight } from 'lucide-react';
 import { GeneralSection } from './general-section';
-import { ApiKeySection } from './api-key-section';
 import { AuthenticationSection } from './authentication-section';
 import { TargetServersSection } from './target-servers-section';
 import { PortalSection } from './portal-section';
@@ -25,7 +24,6 @@ import { cn } from '@/lib/utils';
 
 const NEW_PROJECT_STEPS: { id: ProjectConfigTab; label: string }[] = [
   { id: 'general', label: 'General' },
-  { id: 'api_key', label: 'API Keys' },
   { id: 'auth', label: 'Auth' },
   { id: 'targets', label: 'Targets' },
   { id: 'portal', label: 'Portal' },
@@ -96,10 +94,9 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       targetUrl: '',
       uploadedFile: null,
       userGroupName: '',
-      enableApiKey: true,
-      enableSocialAuth: false,
-      requestsAuthMode: 'passthrough' as const,
-      requestsAuthMethods: ['jwt'] as ('jwt' | 'opaque')[],
+      enableSocialAuth: true,
+      requestsAuthMode: 'authenticate' as const,
+      requestsAuthMethods: ['jwt', 'api_key'] as ('jwt' | 'opaque' | 'api_key')[],
       allowedIssuers: [],
       allowedAudiences: [],
       opaqueTokenEndpoint: '',
@@ -110,7 +107,6 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       authConfigId: undefined,
       appClientId: undefined,
       defaultAppClient: undefined,
-      automaticAppRegistration: 'allow_once_verified',
       bringOwnProvider: false,
       socialProvider: 'google',
       identityProviderDomain: 'https://accounts.google.com',
@@ -144,10 +140,9 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     targetUrl: (projectConfig?.target_url as string) || (projectConfig?.target as string) || '',
     uploadedFile: null,
     userGroupName: (projectConfig?.auth_config_name as string) || '',
-    enableApiKey: (projectConfig?.auth_type as string) !== 'none',
-    enableSocialAuth: (projectConfig?.auth_type as string) === 'oauth' || !!(projectConfig?.auth_config_id as string),
+    enableSocialAuth: true,
     requestsAuthMode: ((projectConfig?.requests_auth as Record<string, unknown>)?.mode as 'authenticate' | 'passthrough') || 'passthrough',
-    requestsAuthMethods: ((projectConfig?.requests_auth as Record<string, unknown>)?.methods as ('jwt' | 'opaque')[]) || ['jwt'],
+    requestsAuthMethods: ((projectConfig?.requests_auth as Record<string, unknown>)?.methods as ('jwt' | 'opaque' | 'api_key')[]) || ['jwt'],
     allowedIssuers: ((projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown>)?.allowed_issuers as string[] || [],
     allowedAudiences: ((projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown>)?.allowed_audiences as string[] || [],
     opaqueTokenEndpoint: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.endpoint as string || '',
@@ -158,7 +153,6 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     authConfigId: projectConfig?.auth_config_id as string | undefined,
     appClientId: undefined,
     defaultAppClient: (projectConfig?.default_app_client_id || projectConfig?.defaultAppClient) as string | undefined,
-    automaticAppRegistration: (projectConfig?.automatic_app_registration as 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow') || 'allow_once_verified',
     bringOwnProvider: !!(projectConfig?.oauth_config as Record<string, unknown>),
     socialProvider: (((projectConfig?.oauth_config as Record<string, unknown>)?.provider as string) || 'google') as SocialProvider,
     identityProviderDomain: (projectConfig?.oauth_config as Record<string, unknown>)?.domain as string || 'https://accounts.google.com',
@@ -338,7 +332,7 @@ export function ProjectConfigPanel({
         if (server.targetUrl) environments[server.stage] = { target: server.targetUrl };
       });
 
-      const authType = config.enableSocialAuth ? 'oauth' : (config.enableApiKey ? 'api_key' : 'none');
+      const authType = config.enableSocialAuth ? 'oauth' : 'none';
       const needsAuthConfig = config.enableSocialAuth || authType === 'oauth';
 
       if (needsAuthConfig) {
@@ -393,7 +387,7 @@ export function ProjectConfigPanel({
               const authConfig = await api.createAuthConfig({
                 name: authConfigName,
                 enableSocialAuth: config.enableSocialAuth,
-                enableApiKeyAuth: config.enableApiKey,
+                enableApiKeyAuth: config.requestsAuthMethods?.includes('api_key'),
                 bringMyOwnOAuth: config.bringOwnProvider,
               });
               currentAuthConfigId = (authConfig as { id: string }).id;
@@ -459,7 +453,7 @@ export function ProjectConfigPanel({
               appClientName,
               scopes: config.authorizedScopes,
               enableSocialAuth: config.enableSocialAuth,
-              enableApiKeyAuth: config.enableApiKey,
+              enableApiKeyAuth: config.requestsAuthMethods?.includes('api_key'),
               bringMyOwnOAuth: config.bringOwnProvider,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
@@ -502,7 +496,7 @@ export function ProjectConfigPanel({
 
       let requests_auth: {
         mode: 'authenticate' | 'passthrough';
-        methods?: ('jwt' | 'opaque')[];
+        methods?: ('jwt' | 'opaque' | 'api_key')[];
         jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
         opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
       } | undefined;
@@ -532,7 +526,6 @@ export function ProjectConfigPanel({
         auth_config_id: authConfigId,
         app_client_id: appClientId,
         default_app_client_id: defaultAppClientId,
-        automatic_app_registration: config.automaticAppRegistration ?? 'allow_once_verified',
         environments: Object.keys(environments).length > 0 ? environments : undefined,
         throttling: config.throttling || { userRateLimit: 10, proxyDailyQuota: 1000, accountMonthlyQuota: 30000 },
         requests_auth,
@@ -612,14 +605,6 @@ export function ProjectConfigPanel({
               preloadedGitHubRepos={preloadedGitHubRepos}
               onProjectNameCheckResult={(blockDeploy) => setProjectNameCheckBlockDeploy(blockDeploy)}
               editingProject={currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null}
-            />
-          )}
-          {activeTab === 'api_key' && (
-            <ApiKeySection
-              config={config}
-              updateConfig={updateConfig}
-              isEditMode={!!currentProject}
-              project={currentProject}
             />
           )}
           {activeTab === 'auth' && (

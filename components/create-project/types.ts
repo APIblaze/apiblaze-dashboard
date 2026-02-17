@@ -35,11 +35,10 @@ export interface ProjectConfig {
   
   // Authentication
   userGroupName: string;
-  enableApiKey: boolean;
   enableSocialAuth: boolean;
   // Requests Authentication (how each proxy request is authenticated)
   requestsAuthMode: 'authenticate' | 'passthrough';
-  requestsAuthMethods: ('jwt' | 'opaque')[];
+  requestsAuthMethods: ('jwt' | 'opaque' | 'api_key')[];
   allowedIssuers: string[];
   allowedAudiences: string[];
   opaqueTokenEndpoint: string;
@@ -50,8 +49,6 @@ export interface ProjectConfig {
   authConfigId?: string;
   appClientId?: string;
   defaultAppClient?: string; // ID of the default app client for this project
-  /** Automatic app registration: allow_without_verification | allow_once_verified | do_not_allow */
-  automaticAppRegistration?: 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow';
   // Legacy OAuth fields (deprecated, use AuthConfig instead)
   bringOwnProvider: boolean;
   socialProvider: SocialProvider;

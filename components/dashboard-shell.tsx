@@ -10,7 +10,6 @@ import { cn } from '@/lib/utils';
 
 const PROJECT_MENU_ITEMS = [
   { id: 'general', label: 'General' },
-  { id: 'api_key', label: 'API Keys' },
   { id: 'auth', label: 'Auth' },
   { id: 'targets', label: 'Targets' },
   { id: 'portal', label: 'Portal' },
@@ -33,6 +32,8 @@ interface DashboardShellProps {
   projectSubmenu?: { activeTab: ProjectConfigTab; onTabChange: (tab: ProjectConfigTab) => void };
   /** When on auth-configs page: drill-down context to show Auth Config > App Client > Provider in nav */
   authConfigsSubmenu?: { authConfigId?: string | null; clientId?: string | null; providerId?: string | null };
+  /** When false (zero state, no projects): hide nav menu and submenu */
+  hasProjects?: boolean;
 }
 
 export function DashboardShell({
@@ -44,13 +45,15 @@ export function DashboardShell({
   userId,
   projectSubmenu,
   authConfigsSubmenu,
+  hasProjects = true,
 }: DashboardShellProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isAuthConfigs = pathname === '/dashboard/auth-configs';
   const tab = searchParams.get('tab');
   const isTeamScope = selectorValue.type === 'team';
-  const showTeamSubMenu = (isTeamScope || isAuthConfigs) && !projectSubmenu;
+  const showNavAndSubmenu = hasProjects;
+  const showTeamSubMenu = showNavAndSubmenu && (isTeamScope || isAuthConfigs) && !projectSubmenu;
   const showProjectSubMenu = !!projectSubmenu;
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
@@ -72,7 +75,8 @@ export function DashboardShell({
           </div>
         </header>
 
-        {/* Nav + Submenu block - collated together (below logo) */}
+        {/* Nav + Submenu block - collated together (below logo). Hidden in zero state (no projects). */}
+        {showNavAndSubmenu && (
         <div className="w-full border-t">
           <div className="w-full px-4 pt-3 pb-2 flex items-center gap-3 flex-wrap">
             {/* Unified nav: Team | Projects | Auth Configs - two distinct dimensions, one dropdown */}
@@ -179,6 +183,7 @@ export function DashboardShell({
       </nav>
         )}
         </div>
+        )}
       </div>
 
       {children}

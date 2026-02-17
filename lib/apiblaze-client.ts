@@ -35,7 +35,6 @@ export interface CreateProxyPayload {
   auth_config_id?: string;
   app_client_id?: string;
   default_app_client_id?: string;
-  automatic_app_registration?: 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow';
   environments?: Record<string, { target: string; description?: string }>;
   throttling?: {
     userRateLimit: number;

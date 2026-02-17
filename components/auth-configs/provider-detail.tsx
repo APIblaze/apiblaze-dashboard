@@ -199,7 +199,7 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
             </CardHeader>
             <CardContent>
               <Badge variant="secondary">
-                {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'apiblaze' ? 'API Blaze token' : 'Third Party'}
+                {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'apiblaze' ? 'API Blaze JWT token' : 'Third Party'}
               </Badge>
             </CardContent>
           </Card>

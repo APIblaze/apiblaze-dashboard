@@ -142,13 +142,10 @@ function EditModeManagementUI({
     if (!project) return; // Only save if we're in edit mode with an existing project
     
     try {
-      // Extract fields to save (defaultAppClient, automaticAppRegistration)
+      // Extract fields to save (defaultAppClient)
       const configToSave: Record<string, unknown> = {};
       if ('defaultAppClient' in updates) {
         configToSave.default_app_client_id = updates.defaultAppClient || null;
-      }
-      if ('automaticAppRegistration' in updates) {
-        configToSave.automatic_app_registration = updates.automaticAppRegistration ?? 'allow_once_verified';
       }
       
       if (Object.keys(configToSave).length > 0) {
@@ -357,8 +354,7 @@ function EditModeManagementUI({
         authConfigId: currentAuthConfigId, 
         useAuthConfig: true,
         userGroupName: ac.name,
-        enableSocialAuth: ac.enableSocialAuth ?? false,
-        enableApiKey: ac.enableApiKeyAuth ?? false,
+        enableSocialAuth: true,
         bringOwnProvider: ac.bringMyOwnOAuth ?? false,
       });
     }
@@ -1084,16 +1080,14 @@ function EditModeManagementUI({
                                         Default
                                       </Badge>
                                     )}
-                                    {config.automaticAppRegistration === 'allow_once_verified' && (
-                                      (clientDetails?.verified ?? client?.verified) === false ? (
-                                        <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-xs">
-                                          Unverified
-                                        </Badge>
-                                      ) : (
-                                        <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
-                                          Verified
-                                        </Badge>
-                                      )
+                                    {(clientDetails?.verified ?? client?.verified) === false ? (
+                                      <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-xs">
+                                        Unverified
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
+                                        Verified
+                                      </Badge>
                                     )}
                                   </div>
                                 </div>
@@ -1188,8 +1182,7 @@ function EditModeManagementUI({
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
-                              {config.automaticAppRegistration === 'allow_once_verified' &&
-                                (clientDetails?.verified ?? client?.verified) === false && (
+                              {(clientDetails?.verified ?? client?.verified) === false && (
                                   <Button
                                     type="button"
                                     variant="outline"
@@ -1776,12 +1769,12 @@ function EditModeManagementUI({
                                   <SelectTrigger className="mt-1">
                                     <SelectValue>
                                       {newProvider[client.id]?.tokenType === 'apiblaze' 
-                                        ? 'API Blaze token' 
+                                        ? 'API Blaze JWT token' 
                                         : `${PROVIDER_TYPE_LABELS[newProvider[client.id]?.type || 'google']} token`}
                                     </SelectValue>
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                                    <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
                                     <SelectItem value="thirdParty">
                                       {(newProvider[client.id]?.type || 'google').charAt(0).toUpperCase() + (newProvider[client.id]?.type || 'google').slice(1)} token
                                     </SelectItem>
@@ -1806,7 +1799,7 @@ function EditModeManagementUI({
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                                    <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
                                     <SelectItem value="third_party_access_token">{PROVIDER_TYPE_LABELS[newProvider[client.id]?.type || 'google']} access token</SelectItem>
                                     <SelectItem value="third_party_id_token">{PROVIDER_TYPE_LABELS[newProvider[client.id]?.type || 'google']} ID token</SelectItem>
                                     <SelectItem value="none">None</SelectItem>
@@ -2014,11 +2007,11 @@ function EditModeManagementUI({
                                         >
                                           <SelectTrigger className="mt-1">
                                             <SelectValue>
-                                              {editProviderForm.tokenType === 'apiblaze' ? 'API Blaze token' : `${PROVIDER_TYPE_LABELS[editProviderForm.type]} token`}
+                                              {editProviderForm.tokenType === 'apiblaze' ? 'API Blaze JWT token' : `${PROVIDER_TYPE_LABELS[editProviderForm.type]} token`}
                                             </SelectValue>
                                           </SelectTrigger>
                                           <SelectContent>
-                                            <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                                            <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
                                             <SelectItem value="thirdParty">{PROVIDER_TYPE_LABELS[editProviderForm.type]} token</SelectItem>
                                           </SelectContent>
                                         </Select>
@@ -2034,7 +2027,7 @@ function EditModeManagementUI({
                                               <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
-                                              <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                                              <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
                                               <SelectItem value="third_party_access_token">{PROVIDER_TYPE_LABELS[editProviderForm.type]} access token</SelectItem>
                                               <SelectItem value="third_party_id_token">{PROVIDER_TYPE_LABELS[editProviderForm.type]} ID token</SelectItem>
                                               <SelectItem value="none">None</SelectItem>
@@ -2147,14 +2140,11 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   const loadingAuthConfigs = isBootstrapping;
 
   const [newScope, setNewScope] = useState('');
-  // Save config changes immediately to backend (for edit mode, e.g. automaticAppRegistration)
-  const saveProjectConfigImmediately = async (updates: { automatic_app_registration?: string; default_app_client_id?: string | null }) => {
+  // Save config changes immediately to backend (for edit mode, e.g. default_app_client_id)
+  const saveProjectConfigImmediately = async (updates: { default_app_client_id?: string | null }) => {
     if (!project) return;
     try {
       const configToSave: Record<string, unknown> = {};
-      if (updates.automatic_app_registration !== undefined) {
-        configToSave.automatic_app_registration = updates.automatic_app_registration;
-      }
       if (updates.default_app_client_id !== undefined) {
         configToSave.default_app_client_id = updates.default_app_client_id;
       }
@@ -2263,52 +2253,8 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   };
 
   // Track if we've already loaded auth configs to prevent repeated API calls
-  // Track initial enableSocialAuth and bringOwnProvider to avoid updating on mount
-  // These refs are used to prevent triggering update useEffects when syncing from authConfig
-  const previousEnableSocialAuthRef = useRef<boolean | undefined>(config.enableSocialAuth);
+  // Track initial bringOwnProvider to avoid updating on mount
   const previousBringOwnProviderRef = useRef<boolean | undefined>(config.bringOwnProvider);
-
-  // Update authConfig's enable_social_auth when enableSocialAuth changes
-  useEffect(() => {
-    // Only update if we have a authConfigId and we're in edit mode
-    if (!isEditMode || !config.authConfigId || !project) {
-      previousEnableSocialAuthRef.current = config.enableSocialAuth;
-      return;
-    }
-
-    // Skip if this is the initial load (value hasn't changed)
-    if (previousEnableSocialAuthRef.current === config.enableSocialAuth) {
-      return;
-    }
-
-    // Update the authConfig with the new enableSocialAuth value
-    const updateAuthConfigSocialAuth = async () => {
-      try {
-        // Backend requires 'name' field, so we need to include it
-        // Try to get name from existingAuthConfigs list, or fetch it, or use userGroupName as fallback
-        let name = config.userGroupName;
-        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
-        if (authConfig) {
-          name = authConfig.name;
-        } else if (!name) {
-          // Fetch the auth config to get its name
-          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
-          name = fullAuthConfig.name;
-        }
-        await api.updateAuthConfig(config.authConfigId!, {
-          name: name || 'Unnamed Auth Config',
-          enableSocialAuth: config.enableSocialAuth,
-        });
-        console.log('[AuthSection] ✅ Updated authConfig enable_social_auth:', config.enableSocialAuth);
-        previousEnableSocialAuthRef.current = config.enableSocialAuth;
-      } catch (error) {
-        console.error('[AuthSection] ❌ Error updating authConfig enable_social_auth:', error);
-      }
-    };
-
-    updateAuthConfigSocialAuth();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.enableSocialAuth, config.authConfigId, isEditMode, project]);
 
   // Update authConfig's bringMyOwnOAuth when bringOwnProvider changes
   useEffect(() => {
@@ -2351,6 +2297,39 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     updateAuthConfigBringOwnOAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.bringOwnProvider, config.authConfigId, isEditMode, project]);
+
+  // Update authConfig's enableApiKeyAuth when requestsAuthMethods changes (edit mode) - derive from "Authenticate by API key" switch
+  const previousApiKeyInMethodsRef = useRef<boolean | undefined>(config.requestsAuthMethods?.includes('api_key'));
+  useEffect(() => {
+    if (!isEditMode || !config.authConfigId || !project) {
+      previousApiKeyInMethodsRef.current = config.requestsAuthMethods?.includes('api_key');
+      return;
+    }
+    const apiKeyEnabled = config.requestsAuthMethods?.includes('api_key') ?? false;
+    if (previousApiKeyInMethodsRef.current === apiKeyEnabled) return;
+
+    const updateAuthConfigApiKey = async () => {
+      try {
+        let name = config.userGroupName;
+        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
+        if (authConfig) {
+          name = authConfig.name;
+        } else if (!name) {
+          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
+          name = fullAuthConfig.name;
+        }
+        await api.updateAuthConfig(config.authConfigId!, {
+          name: name || 'Unnamed Auth Config',
+          enableApiKeyAuth: apiKeyEnabled,
+        });
+        previousApiKeyInMethodsRef.current = apiKeyEnabled;
+      } catch (error) {
+        console.error('[AuthSection] Error updating authConfig enableApiKeyAuth:', error);
+      }
+    };
+
+    updateAuthConfigApiKey();
+  }, [config.requestsAuthMethods, config.authConfigId, config.userGroupName, isEditMode, project, existingAuthConfigs]);
 
   // Track selected authConfigId - only set if we're in edit mode with an existing config
   const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(
@@ -2463,8 +2442,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         authConfigId: selectedAuthConfigId,
         useAuthConfig: true,
         userGroupName: ac.name,
-        enableSocialAuth: ac.enableSocialAuth ?? false,
-        enableApiKey: ac.enableApiKeyAuth ?? false,
+        enableSocialAuth: true,
         bringOwnProvider: ac.bringMyOwnOAuth ?? false,
       });
     } else {
@@ -2624,48 +2602,223 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         <div>
           <Label className="text-base font-semibold">Authentication Methods</Label>
           <p className="text-sm text-muted-foreground">
-            Choose how end users will authenticate to access your API
+            Protect your APIs with API keys or oAuth tokens
           </p>
         </div>
 
-        {/* Create a login page for this API */}
-        <div className="flex items-center justify-between p-4 border rounded-lg">
-          <div className="space-y-1">
-            <Label htmlFor="enableSocialAuth" className="text-sm font-medium">
-              Host a login page for this API (oAuth)
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              Users will be able to authenticate using OAuth tokens (GitHub default)
+        {/* Requests Authentication */}
+        <div className="flex flex-col gap-4 p-4 border rounded-lg">
+          <div>
+            <Label className="text-sm font-medium">Requests Authentication</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              How each API request is authenticated before being passed through
             </p>
           </div>
-          <Switch
-            id="enableSocialAuth"
-            checked={config.enableSocialAuth}
-            onCheckedChange={(checked) => {
-              const updates: Partial<ProjectConfig> = { enableSocialAuth: checked };
-              if (checked && !isEditMode) {
-                updates.requestsAuthMode = 'authenticate';
-                updates.requestsAuthMethods = ['jwt'];
+          <Select
+            value={config.requestsAuthMode ?? 'authenticate'}
+            onValueChange={(v) => {
+              const updates: Partial<ProjectConfig> = { requestsAuthMode: v as 'authenticate' | 'passthrough' };
+              if (v === 'authenticate' && !isEditMode) {
+                updates.requestsAuthMethods = ['jwt', 'api_key'];
               }
               updateConfig(updates);
             }}
-          />
+          >
+            <SelectTrigger className="w-full max-w-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="authenticate">Authenticate every request</SelectItem>
+              <SelectItem value="passthrough">No Authentication. Passthrough traffic</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Authentication method subsection - when authenticate is selected */}
+          {config.requestsAuthMode === 'authenticate' && (
+            <div className="space-y-4 pl-4 border-l-2 border-muted">
+              <p className="text-xs text-muted-foreground">The way each request is authenticated</p>
+
+              {/* JWT tokens checkbox */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="requestsAuthJwt"
+                      checked={config.requestsAuthMethods?.includes('jwt') ?? true}
+                      onCheckedChange={(checked) => {
+                        const methods = config.requestsAuthMethods ?? ['jwt'];
+                        const next: ('jwt' | 'opaque' | 'api_key')[] = checked
+                          ? (methods.includes('jwt') ? methods : [...methods, 'jwt'])
+                          : methods.filter((m) => m !== 'jwt') as ('jwt' | 'opaque' | 'api_key')[];
+                        updateConfig({ requestsAuthMethods: next.length ? next : ['jwt'] });
+                      }}
+                    />
+                    <Label htmlFor="requestsAuthJwt" className="text-sm font-medium">Authenticate JWT tokens</Label>
+                  </div>
+                  {config.requestsAuthMethods?.includes('jwt') && isEditMode && (
+                    <div className="space-y-2 ml-6 mt-2">
+                      <div>
+                        <Label className="text-xs">Allowed issuers (iss)</Label>
+                        <div className="flex gap-2 mt-1">
+                          <Input
+                            value={newAllowedIssuer}
+                            onChange={(e) => setNewAllowedIssuer(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addAllowedIssuer();
+                              }
+                            }}
+                            className="text-sm"
+                          />
+                          <Button type="button" size="sm" onClick={addAllowedIssuer}><Plus className="h-3 w-3" /></Button>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {(config.allowedIssuers ?? []).map((iss) => (
+                            <span key={iss} className="inline-flex items-center gap-0.5 bg-muted px-2 py-0.5 rounded text-xs">
+                              {iss}
+                              <button type="button" onClick={() => removeAllowedIssuer(iss)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Allowed audience (aud)</Label>
+                        <div className="flex gap-2 mt-1">
+                          <Input
+                            value={newAllowedAudience}
+                            onChange={(e) => setNewAllowedAudience(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addAllowedAudience();
+                              }
+                            }}
+                            className="text-sm"
+                          />
+                          <Button type="button" size="sm" onClick={addAllowedAudience}><Plus className="h-3 w-3" /></Button>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {(config.allowedAudiences ?? []).map((aud) => (
+                            <span key={aud} className="inline-flex items-center gap-0.5 bg-muted px-2 py-0.5 rounded text-xs">
+                              {aud}
+                              <button type="button" onClick={() => removeAllowedAudience(aud)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* API key checkbox */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="requestsAuthApiKey"
+                      checked={config.requestsAuthMethods?.includes('api_key') ?? true}
+                      onCheckedChange={(checked) => {
+                        const methods = config.requestsAuthMethods ?? ['jwt'];
+                        const next: ('jwt' | 'opaque' | 'api_key')[] = checked
+                          ? (methods.includes('api_key') ? methods : [...methods, 'api_key'])
+                          : methods.filter((m) => m !== 'api_key') as ('jwt' | 'opaque' | 'api_key')[];
+                        updateConfig({ requestsAuthMethods: next.length ? next : ['jwt'] });
+                      }}
+                    />
+                    <Label htmlFor="requestsAuthApiKey" className="text-sm font-medium">
+                      {(config.requestsAuthMethods?.includes('jwt') && config.requestsAuthMethods?.includes('api_key')) ? 'or ' : ''}Authenticate by API key
+                    </Label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Opaque tokens checkbox */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="requestsAuthOpaque"
+                      checked={config.requestsAuthMethods?.includes('opaque') ?? false}
+                      onCheckedChange={(checked) => {
+                        const methods = config.requestsAuthMethods ?? ['jwt'];
+                        const next: ('jwt' | 'opaque' | 'api_key')[] = checked
+                          ? [...methods, 'opaque']
+                          : methods.filter((m) => m !== 'opaque') as ('jwt' | 'opaque' | 'api_key')[];
+                        updateConfig({ requestsAuthMethods: next });
+                      }}
+                    />
+                    <Label htmlFor="requestsAuthOpaque" className="text-sm font-medium">
+                      {(config.requestsAuthMethods?.includes('jwt') && config.requestsAuthMethods?.includes('opaque')) ? 'or ' : ''}Authenticate opaque tokens
+                    </Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground ml-6">
+                    We will send a request to verify the token (do NOT use Google, Facebook, … introspection endpoint), build your own
+                  </p>
+                  {config.requestsAuthMethods?.includes('opaque') && (
+                    <div className="space-y-2 ml-6 mt-2">
+                      <div>
+                        <Label className="text-xs">Token verification endpoint</Label>
+                        <Input
+                          placeholder="https://your-endpoint.com/introspect"
+                          value={config.opaqueTokenEndpoint ?? ''}
+                          onChange={(e) => updateConfig({ opaqueTokenEndpoint: e.target.value })}
+                          className="mt-1 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Method</Label>
+                        <Select
+                          value={config.opaqueTokenMethod ?? 'GET'}
+                          onValueChange={(v) => updateConfig({ opaqueTokenMethod: v as 'GET' | 'POST' })}
+                        >
+                          <SelectTrigger className="mt-1 w-32">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="GET">GET</SelectItem>
+                            <SelectItem value="POST">POST</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Params (use {'{token}'} for the token)</Label>
+                        <Input
+                          value={config.opaqueTokenParams ?? '?access_token={token}'}
+                          onChange={(e) => updateConfig({ opaqueTokenParams: e.target.value })}
+                          className="mt-1 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Body (use {'{token}'} for the token)</Label>
+                        <Input
+                          value={config.opaqueTokenBody ?? 'token={token}'}
+                          onChange={(e) => updateConfig({ opaqueTokenBody: e.target.value })}
+                          className="mt-1 text-sm"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* OAuth config - Bring My Own OAuth Provider, etc. - only when Create login page is on */}
-        {config.enableSocialAuth && (
-          <div className="space-y-4 pl-4 border-l-2 border-blue-200">
+        {/* OAuth config - Bring My Own OAuth Provider, etc. - always shown for dev portal */}
+        <div className="space-y-4 pl-4 border-l-2 border-blue-200">
             {/* Bring My Own OAuth Provider - first inside expanded section */}
             <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
               <div className="space-y-1">
                 <Label htmlFor="bringOwnProvider" className="text-sm font-medium">
-                  Bring My Own login Provider (oAuth)
+                  Host my own login page for this API (oAuth)
                 </Label>
                 <p className="text-xs text-muted-foreground">
                   Use your own Google, Auth0, or other OAuth provider
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Leave off to use default APIBlaze GitHub
+                  or leave it off to use default APIBlaze GitHub to login on your API portal and obtain JWT tokens
                 </p>
               </div>
               <Switch
@@ -2687,7 +2840,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
               </div>
             ) : (
               <div className="space-y-4">
-                {config.useAuthConfig && config.authConfigId && config.enableSocialAuth ? (
+                {config.useAuthConfig && config.authConfigId ? (
                   <EditModeManagementUI
                     config={config}
                     updateConfig={updateConfig}
@@ -2773,12 +2926,12 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                               <SelectTrigger className="mt-1">
                                 <SelectValue>
                                   {config.tokenType === 'apiblaze' 
-                                    ? 'API Blaze token' 
+                                    ? 'API Blaze JWT token' 
                                     : `${PROVIDER_TYPE_LABELS[config.socialProvider]} token`}
                                 </SelectValue>
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                                <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
                                 <SelectItem value="thirdParty">
                                   {config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} token
                                 </SelectItem>
@@ -2797,7 +2950,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                                <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
                                 <SelectItem value="third_party_access_token">{PROVIDER_TYPE_LABELS[config.socialProvider]} access token</SelectItem>
                                 <SelectItem value="third_party_id_token">{PROVIDER_TYPE_LABELS[config.socialProvider]} ID token</SelectItem>
                                 <SelectItem value="none">None</SelectItem>
@@ -2897,224 +3050,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
               </div>
             )}
 
-            {/* Automatic App registration - below all app clients */}
-            <div className="flex flex-col gap-2 p-4 border rounded-lg">
-              <div className="space-y-1">
-                <Label className="text-sm font-medium">
-                  Automatic App registration
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  Allow third party Apps to create a login page dedicated to them with the same access scopes as your default App Client.
-                </p>
-              </div>
-              <Select
-                value={config.automaticAppRegistration ?? 'allow_once_verified'}
-                onValueChange={(value) => {
-                  const v = value as 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow';
-                  updateConfig({ automaticAppRegistration: v });
-                  if (project) {
-                    saveProjectConfigImmediately({ automatic_app_registration: v });
-                  }
-                }}
-              >
-                <SelectTrigger className="w-full max-w-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="allow_without_verification">Allow without verification</SelectItem>
-                  <SelectItem value="allow_once_verified">Allow once verified</SelectItem>
-                  <SelectItem value="do_not_allow">Do not allow</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
-        )}
-
-        {/* Requests Authentication */}
-        <div className="flex flex-col gap-4 p-4 border rounded-lg">
-          <div>
-            <Label className="text-sm font-medium">Requests Authentication</Label>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              How each request to {config.projectName || '{projectName}'}.apiblaze.com/{config.apiVersion || '{apiVersion}'} is authenticated
-            </p>
-          </div>
-          <Select
-            value={config.requestsAuthMode ?? 'passthrough'}
-            onValueChange={(v) => {
-              const updates: Partial<ProjectConfig> = { requestsAuthMode: v as 'authenticate' | 'passthrough' };
-              if (v === 'authenticate' && !isEditMode && !config.enableSocialAuth) {
-                updates.requestsAuthMethods = ['jwt', 'opaque'];
-              }
-              updateConfig(updates);
-            }}
-          >
-            <SelectTrigger className="w-full max-w-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="authenticate">Authenticate every request</SelectItem>
-              <SelectItem value="passthrough">No Authentication. Passthrough traffic</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* Authentication method subsection - when authenticate is selected */}
-          {config.requestsAuthMode === 'authenticate' && (
-            <div className="space-y-4 pl-4 border-l-2 border-muted">
-              <p className="text-xs text-muted-foreground">The way each request is authenticated</p>
-
-              {/* JWT tokens checkbox */}
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="requestsAuthJwt"
-                      checked={config.requestsAuthMethods?.includes('jwt') ?? true}
-                      onCheckedChange={(checked) => {
-                        const methods = config.requestsAuthMethods ?? ['jwt'];
-                        const next: ('jwt' | 'opaque')[] = checked
-                          ? (methods.includes('jwt') ? methods : [...methods, 'jwt'])
-                          : methods.filter((m) => m !== 'jwt') as ('jwt' | 'opaque')[];
-                        updateConfig({ requestsAuthMethods: next.length ? next : ['jwt'] });
-                      }}
-                    />
-                    <Label htmlFor="requestsAuthJwt" className="text-sm font-medium">Authenticate JWT tokens</Label>
-                  </div>
-                  {config.requestsAuthMethods?.includes('jwt') && isEditMode && (
-                    <div className="space-y-2 ml-6 mt-2">
-                      <div>
-                        <Label className="text-xs">Allowed issuers (iss)</Label>
-                        <div className="flex gap-2 mt-1">
-                          <Input
-                            value={newAllowedIssuer}
-                            onChange={(e) => setNewAllowedIssuer(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                addAllowedIssuer();
-                              }
-                            }}
-                            className="text-sm"
-                          />
-                          <Button type="button" size="sm" onClick={addAllowedIssuer}><Plus className="h-3 w-3" /></Button>
-                        </div>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {(config.allowedIssuers ?? []).map((iss) => (
-                            <span key={iss} className="inline-flex items-center gap-0.5 bg-muted px-2 py-0.5 rounded text-xs">
-                              {iss}
-                              <button type="button" onClick={() => removeAllowedIssuer(iss)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <Label className="text-xs">Allowed audience (aud)</Label>
-                        <div className="flex gap-2 mt-1">
-                          <Input
-                            value={newAllowedAudience}
-                            onChange={(e) => setNewAllowedAudience(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                addAllowedAudience();
-                              }
-                            }}
-                            className="text-sm"
-                          />
-                          <Button type="button" size="sm" onClick={addAllowedAudience}><Plus className="h-3 w-3" /></Button>
-                        </div>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {(config.allowedAudiences ?? []).map((aud) => (
-                            <span key={aud} className="inline-flex items-center gap-0.5 bg-muted px-2 py-0.5 rounded text-xs">
-                              {aud}
-                              <button type="button" onClick={() => removeAllowedAudience(aud)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Opaque tokens checkbox */}
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="requestsAuthOpaque"
-                      checked={config.requestsAuthMethods?.includes('opaque') ?? false}
-                      onCheckedChange={(checked) => {
-                        const methods = config.requestsAuthMethods ?? ['jwt'];
-                        const next: ('jwt' | 'opaque')[] = checked
-                          ? [...methods, 'opaque']
-                          : methods.filter((m) => m !== 'opaque') as ('jwt' | 'opaque')[];
-                        updateConfig({ requestsAuthMethods: next });
-                      }}
-                    />
-                    <Label htmlFor="requestsAuthOpaque" className="text-sm font-medium">
-                      {(config.requestsAuthMethods?.includes('jwt') && config.requestsAuthMethods?.includes('opaque')) ? 'or ' : ''}Authenticate opaque tokens
-                    </Label>
-                  </div>
-                  <p className="text-xs text-muted-foreground ml-6">
-                    We will send a request to verify the token (do NOT use Google, Facebook, … introspection endpoint), build your own
-                  </p>
-                  {config.requestsAuthMethods?.includes('opaque') && (
-                    <div className="space-y-2 ml-6 mt-2">
-                      <div>
-                        <Label className="text-xs">Token verification endpoint</Label>
-                        <Input
-                          placeholder="https://your-endpoint.com/introspect"
-                          value={config.opaqueTokenEndpoint ?? ''}
-                          onChange={(e) => updateConfig({ opaqueTokenEndpoint: e.target.value })}
-                          className="mt-1 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Method</Label>
-                        <Select
-                          value={config.opaqueTokenMethod ?? 'GET'}
-                          onValueChange={(v) => updateConfig({ opaqueTokenMethod: v as 'GET' | 'POST' })}
-                        >
-                          <SelectTrigger className="mt-1 w-32">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="GET">GET</SelectItem>
-                            <SelectItem value="POST">POST</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {config.opaqueTokenMethod === 'GET' ? (
-                        <div>
-                          <Label className="text-xs">Params</Label>
-                          <Input
-                            placeholder="?access_token={token}"
-                            value={config.opaqueTokenParams ?? '?access_token={token}'}
-                            onChange={(e) => updateConfig({ opaqueTokenParams: e.target.value })}
-                            className="mt-1 text-sm"
-                          />
-                        </div>
-                      ) : (
-                        <div>
-                          <Label className="text-xs">Body</Label>
-                          <Input
-                            placeholder="token={token}"
-                            value={config.opaqueTokenBody ?? 'token={token}'}
-                            onChange={(e) => updateConfig({ opaqueTokenBody: e.target.value })}
-                            className="mt-1 text-sm"
-                          />
-                        </div>
-                      )}
-                      <div className="rounded bg-muted/50 p-2 text-xs text-muted-foreground">
-                        Expected minimum response: {`{ "exp": 1419356238, "aud": "https://{projectName}.portal.apiblaze.com/{apiVersion}" }`}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
       <AuthConfigModal

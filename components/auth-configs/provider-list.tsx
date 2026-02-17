@@ -214,7 +214,7 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Client side token type:</span>
                     <Badge variant="secondary">
-                      {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'apiblaze' ? 'API Blaze token' : 'Third Party'}
+                      {(provider.tokenType ?? (provider as { token_type?: string }).token_type) === 'apiblaze' ? 'API Blaze JWT token' : 'Third Party'}
                     </Badge>
                   </div>
                   {(provider.tokenType ?? (provider as { token_type?: string }).token_type) !== 'thirdParty' && (
@@ -227,7 +227,7 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
                         if (v === 'third_party_access_token') return `${providerLabel} access token`;
                         if (v === 'third_party_id_token') return `${providerLabel} ID token`;
                         if (v === 'none') return 'None';
-                        return 'API Blaze token';
+                        return 'API Blaze JWT token';
                       })()}
                     </Badge>
                   </div>

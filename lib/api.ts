@@ -176,7 +176,6 @@ class ApiClient {
     auth_config_id?: string;
     app_client_id?: string;
     default_app_client_id?: string;
-    automatic_app_registration?: 'allow_without_verification' | 'allow_once_verified' | 'do_not_allow';
     environments?: Record<string, { target: string }>;
     throttling?: {
       userRateLimit: number;
@@ -185,7 +184,7 @@ class ApiClient {
     };
     requests_auth?: {
       mode: 'authenticate' | 'passthrough';
-      methods?: ('jwt' | 'opaque')[];
+      methods?: ('jwt' | 'opaque' | 'api_key')[];
       jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
       opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
     };
@@ -227,9 +226,6 @@ class ApiClient {
     }
     if (data.default_app_client_id) {
       backendData.default_app_client_id = data.default_app_client_id;
-    }
-    if (data.automatic_app_registration) {
-      backendData.automatic_app_registration = data.automatic_app_registration;
     }
     if (data.environments) {
       backendData.environments = data.environments;

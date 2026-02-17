@@ -226,7 +226,7 @@ export function ProviderFormDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                  <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
                   <SelectItem value="thirdParty">Third Party</SelectItem>
                 </SelectContent>
               </Select>
@@ -241,7 +241,7 @@ export function ProviderFormDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="apiblaze">API Blaze token</SelectItem>
+                  <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
                   <SelectItem value="third_party_access_token">{PROVIDER_TYPES.find(p => p.value === type)?.label ?? type} access token</SelectItem>
                   <SelectItem value="third_party_id_token">{PROVIDER_TYPES.find(p => p.value === type)?.label ?? type} ID token</SelectItem>
                   <SelectItem value="none">None</SelectItem>
