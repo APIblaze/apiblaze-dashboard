@@ -18,6 +18,7 @@ import {
 import { MoreVertical } from 'lucide-react';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AppClient } from '@/types/auth-config';
+import { cn } from '@/lib/utils';
 
 interface ProjectCardProps {
   project: Project;
@@ -101,8 +102,15 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
     window.open(portalUrl, '_blank');
   };
 
+  const handleCardClick = () => {
+    onUpdateConfig?.(project);
+  };
+
   return (
-    <Card className="hover:shadow-lg transition-shadow">
+    <Card
+      className={cn('hover:shadow-lg transition-shadow', onUpdateConfig && 'cursor-pointer')}
+      onClick={onUpdateConfig ? handleCardClick : undefined}
+    >
       <CardHeader>
         <div className="flex items-start justify-between">
           <div className="flex-1">
@@ -119,7 +127,11 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <MoreVertical className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -212,7 +224,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
         </div>
       </CardContent>
 
-      <CardFooter className="flex gap-2">
+      <CardFooter className="flex gap-2" onClick={(e) => e.stopPropagation()}>
         {bringMyOwnOAuth && appClients.length > 1 ? (
           <>
             <DropdownMenu>

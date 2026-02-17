@@ -14,10 +14,12 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, Rocket } from 'lucide-react';
 import { GeneralSection } from './create-project/general-section';
+import { ApiKeySection } from './create-project/api-key-section';
 import { AuthenticationSection } from './create-project/authentication-section';
 import { TargetServersSection } from './create-project/target-servers-section';
 import { PortalSection } from './create-project/portal-section';
 import { ThrottlingSection } from './create-project/throttling-section';
+import { RoutesSection } from './create-project/routes-section';
 import { PrePostProcessingSection } from './create-project/preprocessing-section';
 import { DomainsSection } from './create-project/domains-section';
 import { ProjectConfig, type SocialProvider } from './create-project/types';
@@ -1044,12 +1046,14 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 overflow-hidden flex flex-col">
-          <TabsList className="grid grid-cols-7 w-full">
+          <TabsList className="grid grid-cols-9 w-full">
             <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="api_key">API Keys</TabsTrigger>
             <TabsTrigger value="auth">Auth</TabsTrigger>
             <TabsTrigger value="targets">Targets</TabsTrigger>
             <TabsTrigger value="portal">Portal</TabsTrigger>
             <TabsTrigger value="throttling">Throttling</TabsTrigger>
+            <TabsTrigger value="routes">Routes</TabsTrigger>
             <TabsTrigger value="preprocessing">Processing</TabsTrigger>
             <TabsTrigger value="domains">Domains</TabsTrigger>
           </TabsList>
@@ -1063,6 +1067,15 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                 preloadedGitHubRepos={preloadedGitHubRepos}
                 onProjectNameCheckResult={(blockDeploy) => setProjectNameCheckBlockDeploy(blockDeploy)}
                 editingProject={currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null}
+              />
+            </TabsContent>
+
+            <TabsContent value="api_key" className="mt-0">
+              <ApiKeySection
+                config={config}
+                updateConfig={updateConfig}
+                isEditMode={!!currentProject}
+                project={currentProject}
               />
             </TabsContent>
 
@@ -1090,6 +1103,10 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
 
             <TabsContent value="throttling" className="mt-0">
               <ThrottlingSection config={config} updateConfig={updateConfig} />
+            </TabsContent>
+
+            <TabsContent value="routes" className="mt-0">
+              <RoutesSection config={config} updateConfig={updateConfig} />
             </TabsContent>
 
             <TabsContent value="preprocessing" className="mt-0">

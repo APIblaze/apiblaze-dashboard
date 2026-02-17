@@ -247,61 +247,6 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
 
   return (
     <div className="space-y-6">
-      {/* Project Name and API Version */}
-      <div>
-        <Label htmlFor="projectName" className="text-base font-semibold">
-          Project Name & API Version
-        </Label>
-        <p className="text-sm text-muted-foreground mb-3">
-          This determines the URL your API will be accessible at
-        </p>
-        
-        <div className="flex items-center gap-2">
-          <div className="flex-1 relative">
-            <Input
-              id="projectName"
-              placeholder="myawesomeapi"
-              value={config.projectName}
-              onChange={(e) => updateConfig({ projectName: e.target.value })}
-              className={`pr-10 ${validationError === 'project-name' || nameAvailable === false ? 'border-red-500 ring-2 ring-red-500 ring-offset-2' : ''}`}
-            />
-            {checkingName && (
-              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
-            )}
-            {!checkingName && nameAvailable === true && (
-              <Check className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-600" />
-            )}
-            {!checkingName && nameAvailable === false && (
-              <X className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-red-600" />
-            )}
-          </div>
-          <span className="text-muted-foreground">.apiblaze.com</span>
-          <span className="text-muted-foreground">/</span>
-          <Input
-            placeholder="1.0.0"
-            value={config.apiVersion}
-            onChange={(e) => updateConfig({ apiVersion: e.target.value })}
-            className="w-32"
-          />
-        </div>
-        
-        {config.projectName && (
-          <p className="text-sm text-muted-foreground mt-2">
-            Your API will be available at: <span className="font-mono text-blue-600">
-              {config.projectName}.apiblaze.com/{config.apiVersion}
-            </span>
-          </p>
-        )}
-        {projectNameCheckMessage && nameAvailable === false && (
-          <p className="text-sm text-red-600 mt-2 flex items-center gap-1.5" role="alert">
-            <AlertCircle className="h-4 w-4 flex-shrink-0" />
-            {projectNameCheckMessage}
-          </p>
-        )}
-      </div>
-
-      <Separator />
-
       {/* Source Selection */}
       <div>
         <Label className="text-base font-semibold">Source</Label>
@@ -530,6 +475,61 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
               </Badge>
             </div>
           </div>
+        )}
+      </div>
+
+      <Separator />
+
+      {/* Project Name and API Version */}
+      <div>
+        <Label htmlFor="projectName" className="text-base font-semibold">
+          Project Name & API Version
+        </Label>
+        <p className="text-sm text-muted-foreground mb-3">
+          This determines the URL your API will be accessible at
+        </p>
+        
+        <div className="flex items-center gap-2">
+          <div className="flex-1 relative">
+            <Input
+              id="projectName"
+              placeholder="myawesomeapi"
+              value={config.projectName}
+              onChange={(e) => updateConfig({ projectName: e.target.value })}
+              className={`pr-10 ${validationError === 'project-name' || nameAvailable === false ? 'border-red-500 ring-2 ring-red-500 ring-offset-2' : ''}`}
+            />
+            {checkingName && (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+            )}
+            {!checkingName && nameAvailable === true && (
+              <Check className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-600" />
+            )}
+            {!checkingName && nameAvailable === false && (
+              <X className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-red-600" />
+            )}
+          </div>
+          <span className="text-muted-foreground">.apiblaze.com</span>
+          <span className="text-muted-foreground">/</span>
+          <Input
+            placeholder="1.0.0"
+            value={config.apiVersion}
+            onChange={(e) => updateConfig({ apiVersion: e.target.value })}
+            className="w-32"
+          />
+        </div>
+        
+        {config.projectName && (
+          <p className="text-sm text-muted-foreground mt-2">
+            Your API will be available at: <span className="font-mono text-blue-600">
+              {config.projectName}.apiblaze.com/{config.apiVersion}
+            </span>
+          </p>
+        )}
+        {projectNameCheckMessage && nameAvailable === false && (
+          <p className="text-sm text-red-600 mt-2 flex items-center gap-1.5" role="alert">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            {projectNameCheckMessage}
+          </p>
         )}
       </div>
     </div>

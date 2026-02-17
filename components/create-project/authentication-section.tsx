@@ -2263,10 +2263,9 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   };
 
   // Track if we've already loaded auth configs to prevent repeated API calls
-  // Track initial enableSocialAuth, enableApiKey, and bringOwnProvider to avoid updating on mount
+  // Track initial enableSocialAuth and bringOwnProvider to avoid updating on mount
   // These refs are used to prevent triggering update useEffects when syncing from authConfig
   const previousEnableSocialAuthRef = useRef<boolean | undefined>(config.enableSocialAuth);
-  const previousEnableApiKeyRef = useRef<boolean | undefined>(config.enableApiKey);
   const previousBringOwnProviderRef = useRef<boolean | undefined>(config.bringOwnProvider);
 
   // Update authConfig's enable_social_auth when enableSocialAuth changes
@@ -2310,48 +2309,6 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     updateAuthConfigSocialAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.enableSocialAuth, config.authConfigId, isEditMode, project]);
-
-  // Update authConfig's enable_api_key_auth when enableApiKey changes
-  useEffect(() => {
-    // Only update if we have a authConfigId and we're in edit mode
-    if (!isEditMode || !config.authConfigId || !project) {
-      previousEnableApiKeyRef.current = config.enableApiKey;
-      return;
-    }
-
-    // Skip if this is the initial load (value hasn't changed)
-    if (previousEnableApiKeyRef.current === config.enableApiKey) {
-      return;
-    }
-
-    // Update the authConfig with the new enableApiKey value
-    const updateAuthConfigApiKey = async () => {
-      try {
-        // Backend requires 'name' field, so we need to include it
-        // Try to get name from existingAuthConfigs list, or fetch it, or use userGroupName as fallback
-        let name = config.userGroupName;
-        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
-        if (authConfig) {
-          name = authConfig.name;
-        } else if (!name) {
-          // Fetch the auth config to get its name
-          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
-          name = fullAuthConfig.name;
-        }
-        await api.updateAuthConfig(config.authConfigId!, {
-          name: name || 'Unnamed Auth Config',
-          enableApiKeyAuth: config.enableApiKey,
-        });
-        console.log('[AuthSection] ✅ Updated authConfig enable_api_key_auth:', config.enableApiKey);
-        previousEnableApiKeyRef.current = config.enableApiKey;
-      } catch (error) {
-        console.error('[AuthSection] ❌ Error updating authConfig enable_api_key_auth:', error);
-      }
-    };
-
-    updateAuthConfigApiKey();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.enableApiKey, config.authConfigId, isEditMode, project]);
 
   // Update authConfig's bringMyOwnOAuth when bringOwnProvider changes
   useEffect(() => {
@@ -2665,23 +2622,6 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           <p className="text-sm text-muted-foreground">
             Choose how end users will authenticate to access your API
           </p>
-        </div>
-
-        {/* API Key Authentication */}
-        <div className="flex items-center justify-between p-4 border rounded-lg">
-          <div className="space-y-1">
-            <Label htmlFor="enableApiKey" className="text-sm font-medium">
-              Enable API Key Authentication
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              Users will authenticate using API keys. Portal helps users create them.
-            </p>
-          </div>
-          <Switch
-            id="enableApiKey"
-            checked={config.enableApiKey}
-            onCheckedChange={(checked) => updateConfig({ enableApiKey: checked })}
-          />
         </div>
 
         {/* Create a login page for this API */}

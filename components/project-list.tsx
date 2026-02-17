@@ -5,7 +5,7 @@ import { Project } from '@/types/project';
 import { ProjectCard } from '@/components/project-card';
 import { deleteProject } from '@/lib/api/projects';
 import { Button } from '@/components/ui/button';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2, Plus, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
@@ -22,6 +22,7 @@ interface ProjectListProps {
   onUpdateConfig?: (project: Project) => void;
   onDelete?: (project: Project) => void;
   onRefresh?: () => void;
+  onNewProject?: () => void;
 }
 
 export interface ProjectListRef {
@@ -29,7 +30,7 @@ export interface ProjectListRef {
 }
 
 export const ProjectList = forwardRef<ProjectListRef, ProjectListProps>(
-  ({ teamId, onUpdateConfig, onDelete: onDeleteCallback, onRefresh }, ref) => {
+  ({ teamId, onUpdateConfig, onDelete: onDeleteCallback, onRefresh, onNewProject }, ref) => {
     const projects = useDashboardCacheStore((s) => s.projects);
     const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
     const error = useDashboardCacheStore((s) => s.error);
@@ -136,10 +137,16 @@ export const ProjectList = forwardRef<ProjectListRef, ProjectListProps>(
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold">Your Projects</h2>
-            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
-              <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={onNewProject}>
+                <Plus className="mr-2 h-4 w-4" />
+                New project
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+                <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
