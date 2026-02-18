@@ -104,16 +104,29 @@ export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl 
     })();
   }, [verifyFromUrl, appClient, loading, authConfigId, updateAppClientInCache, toast, router, searchParams]);
 
-  // Generate PKCE example URL for "Your App login" direct link
+  // Generate PKCE example URL for "Your App login" direct link (include first provider type so auth redirects to it)
   useEffect(() => {
     const external = appClient ? getFirstExternalCallbackUrl(appClient.authorizedCallbackUrls) : null;
     if (!external || !appClient) {
       setLoginUrlWithPkce(null);
       return;
     }
-    const baseUrl = buildAppLoginAuthorizeUrl(appClient.clientId, external, appClient.scopes ?? []);
-    addPkceToAuthorizeUrl(baseUrl).then(setLoginUrlWithPkce);
-  }, [appClient]);
+    let cancelled = false;
+    (async () => {
+      let firstProviderType: string | undefined;
+      try {
+        const providers = await api.listProviders(authConfigId, appClient.id);
+        firstProviderType = Array.isArray(providers) && providers.length > 0 ? providers[0].type : undefined;
+      } catch {
+        // ignore; build URL without provider param
+      }
+      if (cancelled) return;
+      const baseUrl = buildAppLoginAuthorizeUrl(appClient.clientId, external, appClient.scopes ?? [], firstProviderType);
+      const urlWithPkce = await addPkceToAuthorizeUrl(baseUrl);
+      if (!cancelled) setLoginUrlWithPkce(urlWithPkce);
+    })();
+    return () => { cancelled = true; };
+  }, [appClient, authConfigId]);
 
   const handleCopy = async (text: string) => {
     try {

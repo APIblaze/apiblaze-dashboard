@@ -22,11 +22,13 @@ export function getFirstExternalCallbackUrl(authorizedCallbackUrls: string[] | u
 /**
  * Builds the /authorize URL with response_type=code, client_id, redirect_uri, and scope.
  * The app must add state, code_challenge, and code_challenge_method=S256 (PKCE) for each request.
+ * When providerType is set (e.g. first provider for this app client), adds &provider= so auth redirects to that provider.
  */
 export function buildAppLoginAuthorizeUrl(
   clientId: string,
   redirectUri: string,
-  scopes: string[]
+  scopes: string[],
+  providerType?: string
 ): string {
   const base = AUTH_ISSUER.replace(/\/$/, '');
   const path = base.includes('/authorize') ? base : `${base}/authorize`;
@@ -39,6 +41,9 @@ export function buildAppLoginAuthorizeUrl(
     redirect_uri: redirectUri,
     scope: scopeStr,
   });
+  if (providerType && providerType.trim()) {
+    params.set('provider', providerType.trim());
+  }
   return `${path}?${params.toString()}`;
 }
 

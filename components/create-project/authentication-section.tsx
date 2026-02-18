@@ -295,7 +295,7 @@ function EditModeManagementUI({
     newScope: string;
   } | null>(null);
   const [savingAppClientEdit, setSavingAppClientEdit] = useState(false);
-  const [appLoginUrlWithPkce, setAppLoginUrlWithPkce] = useState<Record<string, string>>({});
+  const [appLoginUrlWithPkce, setAppLoginUrlWithPkce] = useState<Record<string, { type: string; url: string }[]>>({});
   const [editingProviderKey, setEditingProviderKey] = useState<string | null>(null);
   const [editProviderForm, setEditProviderForm] = useState<{
     type: SocialProvider;
@@ -312,21 +312,33 @@ function EditModeManagementUI({
   const [savingProviderEdit, setSavingProviderEdit] = useState(false);
   const [loadingProviderSecret, setLoadingProviderSecret] = useState(false);
 
-  // Generate PKCE example URLs for "Your App login" links (so the link can be opened directly)
+  // Generate PKCE example URLs for "Your App login" links (one URL per provider so auth redirects to that provider)
   useEffect(() => {
-    for (const client of appClients) {
-      const details = appClientDetails[client.id] as AppClientResponse | undefined;
-      const urls = (details?.authorizedCallbackUrls ?? details?.authorized_callback_urls ?? []) as string[];
-      const external = getFirstExternalCallbackUrl(urls);
-      if (!external) continue;
-      const oauthClientId = details?.clientId ?? details?.client_id ?? client.clientId ?? client.id;
-      const scopes = (details?.scopes ?? client.scopes ?? []) as string[];
-      const baseUrl = buildAppLoginAuthorizeUrl(oauthClientId, external, scopes);
-      addPkceToAuthorizeUrl(baseUrl).then((urlWithPkce) => {
-        setAppLoginUrlWithPkce((prev) => (prev[client.id] === urlWithPkce ? prev : { ...prev, [client.id]: urlWithPkce }));
-      });
-    }
-  }, [appClients, appClientDetails]);
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, { type: string; url: string }[]> = {};
+      for (const client of appClients) {
+        const details = appClientDetails[client.id] as AppClientResponse | undefined;
+        const urls = (details?.authorizedCallbackUrls ?? details?.authorized_callback_urls ?? []) as string[];
+        const external = getFirstExternalCallbackUrl(urls);
+        if (!external) continue;
+        const oauthClientId = details?.clientId ?? details?.client_id ?? client.clientId ?? client.id;
+        const scopes = (details?.scopes ?? client.scopes ?? []) as string[];
+        const providerList = currentAuthConfigId ? getProviders(currentAuthConfigId, client.id) : [];
+        const list = providerList.length > 0 ? providerList : [{ type: '' }];
+        const arr = await Promise.all(
+          list.map(async (p) => {
+            const baseUrl = buildAppLoginAuthorizeUrl(oauthClientId, external, scopes, p.type || undefined);
+            const urlWithPkce = await addPkceToAuthorizeUrl(baseUrl);
+            return { type: p.type, url: urlWithPkce };
+          })
+        );
+        next[client.id] = arr;
+      }
+      if (!cancelled) setAppLoginUrlWithPkce((prev) => ({ ...prev, ...next }));
+    })();
+    return () => { cancelled = true; };
+  }, [appClients, appClientDetails, currentAuthConfigId, getProviders, providers]);
 
   const validateHttpsUrlForEdit = (url: string): { valid: boolean; error?: string } => {
     try {
@@ -924,7 +936,7 @@ function EditModeManagementUI({
                     {authorizedCallbackUrls.map((url, index) => (
                       <div
                         key={url}
-                        className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs"
+                        className="flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded text-xs"
                       >
                         {index === 0 && (
                           <Badge variant="secondary" className="mr-1 text-xs">
@@ -1037,7 +1049,7 @@ function EditModeManagementUI({
                             </div>
                             <div className="flex flex-wrap gap-2 mt-2">
                               {editAppClientForm.authorizedCallbackUrls.map((url, index) => (
-                                <div key={url} className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs">
+                                <div key={url} className="flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded text-xs">
                                   {index === 0 && (
                                     <Badge variant="secondary" className="mr-1 text-xs">
                                       <Star className="h-2 w-2 mr-1" />
@@ -1323,7 +1335,8 @@ function EditModeManagementUI({
                                     const urls = getClientCallbackUrls(client.id);
                                     const externalRedirect = getFirstExternalCallbackUrl(urls);
                                     if (!externalRedirect) return null;
-                                    const loginUrlWithPkce = appLoginUrlWithPkce[client.id];
+                                    const loginUrls = appLoginUrlWithPkce[client.id];
+                                    const providerLabel = (t: string) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : '');
                                     return (
                                       <div className="space-y-1">
                                         <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
@@ -1339,36 +1352,40 @@ function EditModeManagementUI({
                                             </TooltipContent>
                                           </Tooltip>
                                         </div>
-                                        {loginUrlWithPkce ? (
-                                          <div className="flex items-center gap-2 min-w-0">
-                                            <a
-                                              href={loginUrlWithPkce}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="text-xs text-blue-600 hover:text-blue-800 hover:underline shrink-0"
-                                            >
-                                              Open login page
-                                            </a>
-                                            <a href={loginUrlWithPkce} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
-                                              <ExternalLink className="h-3 w-3" />
-                                            </a>
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              size="sm"
-                                              className="h-6 w-6 p-0 shrink-0"
-                                              onClick={async (e) => {
-                                                e.preventDefault();
-                                                await copyToClipboard(loginUrlWithPkce, `appLogin-${client.id}`);
-                                              }}
-                                              title="Copy URL"
-                                            >
-                                              {copiedField === `appLogin-${client.id}` ? (
-                                                <Check className="h-3 w-3 text-green-600" />
-                                              ) : (
-                                                <Copy className="h-3 w-3" />
-                                              )}
-                                            </Button>
+                                        {loginUrls && loginUrls.length > 0 ? (
+                                          <div className="space-y-1.5">
+                                            {loginUrls.map(({ type, url }) => (
+                                              <div key={type || 'default'} className="flex items-center gap-2 min-w-0">
+                                                <a
+                                                  href={url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline shrink-0"
+                                                >
+                                                  Open login page ({providerLabel(type) || 'default'})
+                                                </a>
+                                                <a href={url} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
+                                                  <ExternalLink className="h-3 w-3" />
+                                                </a>
+                                                <Button
+                                                  type="button"
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-6 w-6 p-0 shrink-0"
+                                                  onClick={async (e) => {
+                                                    e.preventDefault();
+                                                    await copyToClipboard(url, `appLogin-${client.id}-${type || 'default'}`);
+                                                  }}
+                                                  title="Copy URL"
+                                                >
+                                                  {copiedField === `appLogin-${client.id}-${type || 'default'}` ? (
+                                                    <Check className="h-3 w-3 text-green-600" />
+                                                  ) : (
+                                                    <Copy className="h-3 w-3" />
+                                                  )}
+                                                </Button>
+                                              </div>
+                                            ))}
                                           </div>
                                         ) : (
                                           <span className="text-xs text-muted-foreground italic">Generating…</span>
@@ -1501,7 +1518,7 @@ function EditModeManagementUI({
                                       getClientCallbackUrls(client.id).map((url: string, index: number) => (
                                         <div
                                           key={url}
-                                          className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs"
+                                          className="flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded text-xs"
                                         >
                                           {index === 0 && (
                                             <Badge variant="secondary" className="mr-1 text-xs">

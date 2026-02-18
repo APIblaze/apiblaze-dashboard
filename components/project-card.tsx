@@ -1,13 +1,13 @@
 'use client';
 
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import Image from 'next/image';
 import { Project } from '@/types/project';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DeploymentStatus } from '@/components/deployment-status';
-import { ExternalLink, Settings, Trash2, Github, Globe, Loader2, ChevronDown } from 'lucide-react';
+import { ExternalLink, Settings, Trash2, Github, Globe, Loader2, ChevronDown, LogIn } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +19,7 @@ import { MoreVertical } from 'lucide-react';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AppClient } from '@/types/auth-config';
 import { cn } from '@/lib/utils';
+import { getFirstExternalCallbackUrl, buildAppLoginAuthorizeUrl, addPkceToAuthorizeUrl } from '@/lib/build-app-login-url';
 
 interface ProjectCardProps {
   project: Project;
@@ -79,7 +80,49 @@ function useProjectAuth(project: Project) {
 }
 
 export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardProps) {
-  const { appClients, bringMyOwnOAuth, loadingAppClients } = useProjectAuth(project);
+  const { authConfigId, appClients, defaultAppClientId, bringMyOwnOAuth, loadingAppClients } = useProjectAuth(project);
+  const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
+  const providersByConfigClient = useDashboardCacheStore((s) => s.providersByConfigClient);
+  const [appLoginUrls, setAppLoginUrls] = useState<{ type: string; url: string }[]>([]);
+
+  // When this project has an app client with an external callback URL, build one app login URL per provider (with PKCE)
+  useEffect(() => {
+    if (!authConfigId || !appClients.length) {
+      setAppLoginUrls([]);
+      return;
+    }
+    const urls = (c: AppClient) => c.authorizedCallbackUrls ?? (c as { authorized_callback_urls?: string[] }).authorized_callback_urls ?? [];
+    const scopes = (c: AppClient) => c.scopes ?? [];
+    const clientId = (c: AppClient) => (c as { client_id?: string }).client_id ?? c.clientId ?? c.id;
+    const ordered = defaultAppClientId
+      ? [...appClients.filter((c) => c.id === defaultAppClientId), ...appClients.filter((c) => c.id !== defaultAppClientId)]
+      : appClients;
+    const candidate = ordered.find((c) => getFirstExternalCallbackUrl(urls(c)) != null);
+    if (!candidate) {
+      setAppLoginUrls([]);
+      return;
+    }
+    const redirect = getFirstExternalCallbackUrl(urls(candidate));
+    if (!redirect) return;
+
+    let cancelled = false;
+    (async () => {
+      await fetchProvidersForClient(authConfigId, candidate.id);
+      if (cancelled) return;
+      const providers = getProviders(authConfigId, candidate.id);
+      const list = providers.length > 0 ? providers : [{ type: '' }];
+      const arr = await Promise.all(
+        list.map(async (p) => {
+          const base = buildAppLoginAuthorizeUrl(clientId(candidate), redirect, scopes(candidate), p.type || undefined);
+          const urlWithPkce = await addPkceToAuthorizeUrl(base);
+          return { type: p.type, url: urlWithPkce };
+        })
+      );
+      if (!cancelled) setAppLoginUrls(arr);
+    })();
+    return () => { cancelled = true; };
+  }, [authConfigId, appClients, defaultAppClientId, getProviders, fetchProvidersForClient, providersByConfigClient]);
 
   const handleOpenPortal = (appClient?: AppClient) => {
     const projectConfig = project.config as Record<string, unknown> | undefined;
@@ -224,12 +267,13 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
         </div>
       </CardContent>
 
-      <CardFooter className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+      <CardFooter className="flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-wrap gap-2 w-full">
         {bringMyOwnOAuth && appClients.length > 1 ? (
           <>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="flex-1">
+                <Button variant="outline" size="sm" className="flex-1 min-w-0">
                   <ExternalLink className="mr-2 h-4 w-4" />
                   Open Portal
                   <ChevronDown className="ml-2 h-4 w-4" />
@@ -258,7 +302,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
                 variant="outline"
                 size="sm"
                 onClick={() => onUpdateConfig(project)}
-                className="flex-1"
+                className="flex-1 min-w-0"
               >
                 <Settings className="mr-2 h-4 w-4" />
                 Configure
@@ -271,7 +315,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
               variant="outline"
               size="sm"
               onClick={() => handleOpenPortal(appClients[0])}
-              className="flex-1"
+              className="flex-1 min-w-0"
             >
               <ExternalLink className="mr-2 h-4 w-4" />
               Open Portal
@@ -281,7 +325,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
                 variant="outline"
                 size="sm"
                 onClick={() => onUpdateConfig(project)}
-                className="flex-1"
+                className="flex-1 min-w-0"
               >
                 <Settings className="mr-2 h-4 w-4" />
                 Configure
@@ -294,7 +338,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
               variant="outline"
               size="sm"
               onClick={() => handleOpenPortal()}
-              className="flex-1"
+              className="flex-1 min-w-0"
             >
               <ExternalLink className="mr-2 h-4 w-4" />
               Open Portal
@@ -304,7 +348,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
                 variant="outline"
                 size="sm"
                 onClick={() => onUpdateConfig(project)}
-                className="flex-1"
+                className="flex-1 min-w-0"
               >
                 <Settings className="mr-2 h-4 w-4" />
                 Configure
@@ -312,6 +356,51 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
             )}
           </>
         )}
+        </div>
+        {appLoginUrls.length > 1 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                title="Open your app's OAuth login page"
+              >
+                <LogIn className="mr-2 h-4 w-4" />
+                App login
+                <ChevronDown className="ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              {appLoginUrls.map(({ type, url }) => (
+                <DropdownMenuItem
+                  key={type || 'default'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(url, '_blank');
+                  }}
+                >
+                  <LogIn className="mr-2 h-4 w-4" />
+                  {type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Default'}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : appLoginUrls.length === 1 ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(appLoginUrls[0].url, '_blank');
+            }}
+            className="w-full"
+            title="Open your app's OAuth login page"
+          >
+            <LogIn className="mr-2 h-4 w-4" />
+            App login
+          </Button>
+        ) : null}
       </CardFooter>
     </Card>
   );
