@@ -85,7 +85,9 @@ class ApiClient {
         } catch {
           // Ignore JSON parse errors – default error message already set
         }
-        throw new Error(error.error || 'API request failed');
+        // Prefer the most descriptive message (e.g. APIBlaze provider protection errors)
+        const message = error.details || error.error || 'API request failed';
+        throw new Error(message);
       }
       
       // Handle 204 No Content responses (no body)

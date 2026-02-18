@@ -317,7 +317,7 @@ export function AuthConfigModal({
       console.error('Error adding redirect URI:', error);
       toast({
         title: 'Error',
-        description: 'Failed to add redirect URI',
+        description: error instanceof Error ? error.message : 'Failed to add redirect URI',
         variant: 'destructive',
       });
     }
@@ -342,7 +342,7 @@ export function AuthConfigModal({
       console.error('Error adding signout URI:', error);
       toast({
         title: 'Error',
-        description: 'Failed to add signout URI',
+        description: error instanceof Error ? error.message : 'Failed to add signout URI',
         variant: 'destructive',
       });
     }
@@ -368,7 +368,7 @@ export function AuthConfigModal({
       console.error('Error adding scope:', error);
       toast({
         title: 'Error',
-        description: 'Failed to add scope',
+        description: error instanceof Error ? error.message : 'Failed to add scope',
         variant: 'destructive',
       });
     }
@@ -385,6 +385,11 @@ export function AuthConfigModal({
       await invalidateAndRefetch();
     } catch (error) {
       console.error('Error removing redirect URI:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to remove redirect URI',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -399,6 +404,11 @@ export function AuthConfigModal({
       await invalidateAndRefetch();
     } catch (error) {
       console.error('Error removing signout URI:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to remove signout URI',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -414,6 +424,11 @@ export function AuthConfigModal({
       await invalidateAndRefetch();
     } catch (error) {
       console.error('Error removing scope:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to remove scope',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -431,7 +446,7 @@ export function AuthConfigModal({
       console.error('Error removing provider:', error);
       toast({
         title: 'Error',
-        description: 'Failed to remove provider',
+        description: error instanceof Error ? error.message : 'Failed to remove provider',
         variant: 'destructive',
       });
     }

@@ -87,6 +87,16 @@ const PROVIDER_TYPE_LABELS: Record<SocialProvider, string> = {
   other: 'Other',
 };
 
+/** APIBlaze default GitHub OAuth client ID - used to show "API Blaze via GitHub" in provider list. From env or known default. */
+const APIBLAZE_GITHUB_CLIENT_ID = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_APIBLAZE_GITHUB_CLIENT_ID?.trim()) || 'Iv23liwZOuwO0lPP9R9P';
+
+function isApiblazeDefaultProvider(provider: { type: string; clientId?: string; client_id?: string; isApiblazeDefault?: boolean }): boolean {
+  if (provider.type !== 'github') return false;
+  if (provider.isApiblazeDefault === true) return true;
+  const clientId = (provider.clientId ?? provider.client_id ?? '').trim();
+  return !!APIBLAZE_GITHUB_CLIENT_ID && clientId === APIBLAZE_GITHUB_CLIENT_ID;
+}
+
 const PROVIDER_SETUP_GUIDES: Record<SocialProvider, string[]> = {
   google: [
     'Go to Google Cloud Console (console.cloud.google.com)',
@@ -385,7 +395,7 @@ function EditModeManagementUI({
       await invalidateAndRefetch(teamId);
     } catch (err) {
       console.error('Error adding callback URL:', err);
-      alert('Failed to add callback URL');
+      alert(err instanceof Error ? err.message : 'Failed to add callback URL');
     } finally {
       setSavingCallbackUrlsForClient(null);
     }
@@ -403,7 +413,7 @@ function EditModeManagementUI({
       await invalidateAndRefetch(teamId);
     } catch (err) {
       console.error('Error removing callback URL:', err);
-      alert('Failed to remove callback URL');
+      alert(err instanceof Error ? err.message : 'Failed to remove callback URL');
     } finally {
       setSavingCallbackUrlsForClient(null);
     }
@@ -588,7 +598,7 @@ function EditModeManagementUI({
       await invalidateAndRefetch(teamId);
     } catch (error) {
       console.error('Error updating app client expiries:', error);
-      alert('Failed to update token expiries');
+      alert(error instanceof Error ? error.message : 'Failed to update token expiries');
     }
   };
 
@@ -1631,6 +1641,21 @@ function EditModeManagementUI({
                                 
                                 {showAdvancedSettings[client.id] && (
                                   <div className="mt-3 space-y-4">
+                                    {/* Authorized Scopes (read-only) */}
+                                    <div className="space-y-2">
+                                      <Label className="text-xs font-medium text-muted-foreground">Authorized Scopes</Label>
+                                      {(clientDetails?.scopes ?? client?.scopes ?? []).length > 0 ? (
+                                        <div className="flex flex-wrap gap-1">
+                                          {(clientDetails?.scopes ?? client?.scopes ?? []).map((scope) => (
+                                            <Badge key={scope} variant="secondary" className="text-xs">
+                                              {scope}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <span className="text-xs text-muted-foreground">—</span>
+                                      )}
+                                    </div>
                                     {/* Access Token Expiry */}
                                     <div className="space-y-2">
                                       <Label className="text-xs font-medium">Access Token Expiry</Label>
@@ -2471,7 +2496,9 @@ function EditModeManagementUI({
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
                                     <Badge variant="outline" className="text-xs font-medium capitalize">
-                                      {provider.type}
+                                      {isApiblazeDefaultProvider(provider)
+                                        ? 'API Blaze via GitHub'
+                                        : (PROVIDER_TYPE_LABELS[provider.type] ?? provider.type)}
                                     </Badge>
                                   </div>
                                   <div className="text-xs text-muted-foreground mt-1.5 space-y-0.5">
