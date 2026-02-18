@@ -476,7 +476,7 @@ export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl 
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-xs">
-                      <p>We generated an example code_challenge so this link opens the login page. For your own app you must generate your own code_verifier and code_challenge (PKCE) for each request.</p>
+                      <p>We generated an example code_challenge so this link opens the login page. For your own app you must generate your own code_verifier and code_challenge (PKCE) for each request. You can select which provider to link simply by adding the parameter provider=google or others to the url.</p>
                     </TooltipContent>
                   </Tooltip>
                 </div>
