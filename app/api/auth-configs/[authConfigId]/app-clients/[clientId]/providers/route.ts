@@ -55,9 +55,9 @@ export async function POST(
         { status: 400 }
       );
     }
-    if (!body.authorizedScopes || !Array.isArray(body.authorizedScopes) || body.authorizedScopes.length === 0) {
+    if (!body.scopes || !Array.isArray(body.scopes) || body.scopes.length === 0) {
       return NextResponse.json(
-        { error: 'Validation error', details: 'authorizedScopes (non-empty array) is required' },
+        { error: 'Validation error', details: 'scopes (non-empty array) is required' },
         { status: 400 }
       );
     }
@@ -72,7 +72,7 @@ export async function POST(
       type: body.type,
       clientId: body.clientId,
       clientSecret: body.clientSecret,
-      authorizedScopes: body.authorizedScopes,
+      scopes: body.scopes,
       domain: body.domain,
       tokenType: body.tokenType,
       targetServerToken: body.targetServerToken,

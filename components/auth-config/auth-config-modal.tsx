@@ -89,7 +89,7 @@ export function AuthConfigModal({
     type: 'google',
     clientId: '',
     clientSecret: '',
-    authorizedScopes: [],
+    scopes: [],
     domain: 'https://accounts.google.com',
     tokenType: 'apiblaze',
     targetServerToken: 'apiblaze',
@@ -97,7 +97,7 @@ export function AuthConfigModal({
     includeApiblazeIdTokenHeader: false,
   });
   const [isAddingProvider, setIsAddingProvider] = useState(false);
-  const [newAuthorizedScope, setNewAuthorizedScope] = useState('');
+  const [newScopeInput, setNewScopeInput] = useState('');
   const [newRedirectUri, setNewRedirectUri] = useState('');
   const [newSignoutUri, setNewSignoutUri] = useState('');
   const [newScope, setNewScope] = useState('');
@@ -244,10 +244,10 @@ export function AuthConfigModal({
       return;
     }
 
-    if (!newProvider.authorizedScopes?.length) {
+    if (!newProvider.scopes?.length) {
       toast({
         title: 'Validation Error',
-        description: 'At least one authorized scope is required (e.g. openid, email, profile for Google; read:user, user:email for GitHub)',
+        description: 'At least one scope is required (e.g. openid, email, profile for Google; read:user, user:email for GitHub)',
         variant: 'destructive',
       });
       return;
@@ -259,7 +259,7 @@ export function AuthConfigModal({
         type: newProvider.type,
         clientId: newProvider.clientId,
         clientSecret: newProvider.clientSecret,
-        authorizedScopes: newProvider.authorizedScopes,
+        scopes: newProvider.scopes,
         domain: newProvider.domain || PROVIDER_DOMAINS[newProvider.type],
         tokenType: newProvider.tokenType ?? 'apiblaze',
         targetServerToken: newProvider.targetServerToken ?? 'apiblaze',
@@ -267,12 +267,12 @@ export function AuthConfigModal({
         includeApiblazeIdTokenHeader: newProvider.includeApiblazeIdTokenHeader ?? false,
       });
       await invalidateAndRefetch();
-      setNewAuthorizedScope('');
+      setNewScopeInput('');
       setNewProvider({
         type: 'google',
         clientId: '',
         clientSecret: '',
-        authorizedScopes: [],
+        scopes: [],
         domain: 'https://accounts.google.com',
         tokenType: 'apiblaze',
         targetServerToken: 'apiblaze',
@@ -471,12 +471,12 @@ export function AuthConfigModal({
     setNewAppClientSecret(null);
     setNewAppClientId(null);
     setShowAddProvider(false);
-    setNewAuthorizedScope('');
+    setNewScopeInput('');
     setNewProvider({
       type: 'google',
       clientId: '',
       clientSecret: '',
-      authorizedScopes: [],
+      scopes: [],
       domain: 'https://accounts.google.com',
       tokenType: 'apiblaze',
       targetServerToken: 'apiblaze',
@@ -720,12 +720,12 @@ export function AuthConfigModal({
                       />
                     </div>
                     <div>
-                      <Label>Authorized scopes (required)</Label>
+                      <Label>Scopes</Label>
                       <p className="text-xs text-muted-foreground mb-1">
-                        Scopes this provider is allowed to request (e.g. openid email profile for Google; read:user user:email for GitHub)
+                        Authorized scopes that will get used to login your provider.
                       </p>
                       <div className="flex flex-wrap gap-1 mb-2">
-                        {(newProvider.authorizedScopes ?? []).map((scope) => (
+                        {(newProvider.scopes ?? []).map((scope) => (
                           <Badge key={scope} variant="secondary" className="gap-1">
                             {scope}
                             <button
@@ -733,7 +733,7 @@ export function AuthConfigModal({
                               onClick={() =>
                                 setNewProvider({
                                   ...newProvider,
-                                  authorizedScopes: (newProvider.authorizedScopes ?? []).filter((s) => s !== scope),
+                                  scopes: (newProvider.scopes ?? []).filter((s) => s !== scope),
                                 })
                               }
                               className="ml-0.5 rounded hover:bg-muted"
@@ -745,19 +745,19 @@ export function AuthConfigModal({
                       </div>
                       <div className="flex gap-2">
                         <Input
-                          value={newAuthorizedScope}
-                          onChange={(e) => setNewAuthorizedScope(e.target.value)}
+                          value={newScopeInput}
+                          onChange={(e) => setNewScopeInput(e.target.value)}
                           placeholder="e.g. openid or read:user"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
-                              const s = newAuthorizedScope.trim();
-                              if (s && !(newProvider.authorizedScopes ?? []).includes(s)) {
+                              const s = newScopeInput.trim();
+                              if (s && !(newProvider.scopes ?? []).includes(s)) {
                                 setNewProvider({
                                   ...newProvider,
-                                  authorizedScopes: [...(newProvider.authorizedScopes ?? []), s],
+                                  scopes: [...(newProvider.scopes ?? []), s],
                                 });
-                                setNewAuthorizedScope('');
+                                setNewScopeInput('');
                               }
                             }
                           }}
@@ -767,13 +767,13 @@ export function AuthConfigModal({
                           size="sm"
                           variant="outline"
                           onClick={() => {
-                            const s = newAuthorizedScope.trim();
-                            if (s && !(newProvider.authorizedScopes ?? []).includes(s)) {
+                            const s = newScopeInput.trim();
+                            if (s && !(newProvider.scopes ?? []).includes(s)) {
                               setNewProvider({
                                 ...newProvider,
-                                authorizedScopes: [...(newProvider.authorizedScopes ?? []), s],
+                                scopes: [...(newProvider.scopes ?? []), s],
                               });
-                              setNewAuthorizedScope('');
+                              setNewScopeInput('');
                             }
                           }}
                         >
@@ -869,12 +869,12 @@ export function AuthConfigModal({
                         variant="outline"
                         onClick={() => {
                           setShowAddProvider(false);
-                          setNewAuthorizedScope('');
+                          setNewScopeInput('');
                           setNewProvider({
                             type: 'google',
                             clientId: '',
                             clientSecret: '',
-                            authorizedScopes: [],
+                            scopes: [],
                             domain: 'https://accounts.google.com',
                             tokenType: 'apiblaze',
                             targetServerToken: 'apiblaze',
@@ -985,7 +985,10 @@ export function AuthConfigModal({
 
               {/* Scopes */}
               <div className="space-y-3">
-                <Label className="text-base font-semibold">Authorized Scopes</Label>
+                <Label className="text-base font-semibold">Scopes</Label>
+                <p className="text-xs text-muted-foreground mb-1">
+                  API Blaze authorized scopes that will get used to create the API Blaze-powered login page
+                </p>
                 <div className="flex gap-2">
                   <Input
                     placeholder="Add custom scope"

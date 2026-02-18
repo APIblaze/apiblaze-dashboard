@@ -88,7 +88,7 @@ export function ProviderFormDialog({
         setTargetServerToken((provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token ?? 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none');
         setIncludeApiblazeAccessTokenHeader(provider.includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_access_token_header?: boolean }).include_apiblaze_access_token_header ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header ?? false);
         setIncludeApiblazeIdTokenHeader(provider.includeApiblazeIdTokenHeader ?? (provider as { include_apiblaze_id_token_header?: boolean }).include_apiblaze_id_token_header ?? false);
-        const raw = provider.authorizedScopes ?? (provider as { authorized_scopes?: string | string[] }).authorized_scopes;
+        const raw = provider.scopes ?? (provider as { authorized_scopes?: string | string[] }).authorized_scopes;
         setAuthorizedScopes(
           Array.isArray(raw) ? raw : typeof raw === 'string' && raw.trim() ? raw.trim().split(/\s+/).filter(Boolean) : DEFAULT_AUTHORIZED_SCOPES[provider.type]
         );
@@ -141,7 +141,7 @@ export function ProviderFormDialog({
         type,
         clientId: clientIdValue.trim(),
         clientSecret: clientSecret.trim(),
-        authorizedScopes,
+        scopes: authorizedScopes,
         domain: domain.trim() || undefined,
         tokenType,
         targetServerToken,

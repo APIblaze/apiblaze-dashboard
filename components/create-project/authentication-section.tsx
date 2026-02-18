@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { AlertCircle, Plus, X, Users, Key, Copy, Check, Trash2, Search, ChevronDown, Star, ExternalLink, Loader2, Pencil } from 'lucide-react';
+import { AlertCircle, Plus, X, Users, Key, Copy, Check, Trash2, Search, ChevronDown, Star, ExternalLink, Loader2, Pencil, HelpCircle } from 'lucide-react';
 import { ProjectConfig, SocialProvider } from './types';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { AuthConfigModal } from '@/components/auth-config/auth-config-modal';
@@ -19,6 +19,8 @@ import { updateProjectConfig } from '@/lib/api/projects';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AppClient, AuthConfig, SocialProvider as AuthConfigSocialProvider } from '@/types/auth-config';
 import type { Project } from '@/types/project';
+import { getFirstExternalCallbackUrl, buildAppLoginAuthorizeUrl, addPkceToAuthorizeUrl } from '@/lib/build-app-login-url';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 // API response may have snake_case fields from the database
 type AppClientResponse = AppClient & {
@@ -49,8 +51,8 @@ const PROVIDER_DOMAINS: Record<SocialProvider, string> = {
   other: '',
 };
 
-/** Default authorized scopes per provider type (e.g. for project create/add provider) */
-const DEFAULT_AUTHORIZED_SCOPES: Record<SocialProvider, string[]> = {
+/** Default scopes per provider type (e.g. for project create/add provider) */
+const DEFAULT_SCOPES: Record<SocialProvider, string[]> = {
   google: ['email', 'openid', 'profile'],
   github: ['read:user', 'user:email'],
   microsoft: ['email', 'openid', 'profile'],
@@ -69,7 +71,7 @@ function getDefaultNewProvider(type: SocialProvider = 'google') {
     targetServerToken: 'apiblaze' as const,
     includeApiblazeAccessTokenHeader: false,
     includeApiblazeIdTokenHeader: false,
-    authorizedScopes: [...DEFAULT_AUTHORIZED_SCOPES[type]],
+    scopes: [...DEFAULT_SCOPES[type]],
   };
 }
 
@@ -267,7 +269,7 @@ function EditModeManagementUI({
     targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
     includeApiblazeAccessTokenHeader?: boolean;
     includeApiblazeIdTokenHeader?: boolean;
-    authorizedScopes: string[];
+    scopes: string[];
   }>>({});
   const [newAuthorizedScopeByClient, setNewAuthorizedScopeByClient] = useState<Record<string, string>>({});
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -293,6 +295,7 @@ function EditModeManagementUI({
     newScope: string;
   } | null>(null);
   const [savingAppClientEdit, setSavingAppClientEdit] = useState(false);
+  const [appLoginUrlWithPkce, setAppLoginUrlWithPkce] = useState<Record<string, string>>({});
   const [editingProviderKey, setEditingProviderKey] = useState<string | null>(null);
   const [editProviderForm, setEditProviderForm] = useState<{
     type: SocialProvider;
@@ -303,19 +306,36 @@ function EditModeManagementUI({
     targetServerToken: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
     includeApiblazeAccessTokenHeader: boolean;
     includeApiblazeIdTokenHeader: boolean;
-    authorizedScopes: string[];
+    scopes: string[];
   } | null>(null);
   const [editProviderNewScope, setEditProviderNewScope] = useState('');
   const [savingProviderEdit, setSavingProviderEdit] = useState(false);
   const [loadingProviderSecret, setLoadingProviderSecret] = useState(false);
 
+  // Generate PKCE example URLs for "Your App login" links (so the link can be opened directly)
+  useEffect(() => {
+    for (const client of appClients) {
+      const details = appClientDetails[client.id] as AppClientResponse | undefined;
+      const urls = (details?.authorizedCallbackUrls ?? details?.authorized_callback_urls ?? []) as string[];
+      const external = getFirstExternalCallbackUrl(urls);
+      if (!external) continue;
+      const oauthClientId = details?.clientId ?? details?.client_id ?? client.clientId ?? client.id;
+      const scopes = (details?.scopes ?? client.scopes ?? []) as string[];
+      const baseUrl = buildAppLoginAuthorizeUrl(oauthClientId, external, scopes);
+      addPkceToAuthorizeUrl(baseUrl).then((urlWithPkce) => {
+        setAppLoginUrlWithPkce((prev) => (prev[client.id] === urlWithPkce ? prev : { ...prev, [client.id]: urlWithPkce }));
+      });
+    }
+  }, [appClients, appClientDetails]);
+
   const validateHttpsUrlForEdit = (url: string): { valid: boolean; error?: string } => {
     try {
       const urlObj = new URL(url);
-      if (urlObj.protocol !== 'https:') {
-        return { valid: false, error: 'URL must use HTTPS protocol' };
+      if (urlObj.protocol === 'https:') return { valid: true };
+      if (urlObj.protocol === 'http:' && urlObj.hostname.toLowerCase() === 'localhost') {
+        return { valid: true };
       }
-      return { valid: true };
+      return { valid: false, error: 'URL must use HTTPS, or http://localhost for local development' };
     } catch {
       return { valid: false, error: 'Invalid URL format' };
     }
@@ -590,9 +610,9 @@ function EditModeManagementUI({
       alert('Please provide Client ID and Client Secret');
       return;
     }
-    const scopes = provider.authorizedScopes ?? [];
+    const scopes = (provider as { scopes?: string[] }).scopes ?? [];
     if (!scopes.length) {
-      alert('At least one authorized scope is required (e.g. email, openid, profile for Google; read:user, user:email for GitHub)');
+      alert('At least one scope is required (e.g. email, openid, profile for Google; read:user, user:email for GitHub)');
       return;
     }
     try {
@@ -600,7 +620,7 @@ function EditModeManagementUI({
         type: provider.type,
         clientId: provider.clientId,
         clientSecret: provider.clientSecret,
-        authorizedScopes: scopes,
+        scopes,
         domain: provider.domain || PROVIDER_DOMAINS[provider.type],
         tokenType: provider.tokenType || 'apiblaze',
         targetServerToken: provider.targetServerToken ?? 'apiblaze',
@@ -699,12 +719,12 @@ function EditModeManagementUI({
     } finally {
       setLoadingProviderSecret(false);
     }
-    const rawScopes = provider.authorizedScopes ?? (provider as { authorized_scopes?: string | string[] }).authorized_scopes;
-    const authorizedScopes = Array.isArray(rawScopes)
+    const rawScopes = provider.scopes ?? (provider as { authorized_scopes?: string | string[] }).authorized_scopes;
+    const scopes = Array.isArray(rawScopes)
       ? rawScopes
       : typeof rawScopes === 'string' && rawScopes.trim()
         ? rawScopes.trim().split(/\s+/).filter(Boolean)
-        : DEFAULT_AUTHORIZED_SCOPES[provider.type];
+        : DEFAULT_SCOPES[provider.type];
     setEditProviderForm({
       type: provider.type,
       clientId: provider.clientId ?? (provider as { client_id?: string }).client_id ?? '',
@@ -714,7 +734,7 @@ function EditModeManagementUI({
       targetServerToken: (provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token ?? 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none',
       includeApiblazeAccessTokenHeader: provider.includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_access_token_header?: boolean }).include_apiblaze_access_token_header ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header ?? false,
       includeApiblazeIdTokenHeader: provider.includeApiblazeIdTokenHeader ?? (provider as { include_apiblaze_id_token_header?: boolean }).include_apiblaze_id_token_header ?? false,
-      authorizedScopes,
+      scopes,
     });
   };
 
@@ -725,7 +745,7 @@ function EditModeManagementUI({
       alert('Client ID and Client Secret are required');
       return;
     }
-    if (!editProviderForm.authorizedScopes?.length) {
+    if (!editProviderForm.scopes?.length) {
       alert('At least one authorized scope is required');
       return;
     }
@@ -735,7 +755,7 @@ function EditModeManagementUI({
         type: editProviderForm.type,
         clientId: editProviderForm.clientId.trim(),
         clientSecret: editProviderForm.clientSecret.trim(),
-        authorizedScopes: editProviderForm.authorizedScopes,
+        scopes: editProviderForm.scopes ?? [],
         domain: editProviderForm.domain.trim() || undefined,
         tokenType: editProviderForm.tokenType,
         targetServerToken: editProviderForm.targetServerToken,
@@ -1052,35 +1072,88 @@ function EditModeManagementUI({
                               </span>
                             </Button>
                             {showAdvancedSettings[client.id] && (
-                              <div className="space-y-2 mt-3">
-                                <Label className="text-xs">Token Expiry (seconds)</Label>
-                                <div className="grid grid-cols-3 gap-2">
-                                  <div>
-                                    <Label className="text-xs text-muted-foreground">Refresh</Label>
-                                    <Input
-                                      type="number"
-                                      value={editAppClientForm.refreshTokenExpiry}
-                                      onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, refreshTokenExpiry: parseInt(e.target.value, 10) || 2592000 } : null)}
-                                      className="mt-1"
-                                    />
+                              <div className="space-y-4 mt-3">
+                                <div className="space-y-2">
+                                  <Label className="text-xs">Token Expiry (seconds)</Label>
+                                  <div className="grid grid-cols-3 gap-2">
+                                    <div>
+                                      <Label className="text-xs text-muted-foreground">Refresh</Label>
+                                      <Input
+                                        type="number"
+                                        value={editAppClientForm.refreshTokenExpiry}
+                                        onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, refreshTokenExpiry: parseInt(e.target.value, 10) || 2592000 } : null)}
+                                        className="mt-1"
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-muted-foreground">ID Token</Label>
+                                      <Input
+                                        type="number"
+                                        value={editAppClientForm.idTokenExpiry}
+                                        onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, idTokenExpiry: parseInt(e.target.value, 10) || 3600 } : null)}
+                                        className="mt-1"
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-muted-foreground">Access</Label>
+                                      <Input
+                                        type="number"
+                                        value={editAppClientForm.accessTokenExpiry}
+                                        onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, accessTokenExpiry: parseInt(e.target.value, 10) || 3600 } : null)}
+                                        className="mt-1"
+                                      />
+                                    </div>
                                   </div>
-                                  <div>
-                                    <Label className="text-xs text-muted-foreground">ID Token</Label>
-                                    <Input
-                                      type="number"
-                                      value={editAppClientForm.idTokenExpiry}
-                                      onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, idTokenExpiry: parseInt(e.target.value, 10) || 3600 } : null)}
-                                      className="mt-1"
-                                    />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label className="text-xs">Scopes</Label>
+                                  <p className="text-xs text-muted-foreground">
+                                    Scopes for /authorize and /token; requested scopes must be a subset. Add or remove below.
+                                  </p>
+                                  <div className="flex flex-wrap gap-1 mb-2">
+                                    {(editAppClientForm.scopes ?? []).map((scope) => (
+                                      <Badge key={scope} variant="secondary" className="gap-1 text-xs">
+                                        {scope}
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditAppClientForm(prev => prev ? { ...prev, scopes: (prev.scopes ?? []).filter((s) => s !== scope) } : null)}
+                                          className="ml-0.5 rounded hover:bg-muted"
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </button>
+                                      </Badge>
+                                    ))}
                                   </div>
-                                  <div>
-                                    <Label className="text-xs text-muted-foreground">Access</Label>
+                                  <div className="flex gap-2">
                                     <Input
-                                      type="number"
-                                      value={editAppClientForm.accessTokenExpiry}
-                                      onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, accessTokenExpiry: parseInt(e.target.value, 10) || 3600 } : null)}
-                                      className="mt-1"
+                                      placeholder="e.g. openid, email, profile"
+                                      value={editAppClientForm.newScope}
+                                      onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, newScope: e.target.value } : null)}
+                                      className="text-xs"
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          const s = editAppClientForm.newScope.trim();
+                                          if (s && !(editAppClientForm.scopes ?? []).includes(s)) {
+                                            setEditAppClientForm(prev => prev ? { ...prev, scopes: [...(prev.scopes ?? []), s], newScope: '' } : null);
+                                          }
+                                        }
+                                      }}
                                     />
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-9"
+                                      onClick={() => {
+                                        const s = editAppClientForm.newScope.trim();
+                                        if (s && !(editAppClientForm.scopes ?? []).includes(s)) {
+                                          setEditAppClientForm(prev => prev ? { ...prev, scopes: [...(prev.scopes ?? []), s], newScope: '' } : null);
+                                        }
+                                      }}
+                                    >
+                                      <Plus className="h-4 w-4" />
+                                    </Button>
                                   </div>
                                 </div>
                               </div>
@@ -1106,142 +1179,53 @@ function EditModeManagementUI({
                     <Card className="border-2 border-blue-200 bg-blue-50/30 shadow-sm">
                       <CardContent className="p-4">
                         <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Key className="h-4 w-4 text-blue-600" />
-                              <div>
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-semibold text-base">{client.name}</span>
-                                  <div className="flex items-center gap-1.5">
-                                    {config.defaultAppClient === client.id && (
-                                      <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600 text-xs">
-                                        <Star className="h-3 w-3 mr-1" />
-                                        Default
-                                      </Badge>
-                                    )}
-                                    {(clientDetails?.verified ?? client?.verified) === false ? (
-                                      <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-xs">
-                                        Unverified
-                                      </Badge>
-                                    ) : (
-                                      <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
-                                        Verified
-                                      </Badge>
-                                    )}
-                                  </div>
+                          {/* Header row: name + badges left, Edit/Delete right */}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Key className="h-4 w-4 text-blue-600 shrink-0" />
+                              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                <span className="font-semibold text-base">{client.name}</span>
+                                <div className="flex items-center gap-1.5">
+                                  {config.defaultAppClient === client.id && (
+                                    <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600 text-xs">
+                                      <Star className="h-3 w-3 mr-1" />
+                                      Default
+                                    </Badge>
+                                  )}
+                                  {(clientDetails?.verified ?? client?.verified) === false ? (
+                                    <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-xs">
+                                      Unverified
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
+                                      Verified
+                                    </Badge>
+                                  )}
                                 </div>
-                                {/* JWKS Display - shown for all app clients (client_id from list) */}
-                                {(() => {
-                                  const clientId = clientDetails?.client_id || clientDetails?.clientId || client.clientId || client.id;
-                                  if (!clientId) return null;
-                                  const jwksUrl = `https://auth.apiblaze.com/${clientId}/.well-known/jwks.json`;
-                                  return (
-                                    <div className="flex items-center gap-2 mt-0.5">
-                                      <div className="text-xs text-muted-foreground">
-                                        JWKS (RS256 Public Key):{' '}
-                                        <a
-                                          href={jwksUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-blue-600 hover:text-blue-800 underline"
-                                        >
-                                          {jwksUrl}
-                                        </a>
-                                      </div>
-                                      <a
-                                        href={jwksUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 hover:text-blue-800"
-                                        title="Open JWKS in new tab"
-                                      >
-                                        <ExternalLink className="h-3 w-3" />
-                                      </a>
-                                    </div>
-                                  );
-                                })()}
-                                {(() => {
-                                  const clientId = clientDetails?.client_id || clientDetails?.clientId;
-                                  const projectName = project?.project_id || 'project';
-                                  const apiVersion = project?.api_version || '1.0.0';
-                                  const isDefault = config.defaultAppClient === client.id;
-                                  
-                                  // Default app client: https://{projectName}.portal.apiblaze.com/{apiVersion}
-                                  // Non-default: https://{projectName}.portal.apiblaze.com/{apiVersion}/login?clientId={clientId}
-                                  const portalUrl = isDefault
-                                    ? `https://${projectName}.portal.apiblaze.com/${apiVersion}`
-                                    : clientId
-                                      ? `https://${projectName}.portal.apiblaze.com/${apiVersion}/login?clientId=${clientId}`
-                                      : `https://${projectName}.portal.apiblaze.com/${apiVersion}/login`;
-                                  
-                                  return (
-                                    <div className="flex items-center gap-2 mt-0.5">
-                                      <div className="text-xs text-muted-foreground">
-                                        API Portal login:{' '}
-                                        <a
-                                          href={portalUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-blue-600 hover:text-blue-800 underline"
-                                        >
-                                          {portalUrl}
-                                        </a>
-                                      </div>
-                                      <a
-                                        href={portalUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 hover:text-blue-800"
-                                        title="Open in new tab"
-                                      >
-                                        <ExternalLink className="h-3 w-3" />
-                                      </a>
-                                      {isDefault ? null : (
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={async () => {
-                                            updateConfig({
-                                              defaultAppClient: client.id,
-                                            });
-                                            // Save immediately if in edit mode
-                                            await saveConfigImmediately({ defaultAppClient: client.id });
-                                          }}
-                                          className="h-6 px-2 text-xs hover:bg-blue-100 ml-1"
-                                          title="Set as default"
-                                        >
-                                          <Star className="h-3 w-3 mr-1" />
-                                          Set as Default
-                                        </Button>
-                                      )}
-                                    </div>
-                                  );
-                                })()}
                               </div>
                             </div>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 shrink-0">
                               {(clientDetails?.verified ?? client?.verified) === false && (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={async () => {
-                                      if (!selectedAuthConfigId) return;
-                                      try {
-                                        await api.updateAppClient(selectedAuthConfigId, client.id, { verified: true });
-                                        await invalidateAndRefetch(teamId);
-                                      } catch (err) {
-                                        console.error('Failed to verify app client:', err);
-                                        alert('Failed to verify app client');
-                                      }
-                                    }}
-                                    className="h-8 text-xs"
-                                    title="Mark as verified"
-                                  >
-                                    Verify
-                                  </Button>
-                                )}
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={async () => {
+                                    if (!selectedAuthConfigId) return;
+                                    try {
+                                      await api.updateAppClient(selectedAuthConfigId, client.id, { verified: true });
+                                      await invalidateAndRefetch(teamId);
+                                    } catch (err) {
+                                      console.error('Failed to verify app client:', err);
+                                      alert('Failed to verify app client');
+                                    }
+                                  }}
+                                  className="h-8 text-xs"
+                                  title="Mark as verified"
+                                >
+                                  Verify
+                                </Button>
+                              )}
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -1263,6 +1247,136 @@ function EditModeManagementUI({
                               </Button>
                             </div>
                           </div>
+                          {/* Login & keys links - below header */}
+                          <div className="space-y-3">
+                                  {(() => {
+                                    const clientId = clientDetails?.client_id || clientDetails?.clientId || client.clientId || client.id;
+                                    if (!clientId) return null;
+                                    const jwksUrl = `https://auth.apiblaze.com/${clientId}/.well-known/jwks.json`;
+                                    return (
+                                      <div className="space-y-1">
+                                        <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">JWKS (RS256 Public Key)</div>
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <a
+                                            href={jwksUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline truncate min-w-0"
+                                            title={jwksUrl}
+                                          >
+                                            {jwksUrl}
+                                          </a>
+                                          <a href={jwksUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
+                                            <ExternalLink className="h-3 w-3" />
+                                          </a>
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
+                                  {(() => {
+                                    const clientId = clientDetails?.client_id || clientDetails?.clientId;
+                                    const projectName = project?.project_id || 'project';
+                                    const apiVersion = project?.api_version || '1.0.0';
+                                    const isDefault = config.defaultAppClient === client.id;
+                                    const portalUrl = isDefault
+                                      ? `https://${projectName}.portal.apiblaze.com/${apiVersion}`
+                                      : clientId
+                                        ? `https://${projectName}.portal.apiblaze.com/${apiVersion}/login?clientId=${clientId}`
+                                        : `https://${projectName}.portal.apiblaze.com/${apiVersion}/login`;
+                                    return (
+                                      <div className="space-y-1">
+                                        <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">API Portal login</div>
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <a
+                                            href={portalUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline truncate min-w-0"
+                                            title={portalUrl}
+                                          >
+                                            {portalUrl}
+                                          </a>
+                                          <a href={portalUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
+                                            <ExternalLink className="h-3 w-3" />
+                                          </a>
+                                          {!isDefault && (
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={async () => {
+                                                updateConfig({ defaultAppClient: client.id });
+                                                await saveConfigImmediately({ defaultAppClient: client.id });
+                                              }}
+                                              className="h-6 px-2 text-xs shrink-0"
+                                              title="Set as default"
+                                            >
+                                              <Star className="h-3 w-3 mr-1" />
+                                              Default
+                                            </Button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
+                                  {(() => {
+                                    const urls = getClientCallbackUrls(client.id);
+                                    const externalRedirect = getFirstExternalCallbackUrl(urls);
+                                    if (!externalRedirect) return null;
+                                    const loginUrlWithPkce = appLoginUrlWithPkce[client.id];
+                                    return (
+                                      <div className="space-y-1">
+                                        <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                                          Your App login
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <span className="inline-flex text-muted-foreground hover:text-foreground cursor-help">
+                                                <HelpCircle className="h-3.5 w-3.5 shrink-0" />
+                                              </span>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top" className="max-w-xs">
+                                              <p>We generated an example code_challenge so this link opens the login page. For your own app you must generate your own code_verifier and code_challenge (PKCE) for each request.</p>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                        </div>
+                                        {loginUrlWithPkce ? (
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            <a
+                                              href={loginUrlWithPkce}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-xs text-blue-600 hover:text-blue-800 hover:underline shrink-0"
+                                            >
+                                              Open login page
+                                            </a>
+                                            <a href={loginUrlWithPkce} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
+                                              <ExternalLink className="h-3 w-3" />
+                                            </a>
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-6 w-6 p-0 shrink-0"
+                                              onClick={async (e) => {
+                                                e.preventDefault();
+                                                await copyToClipboard(loginUrlWithPkce, `appLogin-${client.id}`);
+                                              }}
+                                              title="Copy URL"
+                                            >
+                                              {copiedField === `appLogin-${client.id}` ? (
+                                                <Check className="h-3 w-3 text-green-600" />
+                                              ) : (
+                                                <Copy className="h-3 w-3" />
+                                              )}
+                                            </Button>
+                                          </div>
+                                        ) : (
+                                          <span className="text-xs text-muted-foreground italic">Generating…</span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
                           {clientDetails && (
                             <>
                             <div className="space-y-3 pt-2 border-t border-blue-100">
@@ -1794,10 +1908,10 @@ function EditModeManagementUI({
                               <div>
                                 <Label className="text-xs">Authorized Scopes</Label>
                                 <p className="text-xs text-muted-foreground mb-1">
-                                  Default mandatory scopes: {(newProvider[client.id]?.authorizedScopes ?? DEFAULT_AUTHORIZED_SCOPES[newProvider[client.id]?.type || 'google']).join(', ') || '—'}
+                                  Default mandatory scopes: {(newProvider[client.id]?.scopes ?? DEFAULT_SCOPES[newProvider[client.id]?.type || 'google']).join(', ') || '—'}
                                 </p>
                                 <div className="flex flex-wrap gap-1 mb-2">
-                                  {(newProvider[client.id]?.authorizedScopes ?? []).map((scope) => (
+                                  {(newProvider[client.id]?.scopes ?? []).map((scope) => (
                                     <Badge key={scope} variant="secondary" className="gap-1 text-xs">
                                       {scope}
                                       <button
@@ -1806,7 +1920,7 @@ function EditModeManagementUI({
                                           ...prev,
                                           [client.id]: {
                                             ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
-                                            authorizedScopes: (prev[client.id]?.authorizedScopes ?? []).filter((s) => s !== scope),
+                                            scopes: (prev[client.id]?.scopes ?? []).filter((s) => s !== scope),
                                           }
                                         }))}
                                         className="ml-0.5 rounded hover:bg-muted"
@@ -1826,12 +1940,12 @@ function EditModeManagementUI({
                                       if (e.key === 'Enter') {
                                         e.preventDefault();
                                         const s = (newAuthorizedScopeByClient[client.id] ?? '').trim();
-                                        if (s && !(newProvider[client.id]?.authorizedScopes ?? []).includes(s)) {
+                                        if (s && !(newProvider[client.id]?.scopes ?? []).includes(s)) {
                                           setNewProvider(prev => ({
                                             ...prev,
                                             [client.id]: {
                                               ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
-                                              authorizedScopes: [...(prev[client.id]?.authorizedScopes ?? []), s],
+                                              scopes: [...(prev[client.id]?.scopes ?? []), s],
                                             }
                                           }));
                                           setNewAuthorizedScopeByClient(prev => ({ ...prev, [client.id]: '' }));
@@ -1846,12 +1960,12 @@ function EditModeManagementUI({
                                     className="h-9"
                                     onClick={() => {
                                       const s = (newAuthorizedScopeByClient[client.id] ?? '').trim();
-                                      if (s && !(newProvider[client.id]?.authorizedScopes ?? []).includes(s)) {
+                                      if (s && !(newProvider[client.id]?.scopes ?? []).includes(s)) {
                                         setNewProvider(prev => ({
                                           ...prev,
                                           [client.id]: {
                                             ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
-                                            authorizedScopes: [...(prev[client.id]?.authorizedScopes ?? []), s],
+                                            scopes: [...(prev[client.id]?.scopes ?? []), s],
                                           }
                                         }));
                                         setNewAuthorizedScopeByClient(prev => ({ ...prev, [client.id]: '' }));
@@ -1961,7 +2075,7 @@ function EditModeManagementUI({
                                   type="button"
                                   size="sm"
                                   onClick={() => handleAddProvider(client.id)}
-                                  disabled={!newProvider[client.id]?.clientId || !newProvider[client.id]?.clientSecret || !(newProvider[client.id]?.authorizedScopes?.length)}
+                                  disabled={!newProvider[client.id]?.clientId || !newProvider[client.id]?.clientSecret || !(newProvider[client.id]?.scopes?.length)}
                                 >
                                   Add Provider
                                 </Button>
@@ -2114,17 +2228,17 @@ function EditModeManagementUI({
                                         />
                                       </div>
                                       <div>
-                                        <Label className="text-xs">Authorized Scopes</Label>
+                                        <Label className="text-xs">Scopes</Label>
                                         <p className="text-xs text-muted-foreground mb-1">
-                                          Default mandatory scopes: email, openid, profile (or provider-specific). Add or remove below.
+                                          Authorized scopes that will get used to login your provider.
                                         </p>
                                         <div className="flex flex-wrap gap-1 mb-2">
-                                          {(editProviderForm.authorizedScopes ?? []).map((scope) => (
+                                          {(editProviderForm.scopes ?? []).map((scope) => (
                                             <Badge key={scope} variant="secondary" className="gap-1 text-xs">
                                               {scope}
                                               <button
                                                 type="button"
-                                                onClick={() => setEditProviderForm(prev => prev ? { ...prev, authorizedScopes: (prev.authorizedScopes ?? []).filter((s) => s !== scope) } : null)}
+                                                onClick={() => setEditProviderForm(prev => prev ? { ...prev, scopes: (prev.scopes ?? []).filter((s) => s !== scope) } : null)}
                                                 className="ml-0.5 rounded hover:bg-muted"
                                               >
                                                 <X className="h-3 w-3" />
@@ -2142,8 +2256,8 @@ function EditModeManagementUI({
                                               if (e.key === 'Enter') {
                                                 e.preventDefault();
                                                 const s = editProviderNewScope.trim();
-                                                if (s && !(editProviderForm.authorizedScopes ?? []).includes(s)) {
-                                                  setEditProviderForm(prev => prev ? { ...prev, authorizedScopes: [...(prev.authorizedScopes ?? []), s] } : null);
+                                                if (s && !(editProviderForm.scopes ?? []).includes(s)) {
+                                                  setEditProviderForm(prev => prev ? { ...prev, scopes: [...(prev.scopes ?? []), s] } : null);
                                                   setEditProviderNewScope('');
                                                 }
                                               }
@@ -2156,8 +2270,8 @@ function EditModeManagementUI({
                                             className="h-9"
                                             onClick={() => {
                                               const s = editProviderNewScope.trim();
-                                              if (s && !(editProviderForm.authorizedScopes ?? []).includes(s)) {
-                                                setEditProviderForm(prev => prev ? { ...prev, authorizedScopes: [...(prev.authorizedScopes ?? []), s] } : null);
+                                              if (s && !(editProviderForm.scopes ?? []).includes(s)) {
+                                                setEditProviderForm(prev => prev ? { ...prev, scopes: [...(prev.scopes ?? []), s] } : null);
                                                 setEditProviderNewScope('');
                                               }
                                             }}
@@ -2225,7 +2339,7 @@ function EditModeManagementUI({
                                           type="button"
                                           size="sm"
                                           onClick={saveProviderEdit}
-                                          disabled={savingProviderEdit || !editProviderForm.clientId.trim() || !editProviderForm.clientSecret.trim() || !(editProviderForm.authorizedScopes?.length)}
+                                          disabled={savingProviderEdit || !editProviderForm.clientId.trim() || !editProviderForm.clientSecret.trim() || !(editProviderForm.scopes?.length)}
                                         >
                                           {savingProviderEdit ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                                           Save
@@ -2657,22 +2771,24 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     updateConfig({
       socialProvider: provider,
       identityProviderDomain: PROVIDER_DOMAINS[provider],
+      scopes: [...DEFAULT_SCOPES[provider]],
     });
   };
 
   const addScope = () => {
-    if (newScope && !config.authorizedScopes.includes(newScope)) {
+    if (newScope && !config.scopes.includes(newScope)) {
       updateConfig({
-        authorizedScopes: [...config.authorizedScopes, newScope],
+        scopes: [...config.scopes, newScope],
       });
       setNewScope('');
     }
   };
 
   const removeScope = (scope: string) => {
-    if (['email', 'openid', 'profile'].includes(scope)) return; // Don't remove mandatory scopes
+    const mandatoryForProvider = DEFAULT_SCOPES[config.socialProvider] ?? ['email', 'openid', 'profile'];
+    if (mandatoryForProvider.includes(scope)) return; // Don't remove default scopes for this provider
     updateConfig({
-      authorizedScopes: config.authorizedScopes.filter(s => s !== scope),
+      scopes: config.scopes.filter(s => s !== scope),
     });
   };
 
@@ -3149,16 +3265,21 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                           )}
                           <div>
                             <Label className="text-sm">Authorized Scopes</Label>
-                            <p className="text-xs text-muted-foreground mb-2">Default mandatory scopes: email, openid, profile</p>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              Default scopes for {PROVIDER_TYPE_LABELS[config.socialProvider]}: {DEFAULT_SCOPES[config.socialProvider].join(', ')}
+                            </p>
                             <div className="flex flex-wrap gap-2 mb-2">
-                              {config.authorizedScopes.map((scope) => (
-                                <Badge key={scope} variant="secondary" className="text-xs">
-                                  {scope}
-                                  {!['email', 'openid', 'profile'].includes(scope) && (
-                                    <X className="ml-1 h-3 w-3 cursor-pointer" onClick={() => removeScope(scope)} />
-                                  )}
-                                </Badge>
-                              ))}
+                              {config.scopes.map((scope) => {
+                                const mandatoryForProvider = DEFAULT_SCOPES[config.socialProvider] ?? ['email', 'openid', 'profile'];
+                                return (
+                                  <Badge key={scope} variant="secondary" className="text-xs">
+                                    {scope}
+                                    {!mandatoryForProvider.includes(scope) && (
+                                      <X className="ml-1 h-3 w-3 cursor-pointer" onClick={() => removeScope(scope)} />
+                                    )}
+                                  </Badge>
+                                );
+                              })}
                             </div>
                             <div className="flex gap-2">
                               <Input placeholder="Add custom scope" value={newScope} onChange={(e) => setNewScope(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addScope(); } }} />

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { APIBlazeError, createAPIBlazeClient } from '@/lib/apiblaze-client';
+import { getDefaultScopesForProvider } from '@/lib/provider-default-scopes';
 import { getUserClaims } from '../../projects/_utils';
 
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
@@ -77,12 +78,13 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 2. Create AppClient
+    // 2. Create AppClient (default scopes for GitHub)
+    const defaultGitHubScopes = getDefaultScopesForProvider('github');
     const appClient = await client.createAppClient(userClaims, authConfigId, {
       name: appClientName,
       projectName: String(projectName).trim(),
       apiVersion: String(apiVersion).trim(),
-      scopes: scopes || ['read:user', 'user:email'],
+      scopes: scopes || defaultGitHubScopes,
     });
     const appClientId = (appClient as { id: string }).id;
 
@@ -98,7 +100,7 @@ export async function POST(request: NextRequest) {
         clientId: defaultClientId,
         clientSecret: defaultClientSecret,
         domain: 'https://github.com',
-        authorizedScopes: ['read:user', 'user:email'],
+        scopes: defaultGitHubScopes,
       });
     }
 

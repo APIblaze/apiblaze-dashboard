@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Loader2, Plus, X, Star } from 'lucide-react';
+import { Loader2, Plus, X, Star, ChevronDown, ChevronUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
@@ -52,8 +52,9 @@ export function AppClientFormDialog({
   const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
   const [signoutUris, setSignoutUris] = useState<string[]>([]);
   const [newSignoutUri, setNewSignoutUri] = useState('');
-  const [scopes, setScopes] = useState<string[]>(['read:user', 'user:email']);
+  const [scopes, setScopes] = useState<string[]>(['email', 'openid', 'profile']);
   const [newScope, setNewScope] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
 
@@ -66,7 +67,7 @@ export function AppClientFormDialog({
         setAccessTokenExpiry(appClient.accessTokenExpiry ?? 3600);
         setAuthorizedCallbackUrls(appClient.authorizedCallbackUrls ?? []);
         setSignoutUris(appClient.signoutUris ?? []);
-        setScopes(appClient.scopes ?? ['read:user', 'user:email']);
+        setScopes(appClient.scopes ?? ['email', 'openid', 'profile']);
         setClientSecret(null);
       } else {
         setName('');
@@ -77,7 +78,7 @@ export function AppClientFormDialog({
         setAccessTokenExpiry(3600);
         setAuthorizedCallbackUrls([]);
         setSignoutUris([]);
-        setScopes(['read:user', 'user:email']);
+        setScopes(['email', 'openid', 'profile']);
         setClientSecret(null);
       }
     }
@@ -135,17 +136,6 @@ export function AppClientFormDialog({
 
   const removeSignoutUri = (uri: string) => {
     setSignoutUris(signoutUris.filter((u) => u !== uri));
-  };
-
-  const addScope = () => {
-    if (newScope.trim() && !scopes.includes(newScope.trim())) {
-      setScopes([...scopes, newScope.trim()]);
-      setNewScope('');
-    }
-  };
-
-  const removeScope = (scope: string) => {
-    setScopes(scopes.filter((s) => s !== scope));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -333,37 +323,105 @@ export function AppClientFormDialog({
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="refreshTokenExpiry">Refresh Token Expiry (seconds)</Label>
-                    <Input
-                      id="refreshTokenExpiry"
-                      type="number"
-                      value={refreshTokenExpiry}
-                      onChange={(e) => setRefreshTokenExpiry(Number(e.target.value))}
-                      disabled={submitting}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="idTokenExpiry">ID Token Expiry (seconds)</Label>
-                    <Input
-                      id="idTokenExpiry"
-                      type="number"
-                      value={idTokenExpiry}
-                      onChange={(e) => setIdTokenExpiry(Number(e.target.value))}
-                      disabled={submitting}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="accessTokenExpiry">Access Token Expiry (seconds)</Label>
-                    <Input
-                      id="accessTokenExpiry"
-                      type="number"
-                      value={accessTokenExpiry}
-                      onChange={(e) => setAccessTokenExpiry(Number(e.target.value))}
-                      disabled={submitting}
-                    />
-                  </div>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setAdvancedOpen((o) => !o)}
+                    className="flex items-center gap-2 w-full text-left font-medium text-sm"
+                  >
+                    {advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    Advanced Settings
+                  </button>
+                  {advancedOpen && (
+                    <div className="space-y-4 rounded-lg border bg-muted/30 p-4">
+                      <div className="space-y-2">
+                        <Label>Authorized Scopes</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Default mandatory scopes: email, openid, profile (or provider-specific). Add or remove below.
+                        </p>
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {scopes.map((scope) => (
+                            <Badge key={scope} variant="secondary" className="gap-1">
+                              {scope}
+                              <button
+                                type="button"
+                                onClick={() => setScopes((prev) => prev.filter((s) => s !== scope))}
+                                className="ml-0.5 rounded hover:bg-muted"
+                                disabled={submitting}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <Input
+                            value={newScope}
+                            onChange={(e) => setNewScope(e.target.value)}
+                            placeholder="Add custom scope"
+                            disabled={submitting}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const s = newScope.trim();
+                                if (s && !scopes.includes(s)) {
+                                  setScopes((prev) => [...prev, s]);
+                                  setNewScope('');
+                                }
+                              }
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              const s = newScope.trim();
+                              if (s && !scopes.includes(s)) {
+                                setScopes((prev) => [...prev, s]);
+                                setNewScope('');
+                              }
+                            }}
+                            disabled={submitting}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="refreshTokenExpiry">Refresh Token Expiry (seconds)</Label>
+                          <Input
+                            id="refreshTokenExpiry"
+                            type="number"
+                            value={refreshTokenExpiry}
+                            onChange={(e) => setRefreshTokenExpiry(Number(e.target.value))}
+                            disabled={submitting}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="idTokenExpiry">ID Token Expiry (seconds)</Label>
+                          <Input
+                            id="idTokenExpiry"
+                            type="number"
+                            value={idTokenExpiry}
+                            onChange={(e) => setIdTokenExpiry(Number(e.target.value))}
+                            disabled={submitting}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="accessTokenExpiry">Access Token Expiry (seconds)</Label>
+                          <Input
+                            id="accessTokenExpiry"
+                            type="number"
+                            value={accessTokenExpiry}
+                            onChange={(e) => setAccessTokenExpiry(Number(e.target.value))}
+                            disabled={submitting}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -460,46 +518,6 @@ export function AppClientFormDialog({
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Scopes</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={newScope}
-                      onChange={(e) => setNewScope(e.target.value)}
-                      placeholder="openid"
-                      disabled={submitting}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          addScope();
-                        }
-                      }}
-                    />
-                    <Button type="button" onClick={addScope} disabled={submitting}>
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {scopes.map((scope) => (
-                      <div
-                        key={scope}
-                        className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-sm"
-                      >
-                        <span>{scope}</span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-5 w-5 p-0"
-                          onClick={() => removeScope(scope)}
-                          disabled={submitting}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               </div>
               <DialogFooter>
                 <Button

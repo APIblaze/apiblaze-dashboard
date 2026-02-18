@@ -65,7 +65,7 @@ export interface ProjectConfig {
   identityProviderDomain: string;
   identityProviderClientId: string;
   identityProviderClientSecret: string;
-  authorizedScopes: string[];
+  scopes: string[];
   authorizedCallbackUrls?: string[]; // Authorized callback URLs for AppClient
   tokenType?: 'apiblaze' | 'thirdParty';
   targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
@@ -77,7 +77,7 @@ export interface ProjectConfig {
     domain: string;
     clientId: string;
     clientSecret: string;
-    authorizedScopes?: string[];
+    scopes?: string[];
     tokenType?: 'apiblaze' | 'thirdParty';
     targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
     includeApiblazeAccessTokenHeader?: boolean;

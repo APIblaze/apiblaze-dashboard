@@ -149,7 +149,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     identityProviderDomain: 'https://accounts.google.com',
     identityProviderClientId: '',
     identityProviderClientSecret: '',
-    authorizedScopes: ['email', 'openid', 'profile'],
+    scopes: ['email', 'openid', 'profile'],
     tokenType: 'apiblaze',
     targetServerToken: 'apiblaze',
     includeApiblazeAccessTokenHeader: false,
@@ -218,7 +218,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       identityProviderDomain: (projectConfig?.oauth_config as Record<string, unknown>)?.domain as string || 'https://accounts.google.com',
       identityProviderClientId: (projectConfig?.oauth_config as Record<string, unknown>)?.client_id as string || '',
       identityProviderClientSecret: '',
-      authorizedScopes: ((projectConfig?.oauth_config as Record<string, unknown>)?.scopes as string)?.split(' ') || ['email', 'openid', 'profile'],
+      scopes: (Array.isArray((projectConfig?.oauth_config as Record<string, unknown>)?.scopes)
+        ? (projectConfig?.oauth_config as Record<string, unknown>)?.scopes as string[]
+        : ((projectConfig?.oauth_config as Record<string, unknown>)?.scopes as string)?.split(' ')) || ['email', 'openid', 'profile'],
       tokenType: ((projectConfig?.oauth_config as Record<string, unknown>)?.token_type as 'apiblaze' | 'thirdParty') || 'apiblaze',
       targetServerToken: ((projectConfig?.oauth_config as Record<string, unknown>)?.target_server_token as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none') || 'apiblaze',
       includeApiblazeAccessTokenHeader: !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_access_token_header) || !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_token_header),
@@ -662,7 +664,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             
             const appClient = await api.createAppClient(currentAuthConfigId, {
               name: `${config.projectName}-appclient`,
-              scopes: config.authorizedScopes,
+              scopes: config.scopes,
               authorizedCallbackUrls: finalCallbackUrls,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
@@ -675,8 +677,8 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               rollbackAppClient = { authConfigId: currentAuthConfigId, appClientId: newAppClientId };
             }
 
-            // Default authorized scopes per provider type
-            const DEFAULT_AUTHORIZED_SCOPES: Record<SocialProvider, string[]> = {
+            // Default scopes per provider type
+            const DEFAULT_SCOPES: Record<SocialProvider, string[]> = {
               google: ['email', 'openid', 'profile'],
               github: ['read:user', 'user:email'],
               microsoft: ['email', 'openid', 'profile'],
@@ -699,18 +701,17 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                       targetServerToken: config.targetServerToken || 'apiblaze',
                       includeApiblazeAccessTokenHeader: config.includeApiblazeAccessTokenHeader ?? false,
                       includeApiblazeIdTokenHeader: config.includeApiblazeIdTokenHeader ?? false,
-                      authorizedScopes: config.authorizedScopes?.length ? config.authorizedScopes : DEFAULT_AUTHORIZED_SCOPES[config.socialProvider],
+                      scopes: config.scopes?.length ? config.scopes : DEFAULT_SCOPES[config.socialProvider],
                     }]
                   : []);
 
             for (const provider of providersToAdd) {
-              const providerAuthorizedScopes = (provider as { authorizedScopes?: string[] }).authorizedScopes
-                ?? (config.authorizedScopes?.length ? config.authorizedScopes : DEFAULT_AUTHORIZED_SCOPES[provider.type]);
+              const providerScopes = provider.scopes?.length ? provider.scopes : DEFAULT_SCOPES[provider.type];
               await api.addProvider(currentAuthConfigId, newAppClientId, {
                 type: provider.type,
                 clientId: provider.clientId,
                 clientSecret: provider.clientSecret,
-                authorizedScopes: providerAuthorizedScopes,
+                scopes: providerScopes,
                 domain: provider.domain || undefined,
                 tokenType: ((provider as { tokenType?: string }).tokenType || config.tokenType || 'apiblaze') as 'apiblaze' | 'thirdParty',
                 targetServerToken: ((provider as { targetServerToken?: string }).targetServerToken || config.targetServerToken || 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none',
@@ -765,7 +766,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             const result = await api.createAuthConfigWithDefaultGitHub({
               authConfigName,
               appClientName,
-              scopes: config.authorizedScopes,
+              scopes: config.scopes,
               enableSocialAuth: config.enableSocialAuth,
               enableApiKeyAuth: config.requestsAuthMethods?.includes('api_key'),
               bringMyOwnOAuth: config.bringOwnProvider,
