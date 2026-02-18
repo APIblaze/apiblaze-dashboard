@@ -71,6 +71,7 @@ export interface ProjectConfig {
   targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
   includeApiblazeAccessTokenHeader?: boolean;
   includeApiblazeIdTokenHeader?: boolean;
+  whoCanRegisterToLogin?: 'anyone' | 'authorized_only';
   // Multiple providers for create mode (when bringOwnProvider is true)
   providers?: Array<{
     type: SocialProvider;

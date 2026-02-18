@@ -154,6 +154,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     targetServerToken: 'apiblaze',
     includeApiblazeAccessTokenHeader: false,
     includeApiblazeIdTokenHeader: false,
+    whoCanRegisterToLogin: 'anyone',
     
     // Target Servers
     targetServers: getDefaultTargetServers(),
@@ -225,6 +226,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       targetServerToken: ((projectConfig?.oauth_config as Record<string, unknown>)?.target_server_token as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none') || 'apiblaze',
       includeApiblazeAccessTokenHeader: !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_access_token_header) || !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_token_header),
       includeApiblazeIdTokenHeader: !!((projectConfig?.oauth_config as Record<string, unknown>)?.include_apiblaze_id_token_header),
+      whoCanRegisterToLogin: ((projectConfig?.auth_config as Record<string, unknown>)?.who_can_register === 'authorized_only' ? 'authorized_only' : 'anyone') as 'anyone' | 'authorized_only',
       
       // Target Servers - from project environments or default
       targetServers: (() => {
@@ -917,6 +919,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         auth_type: authType,
         oauth_config: oauthConfig,
         auth_config_id: authConfigId,
+        auth_config: { who_can_register: config.whoCanRegisterToLogin ?? 'anyone' },
         app_client_id: appClientId, // AppClient selected at deployment time (not stored in config)
         default_app_client_id: defaultAppClientId, // Default app client ID stored in project config
         environments: Object.keys(environments).length > 0 ? environments : undefined,

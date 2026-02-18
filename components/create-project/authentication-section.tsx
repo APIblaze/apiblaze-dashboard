@@ -2559,21 +2559,37 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   const loadingAuthConfigs = isBootstrapping;
 
   const [newScope, setNewScope] = useState('');
-  // Save config changes immediately to backend (for edit mode, e.g. default_app_client_id)
-  const saveProjectConfigImmediately = async (updates: { default_app_client_id?: string | null }) => {
+  // Save config changes immediately to backend (for edit mode, e.g. default_app_client_id, auth_config)
+  const saveProjectConfigImmediately = async (updates: {
+    default_app_client_id?: string | null;
+    auth_config?: { who_can_register?: 'anyone' | 'authorized_only' };
+  }) => {
     if (!project) return;
     try {
       const configToSave: Record<string, unknown> = {};
       if (updates.default_app_client_id !== undefined) {
         configToSave.default_app_client_id = updates.default_app_client_id;
       }
+      if (updates.auth_config !== undefined) {
+        configToSave.auth_config = updates.auth_config;
+      }
       if (Object.keys(configToSave).length > 0) {
         await updateProjectConfig(project.project_id, project.api_version, configToSave);
-        const updatedConfig = project.config
-          ? { ...(project.config as Record<string, unknown>), ...configToSave }
-          : configToSave;
+        const existingConfig = project.config as Record<string, unknown> | undefined;
+        let mergedConfig: Record<string, unknown>;
+        if (existingConfig) {
+          mergedConfig = { ...existingConfig, ...configToSave };
+          if (configToSave.auth_config) {
+            mergedConfig.auth_config = {
+              ...(existingConfig.auth_config as Record<string, unknown> || {}),
+              ...configToSave.auth_config,
+            };
+          }
+        } else {
+          mergedConfig = configToSave;
+        }
         if (onProjectUpdate) {
-          onProjectUpdate({ ...project, config: updatedConfig });
+          onProjectUpdate({ ...project, config: mergedConfig });
         }
       }
     } catch (error) {
@@ -3482,6 +3498,30 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
               </div>
             )}
 
+            {/* Who can register to login and use the API */}
+            <div className="p-4 border rounded-lg bg-muted/30">
+              <Label htmlFor="whoCanRegisterToLogin" className="text-sm font-medium">
+                Who can register to login and use the API
+              </Label>
+              <Select
+                value={config.whoCanRegisterToLogin ?? 'anyone'}
+                onValueChange={(value) => {
+                  const v = value as 'anyone' | 'authorized_only';
+                  updateConfig({ whoCanRegisterToLogin: v });
+                  if (isEditMode && project) {
+                    saveProjectConfigImmediately({ auth_config: { who_can_register: v } });
+                  }
+                }}
+              >
+                <SelectTrigger id="whoCanRegisterToLogin" className="mt-2 w-fit min-w-[280px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="anyone">Anyone</SelectItem>
+                  <SelectItem value="authorized_only">Only users authorized in the API Portal or via the admin API</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
       </div>
 

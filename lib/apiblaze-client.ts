@@ -33,6 +33,7 @@ export interface CreateProxyPayload {
     scopes?: string;
   };
   auth_config_id?: string;
+  auth_config?: { who_can_register?: 'anyone' | 'authorized_only' };
   app_client_id?: string;
   default_app_client_id?: string;
   environments?: Record<string, { target: string; description?: string }>;
