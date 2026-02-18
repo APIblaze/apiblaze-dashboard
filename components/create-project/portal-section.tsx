@@ -2,7 +2,6 @@
 
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 import { ProjectConfig } from './types';
 
 interface PortalSectionProps {
@@ -14,32 +13,14 @@ export function PortalSection({ config, updateConfig }: PortalSectionProps) {
   return (
     <div className="space-y-6">
       <div>
-        <Label className="text-base font-semibold">API Developer Portal</Label>
+        <Label className="text-base font-semibold">Branding</Label>
         <p className="text-sm text-muted-foreground mb-4">
-          Configure the developer portal for your API users
+          Customize the appearance of your developer portal
         </p>
       </div>
 
-      {/* Create Portal */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
-        <div className="space-y-1">
-          <Label htmlFor="createPortal" className="text-sm font-medium">
-            Create API Developer Portal
-          </Label>
-          <p className="text-xs text-muted-foreground">
-            Generate an interactive portal for API documentation and testing
-          </p>
-        </div>
-        <Switch
-          id="createPortal"
-          checked={config.createPortal}
-          onCheckedChange={(checked) => updateConfig({ createPortal: checked })}
-        />
-      </div>
-
       {/* Portal Logo */}
-      {config.createPortal && (
-        <div className="space-y-4 pl-4 border-l-2 border-blue-200">
+      <div className="space-y-4 pl-4 border-l-2 border-blue-200">
           <div>
             <Label htmlFor="portalLogoUrl" className="text-sm">
               Portal Logo URL
@@ -67,7 +48,6 @@ export function PortalSection({ config, updateConfig }: PortalSectionProps) {
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }

@@ -64,12 +64,22 @@ function DashboardContent() {
     }
   }, []);
 
-  // When entering new project flow, redirect off Routes tab if it was selected (Routes hidden for new projects)
+  // When opening a project (new or existing), always start in General menu
+  const lastProjectKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (selectorValue.type === 'new' && projectActiveTab === 'routes') {
+    const projectKey =
+      selectorValue.type === 'team'
+        ? null
+        : selectorValue.type === 'project'
+          ? selectorValue.project.project_id
+          : 'new';
+    if (projectKey && projectKey !== lastProjectKeyRef.current) {
+      lastProjectKeyRef.current = projectKey;
       setProjectActiveTab('general');
+    } else if (!projectKey) {
+      lastProjectKeyRef.current = null;
     }
-  }, [selectorValue.type, projectActiveTab]);
+  }, [selectorValue]);
 
   // Preload GitHub repos when in project scope
   useEffect(() => {

@@ -1148,7 +1148,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="auth">Auth</TabsTrigger>
             <TabsTrigger value="targets">Targets</TabsTrigger>
-            <TabsTrigger value="portal">Portal</TabsTrigger>
+            <TabsTrigger value="portal">Branding</TabsTrigger>
             <TabsTrigger value="throttling">Throttling</TabsTrigger>
             {currentProject && <TabsTrigger value="routes">Routes</TabsTrigger>}
             <TabsTrigger value="preprocessing">Processing</TabsTrigger>

@@ -12,7 +12,7 @@ const PROJECT_MENU_ITEMS = [
   { id: 'general', label: 'General' },
   { id: 'auth', label: 'Auth' },
   { id: 'targets', label: 'Targets' },
-  { id: 'portal', label: 'Portal' },
+  { id: 'portal', label: 'Branding' },
   { id: 'throttling', label: 'Throttling' },
   { id: 'routes', label: 'Routes' },
   { id: 'preprocessing', label: 'Processing' },

@@ -40,6 +40,8 @@ interface AuthConfigModalProps {
   apiVersion?: string;
 }
 
+const CLIENT_SECRET_MIN_LENGTH = 6;
+
 const PROVIDER_TYPES: Array<{ value: SocialProvider['type']; label: string }> = [
   { value: 'google', label: 'Google' },
   { value: 'github', label: 'GitHub' },
@@ -718,6 +720,12 @@ export function AuthConfigModal({
                         }
                         placeholder="Provider Client Secret"
                       />
+                      {newProvider.clientSecret.trim().length > 0 && newProvider.clientSecret.trim().length < CLIENT_SECRET_MIN_LENGTH && (
+                        <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3 flex-shrink-0" />
+                          Client secret must be at least {CLIENT_SECRET_MIN_LENGTH} characters. The API will reject shorter values.
+                        </p>
+                      )}
                     </div>
                     <div>
                       <Label>Scopes</Label>

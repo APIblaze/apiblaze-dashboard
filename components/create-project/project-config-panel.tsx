@@ -27,7 +27,7 @@ const NEW_PROJECT_STEPS: { id: ProjectConfigTab; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'auth', label: 'Auth' },
   { id: 'targets', label: 'Targets' },
-  { id: 'portal', label: 'Portal' },
+  { id: 'portal', label: 'Branding' },
   { id: 'throttling', label: 'Throttling' },
   { id: 'preprocessing', label: 'Processing' },
   { id: 'domains', label: 'Domains' },

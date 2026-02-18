@@ -42,6 +42,9 @@ interface AuthenticationSectionProps {
   teamId?: string;
 }
 
+/** Min length required by the provider API (admin-api providers route) */
+const CLIENT_SECRET_MIN_LENGTH = 6;
+
 const PROVIDER_DOMAINS: Record<SocialProvider, string> = {
   google: 'https://accounts.google.com',
   microsoft: 'https://login.microsoftonline.com',
@@ -309,6 +312,7 @@ function EditModeManagementUI({
     scopes: string[];
   } | null>(null);
   const [editProviderNewScope, setEditProviderNewScope] = useState('');
+  const [newProviderSecretOverride, setNewProviderSecretOverride] = useState('');
   const [savingProviderEdit, setSavingProviderEdit] = useState(false);
   const [loadingProviderSecret, setLoadingProviderSecret] = useState(false);
 
@@ -721,6 +725,7 @@ function EditModeManagementUI({
   const startEditProvider = async (clientId: string, provider: SocialProviderResponse) => {
     setEditingProviderKey(`${clientId}:${provider.id}`);
     setEditProviderNewScope('');
+    setNewProviderSecretOverride('');
     setLoadingProviderSecret(true);
     let secret = '';
     try {
@@ -753,8 +758,13 @@ function EditModeManagementUI({
   const saveProviderEdit = async () => {
     if (!currentAuthConfigId || !editingProviderKey || !editProviderForm) return;
     const [clientId, providerId] = editingProviderKey.split(':');
-    if (!editProviderForm.clientId.trim() || !editProviderForm.clientSecret.trim()) {
+    const secretToSend = newProviderSecretOverride.trim() || editProviderForm.clientSecret.trim();
+    if (!editProviderForm.clientId.trim() || !secretToSend) {
       alert('Client ID and Client Secret are required');
+      return;
+    }
+    if (secretToSend.length > 0 && secretToSend.length < CLIENT_SECRET_MIN_LENGTH) {
+      alert(`Client secret must be at least ${CLIENT_SECRET_MIN_LENGTH} characters.`);
       return;
     }
     if (!editProviderForm.scopes?.length) {
@@ -766,7 +776,7 @@ function EditModeManagementUI({
       await api.updateProvider(currentAuthConfigId, clientId, providerId, {
         type: editProviderForm.type,
         clientId: editProviderForm.clientId.trim(),
-        clientSecret: editProviderForm.clientSecret.trim(),
+        clientSecret: secretToSend,
         scopes: editProviderForm.scopes ?? [],
         domain: editProviderForm.domain.trim() || undefined,
         tokenType: editProviderForm.tokenType,
@@ -777,6 +787,7 @@ function EditModeManagementUI({
       await invalidateAndRefetch(teamId);
       setEditingProviderKey(null);
       setEditProviderForm(null);
+      setNewProviderSecretOverride('');
     } catch (err) {
       console.error('Error updating provider:', err);
       alert(err instanceof Error ? err.message : 'Failed to update provider');
@@ -789,6 +800,7 @@ function EditModeManagementUI({
     setEditingProviderKey(null);
     setEditProviderForm(null);
     setEditProviderNewScope('');
+    setNewProviderSecretOverride('');
   };
 
   const copyToClipboard = async (text: string, field: string) => {
@@ -1426,43 +1438,98 @@ function EditModeManagementUI({
                                 <div>
                                   <Label className="text-xs font-medium text-muted-foreground">Client Secret</Label>
                                   <div className="flex items-center gap-2 mt-1">
-                                    <code className="flex-1 text-xs bg-white px-3 py-2 rounded-md border border-gray-200 font-mono">
+                                    <code className="flex-1 text-xs bg-white px-3 py-2 rounded-md border border-gray-200 font-mono break-all">
                                       {(() => {
                                         const secret = revealedSecrets[client.id] || 
                                                       (clientDetails as AppClientResponse).clientSecret;
+                                        const isRevealed = !!revealedSecrets[client.id];
                                         if (secret) {
-                                          // Show first 4 and last 4 characters
+                                          // When revealed, show full secret; otherwise partial only
+                                          if (isRevealed) {
+                                            return secret;
+                                          }
                                           if (secret.length <= 8) {
-                                            return secret; // Show full secret if it's short
+                                            return secret;
                                           }
                                           return `${secret.substring(0, 4)}...${secret.substring(secret.length - 4)}`;
                                         }
                                         return '••••••••••••••••';
                                       })()}
                                     </code>
-                                    {revealedSecrets[client.id] || 
-                                     (clientDetails as AppClientResponse).clientSecret ? (
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={async (e) => {
-                                          e.stopPropagation();
-                                          e.preventDefault();
-                                          const secret = revealedSecrets[client.id] || 
-                                                        (clientDetails as AppClientResponse).clientSecret;
-                                          if (secret) {
-                                            await copyToClipboard(secret, `clientSecret-${client.id}`);
-                                          }
-                                        }}
-                                        className="h-8 w-8 p-0 hover:bg-blue-100"
-                                      >
-                                        {copiedField === `clientSecret-${client.id}` ? (
-                                          <Check className="h-4 w-4 text-green-600" />
-                                        ) : (
-                                          <Copy className="h-4 w-4" />
-                                        )}
-                                      </Button>
+                                    {revealedSecrets[client.id] ? (
+                                      <>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => setRevealedSecrets(prev => {
+                                            const next = { ...prev };
+                                            delete next[client.id];
+                                            return next;
+                                          })}
+                                          className="h-8 px-3 text-xs hover:bg-blue-100"
+                                          title="Hide secret"
+                                        >
+                                          Hide
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            const secret = revealedSecrets[client.id];
+                                            if (secret) {
+                                              await copyToClipboard(secret, `clientSecret-${client.id}`);
+                                            }
+                                          }}
+                                          className="h-8 w-8 p-0 hover:bg-blue-100"
+                                        >
+                                          {copiedField === `clientSecret-${client.id}` ? (
+                                            <Check className="h-4 w-4 text-green-600" />
+                                          ) : (
+                                            <Copy className="h-4 w-4" />
+                                          )}
+                                        </Button>
+                                      </>
+                                    ) : (clientDetails as AppClientResponse).clientSecret ? (
+                                      <>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            const secret = (clientDetails as AppClientResponse).clientSecret;
+                                            if (secret) {
+                                              await copyToClipboard(secret, `clientSecret-${client.id}`);
+                                            }
+                                          }}
+                                          className="h-8 w-8 p-0 hover:bg-blue-100"
+                                        >
+                                          {copiedField === `clientSecret-${client.id}` ? (
+                                            <Check className="h-4 w-4 text-green-600" />
+                                          ) : (
+                                            <Copy className="h-4 w-4" />
+                                          )}
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => {
+                                            if (selectedAuthConfigId) {
+                                              revealClientSecret(selectedAuthConfigId, client.id);
+                                            }
+                                          }}
+                                          className="h-8 px-3 text-xs hover:bg-blue-100"
+                                          disabled={loadingSecret === client.id}
+                                        >
+                                          {loadingSecret === client.id ? '...' : 'Reveal'}
+                                        </Button>
+                                      </>
                                     ) : (
                                       <Button
                                         type="button"
@@ -1921,6 +1988,12 @@ function EditModeManagementUI({
                                   placeholder="your-client-secret"
                                   className="mt-1"
                                 />
+                                {(newProvider[client.id]?.clientSecret?.trim().length ?? 0) > 0 && (newProvider[client.id]?.clientSecret?.trim().length ?? 0) < CLIENT_SECRET_MIN_LENGTH && (
+                                  <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                                    <AlertCircle className="h-3 w-3 flex-shrink-0" />
+                                    Client secret must be at least {CLIENT_SECRET_MIN_LENGTH} characters. The API will reject shorter values.
+                                  </p>
+                                )}
                               </div>
                               <div>
                                 <Label className="text-xs">Authorized Scopes</Label>
@@ -2234,15 +2307,36 @@ function EditModeManagementUI({
                                           className="mt-1"
                                         />
                                       </div>
-                                      <div>
+                                      <div className="space-y-2">
                                         <Label className="text-xs">Client Secret</Label>
-                                        <Input
-                                          type="password"
-                                          value={editProviderForm.clientSecret}
-                                          onChange={(e) => setEditProviderForm(prev => prev ? { ...prev, clientSecret: e.target.value } : null)}
-                                          placeholder="your-client-secret"
-                                          className="mt-1"
-                                        />
+                                        <div className="text-xs text-muted-foreground">
+                                          {editProviderForm.clientSecret ? (
+                                            <code className="bg-muted px-2 py-1 rounded font-mono">
+                                              {editProviderForm.clientSecret.length <= 8
+                                                ? '••••••••'
+                                                : `${editProviderForm.clientSecret.substring(0, 4)}...${editProviderForm.clientSecret.substring(editProviderForm.clientSecret.length - 4)}`}
+                                            </code>
+                                          ) : (
+                                            <span className="italic">No secret stored</span>
+                                          )}
+                                          <span className="ml-1">(only partial view; full secret never shown)</span>
+                                        </div>
+                                        <div>
+                                          <Label className="text-xs text-muted-foreground">New client secret (leave blank to keep current)</Label>
+                                          <Input
+                                            type="password"
+                                            value={newProviderSecretOverride}
+                                            onChange={(e) => setNewProviderSecretOverride(e.target.value)}
+                                            placeholder="Enter new secret to change"
+                                            className="mt-1"
+                                          />
+                                          {newProviderSecretOverride.trim().length > 0 && newProviderSecretOverride.trim().length < CLIENT_SECRET_MIN_LENGTH && (
+                                            <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                                              <AlertCircle className="h-3 w-3 flex-shrink-0" />
+                                              Client secret must be at least {CLIENT_SECRET_MIN_LENGTH} characters. The API will reject shorter values.
+                                            </p>
+                                          )}
+                                        </div>
                                       </div>
                                       <div>
                                         <Label className="text-xs">Scopes</Label>
@@ -2356,7 +2450,7 @@ function EditModeManagementUI({
                                           type="button"
                                           size="sm"
                                           onClick={saveProviderEdit}
-                                          disabled={savingProviderEdit || !editProviderForm.clientId.trim() || !editProviderForm.clientSecret.trim() || !(editProviderForm.scopes?.length)}
+                                          disabled={savingProviderEdit || !editProviderForm.clientId.trim() || !(newProviderSecretOverride.trim() || editProviderForm.clientSecret.trim()) || !(editProviderForm.scopes?.length)}
                                         >
                                           {savingProviderEdit ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                                           Save
@@ -3203,6 +3297,12 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                               onChange={(e) => updateConfig({ identityProviderClientSecret: e.target.value })}
                               className="mt-1"
                             />
+                            {(config.identityProviderClientSecret?.trim().length ?? 0) > 0 && (config.identityProviderClientSecret?.trim().length ?? 0) < CLIENT_SECRET_MIN_LENGTH && (
+                              <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                                <AlertCircle className="h-3 w-3 flex-shrink-0" />
+                                Client secret must be at least {CLIENT_SECRET_MIN_LENGTH} characters. The API will reject shorter values.
+                              </p>
+                            )}
                           </div>
                           <div>
                             <Label htmlFor="tokenType" className="text-sm">Client side token type</Label>

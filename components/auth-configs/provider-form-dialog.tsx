@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Plus, X } from 'lucide-react';
+import { Loader2, Plus, X, AlertCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import type { SocialProvider, CreateProviderRequest } from '@/types/auth-config';
@@ -46,6 +46,8 @@ const PROVIDER_DOMAINS: Record<SocialProvider['type'], string> = {
   auth0: 'https://YOUR_DOMAIN.auth0.com',
   other: '',
 };
+
+const CLIENT_SECRET_MIN_LENGTH = 6;
 
 const DEFAULT_AUTHORIZED_SCOPES: Record<SocialProvider['type'], string[]> = {
   google: ['email', 'openid', 'profile'],
@@ -226,6 +228,12 @@ export function ProviderFormDialog({
                 placeholder="Enter client secret"
                 disabled={submitting}
               />
+              {clientSecret.trim().length > 0 && clientSecret.trim().length < CLIENT_SECRET_MIN_LENGTH && (
+                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3 flex-shrink-0" />
+                  Client secret must be at least {CLIENT_SECRET_MIN_LENGTH} characters. The API will reject shorter values.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
