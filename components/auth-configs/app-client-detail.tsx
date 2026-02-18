@@ -104,7 +104,7 @@ export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl 
     })();
   }, [verifyFromUrl, appClient, loading, authConfigId, updateAppClientInCache, toast, router, searchParams]);
 
-  // Generate PKCE example URL for "Your App login" direct link (include first provider type so auth redirects to it)
+  // Generate PKCE example URL for "Your App login URLs" direct link (include first provider type so auth redirects to it)
   useEffect(() => {
     const external = appClient ? getFirstExternalCallbackUrl(appClient.authorizedCallbackUrls) : null;
     if (!external || !appClient) {
@@ -460,7 +460,7 @@ export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl 
           </Card>
         )}
 
-        {/* Your App login - same compact style as other links */}
+        {/* Your App login URLs - same compact style as other links */}
         {(() => {
           const externalRedirect = getFirstExternalCallbackUrl(appClient.authorizedCallbackUrls);
           if (!externalRedirect) return null;
@@ -468,7 +468,7 @@ export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl 
             <Card>
               <CardHeader className="pb-2">
                 <div className="flex items-center gap-2">
-                  <CardTitle className="text-sm font-medium">Your App login</CardTitle>
+                  <CardTitle className="text-sm font-medium">Your App login URLs</CardTitle>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="inline-flex text-muted-foreground hover:text-foreground cursor-help">

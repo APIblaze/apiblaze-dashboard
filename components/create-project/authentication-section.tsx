@@ -312,7 +312,7 @@ function EditModeManagementUI({
   const [savingProviderEdit, setSavingProviderEdit] = useState(false);
   const [loadingProviderSecret, setLoadingProviderSecret] = useState(false);
 
-  // Generate PKCE example URLs for "Your App login" links (one URL per provider so auth redirects to that provider)
+  // Generate PKCE example URLs for "Your App login URLs" links (one URL per provider so auth redirects to that provider)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1340,7 +1340,7 @@ function EditModeManagementUI({
                                     return (
                                       <div className="space-y-1">
                                         <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                                          Your App login
+                                          Your App login URLs
                                           <Tooltip>
                                             <TooltipTrigger asChild>
                                               <span className="inline-flex text-muted-foreground hover:text-foreground cursor-help">
