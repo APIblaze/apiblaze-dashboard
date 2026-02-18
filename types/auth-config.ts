@@ -49,6 +49,8 @@ export interface SocialProvider {
   targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
   includeApiblazeAccessTokenHeader?: boolean;
   includeApiblazeIdTokenHeader?: boolean;
+  /** Space-separated or array of scopes allowed for this provider; requested scopes must be a subset */
+  authorizedScopes: string[] | string;
   created_at: string;
   updated_at: string;
 }
@@ -87,6 +89,8 @@ export interface CreateProviderRequest {
   type: 'google' | 'github' | 'microsoft' | 'facebook' | 'auth0' | 'other';
   clientId: string;
   clientSecret: string;
+  /** Scopes allowed for this provider (e.g. ["openid", "email", "profile"]); requested scopes must be a subset */
+  authorizedScopes: string[];
   domain?: string;
   tokenType?: 'apiblaze' | 'thirdParty';
   targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';

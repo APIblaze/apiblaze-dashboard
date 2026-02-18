@@ -77,6 +77,11 @@ export interface ProjectConfig {
     domain: string;
     clientId: string;
     clientSecret: string;
+    authorizedScopes?: string[];
+    tokenType?: 'apiblaze' | 'thirdParty';
+    targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+    includeApiblazeAccessTokenHeader?: boolean;
+    includeApiblazeIdTokenHeader?: boolean;
   }>;
   
   // Target Servers

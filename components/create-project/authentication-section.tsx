@@ -49,6 +49,30 @@ const PROVIDER_DOMAINS: Record<SocialProvider, string> = {
   other: '',
 };
 
+/** Default authorized scopes per provider type (e.g. for project create/add provider) */
+const DEFAULT_AUTHORIZED_SCOPES: Record<SocialProvider, string[]> = {
+  google: ['email', 'openid', 'profile'],
+  github: ['read:user', 'user:email'],
+  microsoft: ['email', 'openid', 'profile'],
+  facebook: ['email', 'public_profile'],
+  auth0: ['openid', 'profile', 'email'],
+  other: ['openid', 'profile'],
+};
+
+function getDefaultNewProvider(type: SocialProvider = 'google') {
+  return {
+    type,
+    clientId: '',
+    clientSecret: '',
+    domain: PROVIDER_DOMAINS[type],
+    tokenType: 'apiblaze' as const,
+    targetServerToken: 'apiblaze' as const,
+    includeApiblazeAccessTokenHeader: false,
+    includeApiblazeIdTokenHeader: false,
+    authorizedScopes: [...DEFAULT_AUTHORIZED_SCOPES[type]],
+  };
+}
+
 const PROVIDER_TYPE_LABELS: Record<SocialProvider, string> = {
   google: 'Google',
   github: 'GitHub',
@@ -243,7 +267,9 @@ function EditModeManagementUI({
     targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
     includeApiblazeAccessTokenHeader?: boolean;
     includeApiblazeIdTokenHeader?: boolean;
+    authorizedScopes: string[];
   }>>({});
+  const [newAuthorizedScopeByClient, setNewAuthorizedScopeByClient] = useState<Record<string, string>>({});
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState<Record<string, boolean>>({});
   const [expiryValues, setExpiryValues] = useState<Record<string, {
@@ -277,7 +303,9 @@ function EditModeManagementUI({
     targetServerToken: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
     includeApiblazeAccessTokenHeader: boolean;
     includeApiblazeIdTokenHeader: boolean;
+    authorizedScopes: string[];
   } | null>(null);
+  const [editProviderNewScope, setEditProviderNewScope] = useState('');
   const [savingProviderEdit, setSavingProviderEdit] = useState(false);
   const [loadingProviderSecret, setLoadingProviderSecret] = useState(false);
 
@@ -557,26 +585,22 @@ function EditModeManagementUI({
 
   const handleAddProvider = async (clientId: string) => {
     if (!selectedAuthConfigId) return;
-    const provider = newProvider[clientId] ?? {
-      type: 'google' as SocialProvider,
-      clientId: '',
-      clientSecret: '',
-      domain: PROVIDER_DOMAINS.google,
-      tokenType: 'apiblaze' as const,
-      targetServerToken: 'apiblaze' as const,
-      includeApiblazeAccessTokenHeader: false,
-      includeApiblazeIdTokenHeader: false,
-    };
+    const provider = newProvider[clientId] ?? getDefaultNewProvider('google');
     if (!provider.clientId || !provider.clientSecret) {
       alert('Please provide Client ID and Client Secret');
       return;
     }
-    
+    const scopes = provider.authorizedScopes ?? [];
+    if (!scopes.length) {
+      alert('At least one authorized scope is required (e.g. email, openid, profile for Google; read:user, user:email for GitHub)');
+      return;
+    }
     try {
       await api.addProvider(selectedAuthConfigId, clientId, {
         type: provider.type,
         clientId: provider.clientId,
         clientSecret: provider.clientSecret,
+        authorizedScopes: scopes,
         domain: provider.domain || PROVIDER_DOMAINS[provider.type],
         tokenType: provider.tokenType || 'apiblaze',
         targetServerToken: provider.targetServerToken ?? 'apiblaze',
@@ -585,6 +609,7 @@ function EditModeManagementUI({
       });
       
       await invalidateAndRefetch(teamId);
+      setNewAuthorizedScopeByClient(prev => ({ ...prev, [clientId]: '' }));
       setNewProvider(prev => {
         const next = { ...prev };
         delete next[clientId];
@@ -663,6 +688,7 @@ function EditModeManagementUI({
 
   const startEditProvider = async (clientId: string, provider: SocialProviderResponse) => {
     setEditingProviderKey(`${clientId}:${provider.id}`);
+    setEditProviderNewScope('');
     setLoadingProviderSecret(true);
     let secret = '';
     try {
@@ -673,6 +699,12 @@ function EditModeManagementUI({
     } finally {
       setLoadingProviderSecret(false);
     }
+    const rawScopes = provider.authorizedScopes ?? (provider as { authorized_scopes?: string | string[] }).authorized_scopes;
+    const authorizedScopes = Array.isArray(rawScopes)
+      ? rawScopes
+      : typeof rawScopes === 'string' && rawScopes.trim()
+        ? rawScopes.trim().split(/\s+/).filter(Boolean)
+        : DEFAULT_AUTHORIZED_SCOPES[provider.type];
     setEditProviderForm({
       type: provider.type,
       clientId: provider.clientId ?? (provider as { client_id?: string }).client_id ?? '',
@@ -682,6 +714,7 @@ function EditModeManagementUI({
       targetServerToken: (provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token ?? 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none',
       includeApiblazeAccessTokenHeader: provider.includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_access_token_header?: boolean }).include_apiblaze_access_token_header ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header ?? false,
       includeApiblazeIdTokenHeader: provider.includeApiblazeIdTokenHeader ?? (provider as { include_apiblaze_id_token_header?: boolean }).include_apiblaze_id_token_header ?? false,
+      authorizedScopes,
     });
   };
 
@@ -692,12 +725,17 @@ function EditModeManagementUI({
       alert('Client ID and Client Secret are required');
       return;
     }
+    if (!editProviderForm.authorizedScopes?.length) {
+      alert('At least one authorized scope is required');
+      return;
+    }
     setSavingProviderEdit(true);
     try {
       await api.updateProvider(currentAuthConfigId, clientId, providerId, {
         type: editProviderForm.type,
         clientId: editProviderForm.clientId.trim(),
         clientSecret: editProviderForm.clientSecret.trim(),
+        authorizedScopes: editProviderForm.authorizedScopes,
         domain: editProviderForm.domain.trim() || undefined,
         tokenType: editProviderForm.tokenType,
         targetServerToken: editProviderForm.targetServerToken,
@@ -718,6 +756,7 @@ function EditModeManagementUI({
   const cancelProviderEdit = () => {
     setEditingProviderKey(null);
     setEditProviderForm(null);
+    setEditProviderNewScope('');
   };
 
   const copyToClipboard = async (text: string, field: string) => {
@@ -1656,7 +1695,12 @@ function EditModeManagementUI({
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => setShowAddProvider(prev => ({ ...prev, [client.id]: !prev[client.id] }))}
+                          onClick={() => {
+                            setShowAddProvider(prev => ({ ...prev, [client.id]: !prev[client.id] }));
+                            if (!newProvider[client.id]) {
+                              setNewProvider(prev => ({ ...prev, [client.id]: getDefaultNewProvider('google') }));
+                            }
+                          }}
                           className="h-8 text-xs"
                         >
                           <Plus className="h-3 w-3 mr-1.5" />
@@ -1679,11 +1723,9 @@ function EditModeManagementUI({
                                   onValueChange={(value) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      type: value as SocialProvider,
+                                      ...getDefaultNewProvider(value as SocialProvider),
                                       clientId: prev[client.id]?.clientId || '',
                                       clientSecret: prev[client.id]?.clientSecret || '',
-                                      domain: PROVIDER_DOMAINS[value as SocialProvider],
-                                      tokenType: prev[client.id]?.tokenType || 'apiblaze',
                                     }
                                   }))}
                                 >
@@ -1708,7 +1750,7 @@ function EditModeManagementUI({
                                   onChange={(e) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
+                                      ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
                                       domain: e.target.value
                                     }
                                   }))}
@@ -1724,7 +1766,7 @@ function EditModeManagementUI({
                                   onChange={(e) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
+                                      ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
                                       clientId: e.target.value
                                     }
                                   }))}
@@ -1741,13 +1783,84 @@ function EditModeManagementUI({
                                   onChange={(e) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
+                                      ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
                                       clientSecret: e.target.value
                                     }
                                   }))}
                                   placeholder="your-client-secret"
                                   className="mt-1"
                                 />
+                              </div>
+                              <div>
+                                <Label className="text-xs">Authorized Scopes</Label>
+                                <p className="text-xs text-muted-foreground mb-1">
+                                  Default mandatory scopes: {(newProvider[client.id]?.authorizedScopes ?? DEFAULT_AUTHORIZED_SCOPES[newProvider[client.id]?.type || 'google']).join(', ') || '—'}
+                                </p>
+                                <div className="flex flex-wrap gap-1 mb-2">
+                                  {(newProvider[client.id]?.authorizedScopes ?? []).map((scope) => (
+                                    <Badge key={scope} variant="secondary" className="gap-1 text-xs">
+                                      {scope}
+                                      <button
+                                        type="button"
+                                        onClick={() => setNewProvider(prev => ({
+                                          ...prev,
+                                          [client.id]: {
+                                            ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
+                                            authorizedScopes: (prev[client.id]?.authorizedScopes ?? []).filter((s) => s !== scope),
+                                          }
+                                        }))}
+                                        className="ml-0.5 rounded hover:bg-muted"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </Badge>
+                                  ))}
+                                </div>
+                                <div className="flex gap-2">
+                                  <Input
+                                    placeholder="Add custom scope"
+                                    value={newAuthorizedScopeByClient[client.id] ?? ''}
+                                    onChange={(e) => setNewAuthorizedScopeByClient(prev => ({ ...prev, [client.id]: e.target.value }))}
+                                    className="mt-1 text-xs"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        const s = (newAuthorizedScopeByClient[client.id] ?? '').trim();
+                                        if (s && !(newProvider[client.id]?.authorizedScopes ?? []).includes(s)) {
+                                          setNewProvider(prev => ({
+                                            ...prev,
+                                            [client.id]: {
+                                              ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
+                                              authorizedScopes: [...(prev[client.id]?.authorizedScopes ?? []), s],
+                                            }
+                                          }));
+                                          setNewAuthorizedScopeByClient(prev => ({ ...prev, [client.id]: '' }));
+                                        }
+                                      }
+                                    }}
+                                  />
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-9"
+                                    onClick={() => {
+                                      const s = (newAuthorizedScopeByClient[client.id] ?? '').trim();
+                                      if (s && !(newProvider[client.id]?.authorizedScopes ?? []).includes(s)) {
+                                        setNewProvider(prev => ({
+                                          ...prev,
+                                          [client.id]: {
+                                            ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
+                                            authorizedScopes: [...(prev[client.id]?.authorizedScopes ?? []), s],
+                                          }
+                                        }));
+                                        setNewAuthorizedScopeByClient(prev => ({ ...prev, [client.id]: '' }));
+                                      }
+                                    }}
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </div>
                               <div>
                                 <Label htmlFor={`providerTokenType-${client.id}`} className="text-xs">Client side token type</Label>
@@ -1761,7 +1874,7 @@ function EditModeManagementUI({
                                   onValueChange={(value) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
+                                      ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
                                       tokenType: value as 'apiblaze' | 'thirdParty'
                                     }
                                   }))}
@@ -1790,7 +1903,7 @@ function EditModeManagementUI({
                                   onValueChange={(value) => setNewProvider(prev => ({
                                     ...prev,
                                     [client.id]: {
-                                      ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
+                                      ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
                                       targetServerToken: value as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none'
                                     }
                                   }))}
@@ -1814,7 +1927,7 @@ function EditModeManagementUI({
                                         onCheckedChange={(checked) => setNewProvider(prev => ({
                                           ...prev,
                                           [client.id]: {
-                                            ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
+                                            ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
                                             includeApiblazeAccessTokenHeader: checked
                                           }
                                         }))}
@@ -1830,7 +1943,7 @@ function EditModeManagementUI({
                                         onCheckedChange={(checked) => setNewProvider(prev => ({
                                           ...prev,
                                           [client.id]: {
-                                            ...(prev[client.id] || { type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS.google, tokenType: 'apiblaze', targetServerToken: 'apiblaze', includeApiblazeAccessTokenHeader: false, includeApiblazeIdTokenHeader: false }),
+                                            ...(prev[client.id] || getDefaultNewProvider(prev[client.id]?.type || 'google')),
                                             includeApiblazeIdTokenHeader: checked
                                           }
                                         }))}
@@ -1848,7 +1961,7 @@ function EditModeManagementUI({
                                   type="button"
                                   size="sm"
                                   onClick={() => handleAddProvider(client.id)}
-                                  disabled={!newProvider[client.id]?.clientId || !newProvider[client.id]?.clientSecret}
+                                  disabled={!newProvider[client.id]?.clientId || !newProvider[client.id]?.clientSecret || !(newProvider[client.id]?.authorizedScopes?.length)}
                                 >
                                   Add Provider
                                 </Button>
@@ -1858,6 +1971,7 @@ function EditModeManagementUI({
                                   size="sm"
                                   onClick={() => {
                                     setShowAddProvider(prev => ({ ...prev, [client.id]: false }));
+                                    setNewAuthorizedScopeByClient(prev => ({ ...prev, [client.id]: '' }));
                                     setNewProvider(prev => {
                                       const next = { ...prev };
                                       delete next[client.id];
@@ -2000,6 +2114,59 @@ function EditModeManagementUI({
                                         />
                                       </div>
                                       <div>
+                                        <Label className="text-xs">Authorized Scopes</Label>
+                                        <p className="text-xs text-muted-foreground mb-1">
+                                          Default mandatory scopes: email, openid, profile (or provider-specific). Add or remove below.
+                                        </p>
+                                        <div className="flex flex-wrap gap-1 mb-2">
+                                          {(editProviderForm.authorizedScopes ?? []).map((scope) => (
+                                            <Badge key={scope} variant="secondary" className="gap-1 text-xs">
+                                              {scope}
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditProviderForm(prev => prev ? { ...prev, authorizedScopes: (prev.authorizedScopes ?? []).filter((s) => s !== scope) } : null)}
+                                                className="ml-0.5 rounded hover:bg-muted"
+                                              >
+                                                <X className="h-3 w-3" />
+                                              </button>
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <Input
+                                            placeholder="Add custom scope"
+                                            value={editProviderNewScope}
+                                            onChange={(e) => setEditProviderNewScope(e.target.value)}
+                                            className="mt-1 text-xs"
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                const s = editProviderNewScope.trim();
+                                                if (s && !(editProviderForm.authorizedScopes ?? []).includes(s)) {
+                                                  setEditProviderForm(prev => prev ? { ...prev, authorizedScopes: [...(prev.authorizedScopes ?? []), s] } : null);
+                                                  setEditProviderNewScope('');
+                                                }
+                                              }
+                                            }}
+                                          />
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-9"
+                                            onClick={() => {
+                                              const s = editProviderNewScope.trim();
+                                              if (s && !(editProviderForm.authorizedScopes ?? []).includes(s)) {
+                                                setEditProviderForm(prev => prev ? { ...prev, authorizedScopes: [...(prev.authorizedScopes ?? []), s] } : null);
+                                                setEditProviderNewScope('');
+                                              }
+                                            }}
+                                          >
+                                            <Plus className="h-4 w-4" />
+                                          </Button>
+                                        </div>
+                                      </div>
+                                      <div>
                                         <Label className="text-xs">Client side token type</Label>
                                         <Select
                                           value={editProviderForm.tokenType}
@@ -2058,7 +2225,7 @@ function EditModeManagementUI({
                                           type="button"
                                           size="sm"
                                           onClick={saveProviderEdit}
-                                          disabled={savingProviderEdit || !editProviderForm.clientId.trim() || !editProviderForm.clientSecret.trim()}
+                                          disabled={savingProviderEdit || !editProviderForm.clientId.trim() || !editProviderForm.clientSecret.trim() || !(editProviderForm.authorizedScopes?.length)}
                                         >
                                           {savingProviderEdit ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                                           Save

@@ -20,6 +20,12 @@ export async function PATCH(
         { status: 400 }
       );
     }
+    if (!body.authorizedScopes || !Array.isArray(body.authorizedScopes) || body.authorizedScopes.length === 0) {
+      return NextResponse.json(
+        { error: 'Validation error', details: 'authorizedScopes (non-empty array) is required' },
+        { status: 400 }
+      );
+    }
 
     const client = createAPIBlazeClient({
       apiKey: INTERNAL_API_KEY,
@@ -30,6 +36,7 @@ export async function PATCH(
       type: body.type,
       clientId: body.clientId,
       clientSecret: body.clientSecret,
+      authorizedScopes: body.authorizedScopes,
       domain: body.domain,
       tokenType: body.tokenType,
       targetServerToken: body.targetServerToken,

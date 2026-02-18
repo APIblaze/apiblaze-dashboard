@@ -52,7 +52,7 @@ export function AppClientFormDialog({
   const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
   const [signoutUris, setSignoutUris] = useState<string[]>([]);
   const [newSignoutUri, setNewSignoutUri] = useState('');
-  const [scopes, setScopes] = useState<string[]>(['email', 'openid', 'profile']);
+  const [scopes, setScopes] = useState<string[]>(['read:user', 'user:email']);
   const [newScope, setNewScope] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export function AppClientFormDialog({
         setAccessTokenExpiry(appClient.accessTokenExpiry ?? 3600);
         setAuthorizedCallbackUrls(appClient.authorizedCallbackUrls ?? []);
         setSignoutUris(appClient.signoutUris ?? []);
-        setScopes(appClient.scopes ?? ['email', 'openid', 'profile']);
+        setScopes(appClient.scopes ?? ['read:user', 'user:email']);
         setClientSecret(null);
       } else {
         setName('');
@@ -77,7 +77,7 @@ export function AppClientFormDialog({
         setAccessTokenExpiry(3600);
         setAuthorizedCallbackUrls([]);
         setSignoutUris([]);
-        setScopes(['email', 'openid', 'profile']);
+        setScopes(['read:user', 'user:email']);
         setClientSecret(null);
       }
     }

@@ -14,7 +14,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
-import { Loader2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Loader2, Plus, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import type { SocialProvider, CreateProviderRequest } from '@/types/auth-config';
@@ -46,6 +47,15 @@ const PROVIDER_DOMAINS: Record<SocialProvider['type'], string> = {
   other: '',
 };
 
+const DEFAULT_AUTHORIZED_SCOPES: Record<SocialProvider['type'], string[]> = {
+  google: ['email', 'openid', 'profile'],
+  github: ['read:user', 'user:email'],
+  microsoft: ['email', 'openid', 'profile'],
+  facebook: ['email', 'public_profile'],
+  auth0: ['openid', 'profile', 'email'],
+  other: ['openid', 'profile'],
+};
+
 export function ProviderFormDialog({
   open,
   onOpenChange,
@@ -63,6 +73,8 @@ export function ProviderFormDialog({
   const [targetServerToken, setTargetServerToken] = useState<'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none'>('apiblaze');
   const [includeApiblazeAccessTokenHeader, setIncludeApiblazeAccessTokenHeader] = useState(false);
   const [includeApiblazeIdTokenHeader, setIncludeApiblazeIdTokenHeader] = useState(false);
+  const [authorizedScopes, setAuthorizedScopes] = useState<string[]>(DEFAULT_AUTHORIZED_SCOPES.google);
+  const [newAuthorizedScope, setNewAuthorizedScope] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -76,6 +88,10 @@ export function ProviderFormDialog({
         setTargetServerToken((provider.targetServerToken ?? (provider as { target_server_token?: string }).target_server_token ?? 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none');
         setIncludeApiblazeAccessTokenHeader(provider.includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_access_token_header?: boolean }).include_apiblaze_access_token_header ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header ?? false);
         setIncludeApiblazeIdTokenHeader(provider.includeApiblazeIdTokenHeader ?? (provider as { include_apiblaze_id_token_header?: boolean }).include_apiblaze_id_token_header ?? false);
+        const raw = provider.authorizedScopes ?? (provider as { authorized_scopes?: string | string[] }).authorized_scopes;
+        setAuthorizedScopes(
+          Array.isArray(raw) ? raw : typeof raw === 'string' && raw.trim() ? raw.trim().split(/\s+/).filter(Boolean) : DEFAULT_AUTHORIZED_SCOPES[provider.type]
+        );
       } else {
         setType('google');
         setClientIdValue('');
@@ -85,13 +101,16 @@ export function ProviderFormDialog({
         setTargetServerToken('apiblaze');
         setIncludeApiblazeAccessTokenHeader(false);
         setIncludeApiblazeIdTokenHeader(false);
+        setAuthorizedScopes(DEFAULT_AUTHORIZED_SCOPES.google);
       }
+      setNewAuthorizedScope('');
     }
   }, [open, provider]);
 
   useEffect(() => {
     if (type && !provider) {
       setDomain(PROVIDER_DOMAINS[type] || '');
+      setAuthorizedScopes(DEFAULT_AUTHORIZED_SCOPES[type]);
     }
   }, [type, provider]);
 
@@ -106,6 +125,14 @@ export function ProviderFormDialog({
       });
       return;
     }
+    if (!authorizedScopes.length) {
+      toast({
+        title: 'Validation Error',
+        description: 'At least one authorized scope is required (e.g. email, openid, profile for Google; read:user, user:email for GitHub)',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     try {
       setSubmitting(true);
@@ -114,6 +141,7 @@ export function ProviderFormDialog({
         type,
         clientId: clientIdValue.trim(),
         clientSecret: clientSecret.trim(),
+        authorizedScopes,
         domain: domain.trim() || undefined,
         tokenType,
         targetServerToken,
@@ -212,6 +240,61 @@ export function ProviderFormDialog({
               <p className="text-xs text-muted-foreground">
                 OAuth provider domain (required for Auth0)
               </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Authorized Scopes</Label>
+              <p className="text-xs text-muted-foreground">
+                Default mandatory scopes: {authorizedScopes.join(', ') || '—'}
+              </p>
+              <div className="flex flex-wrap gap-1 mb-2">
+                {authorizedScopes.map((scope) => (
+                  <Badge key={scope} variant="secondary" className="gap-1">
+                    {scope}
+                    <button
+                      type="button"
+                      onClick={() => setAuthorizedScopes((prev) => prev.filter((s) => s !== scope))}
+                      className="ml-0.5 rounded hover:bg-muted"
+                      disabled={submitting}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={newAuthorizedScope}
+                  onChange={(e) => setNewAuthorizedScope(e.target.value)}
+                  placeholder="Add custom scope"
+                  disabled={submitting}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const s = newAuthorizedScope.trim();
+                      if (s && !authorizedScopes.includes(s)) {
+                        setAuthorizedScopes((prev) => [...prev, s]);
+                        setNewAuthorizedScope('');
+                      }
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const s = newAuthorizedScope.trim();
+                    if (s && !authorizedScopes.includes(s)) {
+                      setAuthorizedScopes((prev) => [...prev, s]);
+                      setNewAuthorizedScope('');
+                    }
+                  }}
+                  disabled={submitting}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-2">

@@ -675,6 +675,16 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               rollbackAppClient = { authConfigId: currentAuthConfigId, appClientId: newAppClientId };
             }
 
+            // Default authorized scopes per provider type
+            const DEFAULT_AUTHORIZED_SCOPES: Record<SocialProvider, string[]> = {
+              google: ['email', 'openid', 'profile'],
+              github: ['read:user', 'user:email'],
+              microsoft: ['email', 'openid', 'profile'],
+              facebook: ['email', 'public_profile'],
+              auth0: ['openid', 'profile', 'email'],
+              other: ['openid', 'profile'],
+            };
+
             // 3. Add Provider(s) to AppClient
             // Use providers array if available, otherwise fall back to legacy single provider
             const providersToAdd = config.providers && config.providers.length > 0
@@ -689,14 +699,18 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                       targetServerToken: config.targetServerToken || 'apiblaze',
                       includeApiblazeAccessTokenHeader: config.includeApiblazeAccessTokenHeader ?? false,
                       includeApiblazeIdTokenHeader: config.includeApiblazeIdTokenHeader ?? false,
+                      authorizedScopes: config.authorizedScopes?.length ? config.authorizedScopes : DEFAULT_AUTHORIZED_SCOPES[config.socialProvider],
                     }]
                   : []);
 
             for (const provider of providersToAdd) {
+              const providerAuthorizedScopes = (provider as { authorizedScopes?: string[] }).authorizedScopes
+                ?? (config.authorizedScopes?.length ? config.authorizedScopes : DEFAULT_AUTHORIZED_SCOPES[provider.type]);
               await api.addProvider(currentAuthConfigId, newAppClientId, {
                 type: provider.type,
                 clientId: provider.clientId,
                 clientSecret: provider.clientSecret,
+                authorizedScopes: providerAuthorizedScopes,
                 domain: provider.domain || undefined,
                 tokenType: ((provider as { tokenType?: string }).tokenType || config.tokenType || 'apiblaze') as 'apiblaze' | 'thirdParty',
                 targetServerToken: ((provider as { targetServerToken?: string }).targetServerToken || config.targetServerToken || 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none',

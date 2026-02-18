@@ -82,17 +82,25 @@ export async function POST(request: NextRequest) {
       name: appClientName,
       projectName: String(projectName).trim(),
       apiVersion: String(apiVersion).trim(),
-      scopes: scopes || ['email', 'openid', 'profile'],
+      scopes: scopes || ['read:user', 'user:email'],
     });
     const appClientId = (appClient as { id: string }).id;
 
-    // 3. Add default GitHub Provider to AppClient (server-side, secret never exposed)
-    await client.addProvider(userClaims, authConfigId, appClientId, {
-      type: 'github',
-      clientId: defaultClientId,
-      clientSecret: defaultClientSecret,
-      domain: 'https://github.com',
-    });
+    // 3. Add default GitHub Provider only if one does not already exist (avoids duplicate providers
+    //    when the internal API auto-adds a default GitHub provider on createAppClient)
+    const existingProviders = await client.listProviders(userClaims, authConfigId, appClientId);
+    const hasGitHubProvider = Array.isArray(existingProviders) && existingProviders.some(
+      (p: { type?: string }) => (p?.type ?? '').toLowerCase() === 'github'
+    );
+    if (!hasGitHubProvider) {
+      await client.addProvider(userClaims, authConfigId, appClientId, {
+        type: 'github',
+        clientId: defaultClientId,
+        clientSecret: defaultClientSecret,
+        domain: 'https://github.com',
+        authorizedScopes: ['read:user', 'user:email'],
+      });
+    }
 
     return NextResponse.json({
       authConfigId,

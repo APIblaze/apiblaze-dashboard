@@ -360,6 +360,7 @@ class ApiClient {
     type: string;
     clientId: string;
     clientSecret: string;
+    authorizedScopes: string[];
     domain?: string;
     tokenType?: 'apiblaze' | 'thirdParty';
     targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
@@ -376,6 +377,7 @@ class ApiClient {
     type: string;
     clientId: string;
     clientSecret: string;
+    authorizedScopes: string[];
     domain?: string;
     tokenType?: 'apiblaze' | 'thirdParty';
     targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';

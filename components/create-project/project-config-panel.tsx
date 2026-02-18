@@ -410,6 +410,14 @@ export function ProjectConfigPanel({
             });
             const newAppClientId = (appClient as { id: string }).id;
             if (!rollbackAuthConfigId) rollbackAppClient = { authConfigId: currentAuthConfigId, appClientId: newAppClientId };
+            const DEFAULT_AUTHORIZED_SCOPES: Record<SocialProvider, string[]> = {
+              google: ['email', 'openid', 'profile'],
+              github: ['read:user', 'user:email'],
+              microsoft: ['email', 'openid', 'profile'],
+              facebook: ['email', 'public_profile'],
+              auth0: ['openid', 'profile', 'email'],
+              other: ['openid', 'profile'],
+            };
             const providersToAdd = config.providers?.length
               ? config.providers
               : config.identityProviderClientId && config.identityProviderClientSecret
@@ -422,13 +430,16 @@ export function ProjectConfigPanel({
                     targetServerToken: config.targetServerToken || 'apiblaze',
                     includeApiblazeAccessTokenHeader: config.includeApiblazeAccessTokenHeader ?? false,
                     includeApiblazeIdTokenHeader: config.includeApiblazeIdTokenHeader ?? false,
+                    authorizedScopes: config.authorizedScopes?.length ? config.authorizedScopes : DEFAULT_AUTHORIZED_SCOPES[config.socialProvider],
                   }]
                 : [];
             for (const provider of providersToAdd) {
+              const authorizedScopes = provider.authorizedScopes ?? (config.authorizedScopes?.length ? config.authorizedScopes : DEFAULT_AUTHORIZED_SCOPES[provider.type]);
               await api.addProvider(currentAuthConfigId, newAppClientId, {
                 type: provider.type,
                 clientId: provider.clientId,
                 clientSecret: provider.clientSecret,
+                authorizedScopes,
                 domain: provider.domain,
                 tokenType: ((provider as { tokenType?: string }).tokenType || config.tokenType || 'apiblaze') as 'apiblaze' | 'thirdParty',
                 targetServerToken: ((provider as { targetServerToken?: string }).targetServerToken || config.targetServerToken || 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none',
