@@ -16,7 +16,6 @@ import { Loader2, Rocket, Save } from 'lucide-react';
 import { GeneralSection } from './create-project/general-section';
 import { AuthenticationSection } from './create-project/authentication-section';
 import { TargetServersSection } from './create-project/target-servers-section';
-import { PortalSection } from './create-project/portal-section';
 import { ThrottlingSection } from './create-project/throttling-section';
 import { RoutesSection } from './create-project/routes-section';
 import { PrePostProcessingSection } from './create-project/preprocessing-section';
@@ -300,6 +299,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     if (open && !isDeployingRef.current) {
       setConfig(getInitialConfig());
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- getInitialConfig is intentionally excluded to avoid reset loops
   }, [open, currentProject, project]);
 
   // Preload GitHub repos when dialog opens
@@ -324,7 +324,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             }
           }
         }
-      } catch (error) {
+      } catch {
         // Silently fail - not critical
       }
     };
@@ -672,7 +672,6 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               apiVersion: config.apiVersion || '1.0.0',
             });
             const newAppClientId = (appClient as { id: string }).id;
-            const createdAppClientClientId = (appClient as { clientId: string }).clientId;
 
             // If we reused existing auth config, track app client for rollback (auth config cascades if we created it)
             if (!rollbackAuthConfigId) {
@@ -1107,7 +1106,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     } finally {
       setIsSavingConfig(false);
     }
-  }, [currentProject, config, onProjectUpdate]);
+  }, [currentProject, config, onProjectUpdate, toast]);
 
   const handleDelete = useCallback(async () => {
     if (!currentProject) return;
@@ -1128,7 +1127,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     } finally {
       setIsDeleting(false);
     }
-  }, [currentProject, onOpenChange, onSuccess]);
+  }, [currentProject, onOpenChange, onSuccess, toast]);
 
   const isEditMode = !!currentProject;
 
@@ -1147,11 +1146,10 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 overflow-hidden flex flex-col">
-          <TabsList className={cn('grid w-full', currentProject ? 'grid-cols-8' : 'grid-cols-7')}>
+          <TabsList className={cn('grid w-full', currentProject ? 'grid-cols-7' : 'grid-cols-6')}>
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="auth">Auth</TabsTrigger>
             <TabsTrigger value="targets">Targets</TabsTrigger>
-            <TabsTrigger value="portal">Branding</TabsTrigger>
             <TabsTrigger value="throttling">Throttling</TabsTrigger>
             {currentProject && <TabsTrigger value="routes">Routes</TabsTrigger>}
             <TabsTrigger value="preprocessing">Processing</TabsTrigger>
@@ -1190,10 +1188,6 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
 
             <TabsContent value="targets" className="mt-0">
               <TargetServersSection config={config} updateConfig={updateConfig} />
-            </TabsContent>
-
-            <TabsContent value="portal" className="mt-0">
-              <PortalSection config={config} updateConfig={updateConfig} />
             </TabsContent>
 
             <TabsContent value="throttling" className="mt-0">

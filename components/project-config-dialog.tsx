@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Loader2, ExternalLink, Users, Key, Globe, Settings } from 'lucide-react';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
-import type { AuthConfig, AppClient, SocialProvider } from '@/types/auth-config';
+import type { AppClient, SocialProvider } from '@/types/auth-config';
 
 // API response may have snake_case fields from the database
 type AppClientResponse = AppClient & {

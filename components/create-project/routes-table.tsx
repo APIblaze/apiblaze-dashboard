@@ -107,7 +107,7 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
       const fromSpec = spec ? extractOperationsFromSpec(spec) : [];
       const existing = externalRoutesRef?.current?.length ? externalRoutesRef.current : existingRoutes;
       return mergeWithExisting(fromSpec, existing);
-    }, [spec, existingRoutes]);
+    }, [spec, existingRoutes, externalRoutesRef]);
 
     const pathGroups = useMemo(
       () => groupByBasePath(merged),

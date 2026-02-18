@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { APIBlazeError, createAPIBlazeClient } from '@/lib/apiblaze-client';
 import { getUserClaims } from '../projects/_utils';
-import type { CreateAuthConfigRequest, AuthConfig } from '@/types/auth-config';
+import type { CreateAuthConfigRequest } from '@/types/auth-config';
 
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const userClaims = await getUserClaims();
     

@@ -32,7 +32,6 @@ export function AuthConfigsNav({
 
   const authConfigs = useDashboardCacheStore((s) => s.getAuthConfigs());
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
-  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
   const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
 

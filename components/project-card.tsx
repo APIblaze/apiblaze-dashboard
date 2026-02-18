@@ -33,7 +33,6 @@ function useProjectAuth(project: Project) {
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
   const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
-  const appClientsByConfig = useDashboardCacheStore((s) => s.appClientsByConfig);
 
   const authConfigIdFromConfig = useMemo(() => {
     const projectConfig = project.config as Record<string, unknown> | undefined;
@@ -76,7 +75,7 @@ function useProjectAuth(project: Project) {
       bringMyOwnOAuth,
       loadingAppClients: isBootstrapping && !!authConfigId,
     };
-  }, [project.config, getAuthConfigs, getAuthConfig, getAppClients, isBootstrapping, appClientsByConfig]);
+  }, [project.config, getAuthConfigs, getAuthConfig, getAppClients, isBootstrapping]);
 }
 
 export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardProps) {
@@ -125,10 +124,6 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
   }, [authConfigId, appClients, defaultAppClientId, getProviders, fetchProvidersForClient, providersByConfigClient]);
 
   const handleOpenPortal = (appClient?: AppClient) => {
-    const projectConfig = project.config as Record<string, unknown> | undefined;
-    const defaultAppClientId = (projectConfig?.default_app_client_id ||
-      projectConfig?.defaultAppClient) as string | undefined;
-
     let portalUrl = project.api_version
       ? `${project.urls.portal}/${project.api_version}`
       : project.urls.portal;

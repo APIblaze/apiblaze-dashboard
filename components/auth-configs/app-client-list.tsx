@@ -24,7 +24,7 @@ import {
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
-import type { AppClient, AuthConfig } from '@/types/auth-config';
+import type { AppClient } from '@/types/auth-config';
 import { AppClientFormDialog } from './app-client-form-dialog';
 
 interface AppClientListProps {

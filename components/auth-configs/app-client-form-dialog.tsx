@@ -91,7 +91,7 @@ export function AppClientFormDialog({
         return { valid: false, error: 'URL must use HTTPS protocol' };
       }
       return { valid: true };
-    } catch (error) {
+    } catch {
       return { valid: false, error: 'Invalid URL format' };
     }
   };

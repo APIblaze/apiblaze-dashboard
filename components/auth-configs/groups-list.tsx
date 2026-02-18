@@ -10,7 +10,7 @@ interface GroupsListProps {
   onRefresh?: () => void;
 }
 
-export function GroupsList({ authConfigId, clientId, onRefresh }: GroupsListProps) {
+export function GroupsList({ authConfigId, clientId }: GroupsListProps) {
   // TODO: Implement groups management when backend API is available (per app client)
   const scopeLabel = clientId ? 'app client' : 'auth config';
 

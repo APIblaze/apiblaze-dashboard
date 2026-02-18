@@ -110,8 +110,6 @@ export function ThrottlingSection({ config, updateConfig }: ThrottlingSectionPro
 
   // Handle proxyDailyQuota input change
   const handleProxyDailyQuotaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const input = e.target;
-    const cursorPosition = input.selectionStart || 0;
     const value = e.target.value;
     setProxyDailyQuotaInput(value);
     

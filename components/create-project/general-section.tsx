@@ -45,7 +45,7 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
   const [repoSelectorOpen, setRepoSelectorOpen] = useState(false);
   const [installModalOpen, setInstallModalOpen] = useState(false);
   const [githubAppInstalled, setGithubAppInstalled] = useState(false);
-  const [checkingInstallation, setCheckingInstallation] = useState(true);
+  const [, setCheckingInstallation] = useState(true);
 
   useEffect(() => {
     // Check if GitHub App is installed

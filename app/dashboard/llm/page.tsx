@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   Bot,
-  Cloud,
   KeyRound,
   ListTree,
   MessageCircle,

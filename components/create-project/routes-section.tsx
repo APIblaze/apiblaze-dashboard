@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { RoutesTable, type RoutesTableRef } from './routes-table';
@@ -60,9 +60,14 @@ export function RoutesSection({
   const [error, setError] = useState<string | null>(null);
 
   const existingRoutes = config.routeConfig?.routes ?? [];
-  const project = projectProp ?? (config.projectName && config.apiVersion
-    ? { project_id: config.projectName, api_version: config.apiVersion }
-    : null);
+  const project = useMemo(
+    () =>
+      projectProp ??
+      (config.projectName && config.apiVersion
+        ? { project_id: config.projectName, api_version: config.apiVersion }
+        : null),
+    [projectProp, config.projectName, config.apiVersion]
+  );
 
   const hasSpecSource =
     config.sourceType === 'github' &&
@@ -121,6 +126,7 @@ export function RoutesSection({
     config.githubBranch,
     config.uploadedFile,
     projectProp,
+    hasSpecSource,
   ]);
 
   useEffect(() => {
@@ -131,7 +137,7 @@ export function RoutesSection({
       setLoading(false);
       setError(null);
     }
-  }, [hasSpecSource, hasUpload, hasLoadedProject, projectProp?.project_id, projectProp?.api_version, project?.project_id, project?.api_version, loadSpec]);
+  }, [hasSpecSource, hasUpload, hasLoadedProject, projectProp, project, loadSpec]);
 
   useEffect(() => {
     if (projectProp && !config.routeConfig && !loading) {
@@ -145,7 +151,7 @@ export function RoutesSection({
           // No existing route config is fine
         });
     }
-  }, [projectProp?.project_id, projectProp?.api_version, config.routeConfig, loading, updateConfig]);
+  }, [projectProp, config.routeConfig, loading, updateConfig]);
 
   const tableRef = useRef<RoutesTableRef>(null);
 

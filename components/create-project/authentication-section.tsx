@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { AlertCircle, Plus, X, Users, Key, Copy, Check, Trash2, Search, ChevronDown, Star, ExternalLink, Loader2, Pencil, HelpCircle } from 'lucide-react';
+import { AlertCircle, Plus, X, Users, Key, Copy, Check, Search, ChevronDown, Star, ExternalLink, Loader2, Pencil, HelpCircle } from 'lucide-react';
 import { ProjectConfig, SocialProvider } from './types';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { AuthConfigModal } from '@/components/auth-config/auth-config-modal';
@@ -227,7 +227,10 @@ function EditModeManagementUI({
 
   const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(authConfigId);
   const currentAuthConfigId = authConfigId || selectedAuthConfigId;
-  const appClients = currentAuthConfigId ? getAppClients(currentAuthConfigId) : [];
+  const appClients = useMemo(
+    () => (currentAuthConfigId ? getAppClients(currentAuthConfigId) : []),
+    [currentAuthConfigId, getAppClients]
+  );
   const loadingAppClients = isBootstrapping && !!currentAuthConfigId;
 
   const providers = useMemo(() => {
@@ -261,7 +264,6 @@ function EditModeManagementUI({
   }, [currentAuthConfigId, appClients, isBootstrapping, fetchProvidersForClient]);
 
   const [appClientDetails, setAppClientDetails] = useState<Record<string, AppClientResponse>>({});
-  const [loadingAppClientDetails, setLoadingAppClientDetails] = useState<Record<string, boolean>>({});
   const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
   const [loadingSecret, setLoadingSecret] = useState<string | null>(null);
   const [showAddAppClient, setShowAddAppClient] = useState(false);
@@ -507,7 +509,7 @@ function EditModeManagementUI({
         return { valid: false, error: 'URL must use HTTPS protocol' };
       }
       return { valid: true };
-    } catch (error) {
+    } catch {
       return { valid: false, error: 'Invalid URL format' };
     }
   };

@@ -55,7 +55,7 @@ export async function GET(request: NextRequest, context: unknown) {
     let spec: unknown;
 
     if (contentType.includes('yaml')) {
-      const text = await upstreamResponse.text();
+      await upstreamResponse.text();
       return NextResponse.json(
         {
           error: 'unsupported_format',

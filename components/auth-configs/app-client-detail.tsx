@@ -73,7 +73,7 @@ export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl 
         // Ignore; keep using cached app client
       }
     })();
-  }, [authConfigId, clientId, appClient?.id, updateAppClientInCache]);
+  }, [authConfigId, clientId, appClient, updateAppClientInCache]);
 
   // Auto-verify when landing from unverified error page link
   useEffect(() => {

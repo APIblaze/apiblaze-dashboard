@@ -8,7 +8,6 @@ import { Loader2, ArrowLeft, Settings, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
-import type { AuthConfig } from '@/types/auth-config';
 import { AppClientList } from './app-client-list';
 import { AuthConfigFormDialog } from './auth-config-form-dialog';
 import {

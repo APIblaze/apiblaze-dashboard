@@ -10,7 +10,7 @@ interface UsersListProps {
   onRefresh?: () => void;
 }
 
-export function UsersList({ authConfigId, clientId, onRefresh }: UsersListProps) {
+export function UsersList({ authConfigId, clientId }: UsersListProps) {
   // TODO: Implement users management when backend API is available (per app client)
   const scopeLabel = clientId ? 'app client' : 'auth config';
 

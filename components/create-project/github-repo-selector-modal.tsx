@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { ProjectConfig } from './types';
 import { fetchGitHubAPI } from '@/lib/github-api';
-import { getCachedGitHubRepos, setCachedGitHubRepos, getCachedOpenAPISpecs, setCachedOpenAPISpecs, CachedGitHubRepo } from '@/lib/github-repos-cache';
+import { getCachedGitHubRepos, setCachedGitHubRepos, getCachedOpenAPISpecs, setCachedOpenAPISpecs } from '@/lib/github-repos-cache';
 
 interface GitHubRepoSelectorModalProps {
   open: boolean;

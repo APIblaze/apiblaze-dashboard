@@ -7,7 +7,6 @@ import { Loader2, Rocket, ChevronRight, Save } from 'lucide-react';
 import { GeneralSection } from './general-section';
 import { AuthenticationSection } from './authentication-section';
 import { TargetServersSection } from './target-servers-section';
-import { PortalSection } from './portal-section';
 import { ThrottlingSection } from './throttling-section';
 import { RoutesSection } from './routes-section';
 import { PrePostProcessingSection } from './preprocessing-section';
@@ -27,7 +26,6 @@ const NEW_PROJECT_STEPS: { id: ProjectConfigTab; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'auth', label: 'Auth' },
   { id: 'targets', label: 'Targets' },
-  { id: 'portal', label: 'Branding' },
   { id: 'throttling', label: 'Throttling' },
   { id: 'preprocessing', label: 'Processing' },
   { id: 'domains', label: 'Domains' },
@@ -643,7 +641,7 @@ export function ProjectConfigPanel({
     } finally {
       setIsSavingConfig(false);
     }
-  }, [currentProject, config, onProjectUpdate]);
+  }, [currentProject, config, onProjectUpdate, toast]);
 
   const handleDelete = useCallback(async () => {
     if (!currentProject) return;
@@ -663,7 +661,7 @@ export function ProjectConfigPanel({
     } finally {
       setIsDeleting(false);
     }
-  }, [currentProject, onDeploySuccess]);
+  }, [currentProject, onDeploySuccess, toast]);
 
   const isNewProject = !currentProject;
   const currentStepIndex = NEW_PROJECT_STEPS.findIndex((s) => s.id === activeTab);
@@ -726,9 +724,6 @@ export function ProjectConfigPanel({
           )}
           {activeTab === 'targets' && (
             <TargetServersSection config={config} updateConfig={updateConfig} />
-          )}
-          {activeTab === 'portal' && (
-            <PortalSection config={config} updateConfig={updateConfig} />
           )}
           {activeTab === 'throttling' && (
             <ThrottlingSection config={config} updateConfig={updateConfig} />
