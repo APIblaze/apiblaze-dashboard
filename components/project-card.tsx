@@ -112,6 +112,9 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
       if (cancelled) return;
       const providers = getProviders(authConfigId, candidate.id);
       const list = providers.length > 0 ? providers : [{ type: '' }];
+      const allBase = buildAppLoginAuthorizeUrl(clientId(candidate), redirect, scopes(candidate), undefined);
+      const allUrlWithPkce = await addPkceToAuthorizeUrl(allBase);
+      if (cancelled) return;
       const arr = await Promise.all(
         list.map(async (p) => {
           const base = buildAppLoginAuthorizeUrl(clientId(candidate), redirect, scopes(candidate), p.type || undefined);
@@ -119,7 +122,12 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
           return { type: p.type, url: urlWithPkce };
         })
       );
-      if (!cancelled) setAppLoginUrls(arr);
+      if (!cancelled) {
+        const withAll = list.length > 1
+          ? [{ type: 'all', url: allUrlWithPkce }, ...arr]
+          : arr;
+        setAppLoginUrls(withAll);
+      }
     })();
     return () => { cancelled = true; };
   }, [authConfigId, appClients, defaultAppClientId, getProviders, fetchProvidersForClient, providersByConfigClient]);
@@ -379,7 +387,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
                   }}
                 >
                   <LogIn className="mr-2 h-4 w-4" />
-                  {type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Default'}
+                  {type === 'all' ? 'All' : type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Default'}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>

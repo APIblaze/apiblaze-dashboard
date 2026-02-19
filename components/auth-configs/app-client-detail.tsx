@@ -48,7 +48,8 @@ export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [loginUrlWithPkce, setLoginUrlWithPkce] = useState<string | null>(null);
+  const [copiedLoginUrlKey, setCopiedLoginUrlKey] = useState<string | null>(null);
+  const [loginUrlsWithPkce, setLoginUrlsWithPkce] = useState<{ type: string; url: string }[] | null>(null);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [loadingReveal, setLoadingReveal] = useState(false);
   const [justVerified, setJustVerified] = useState(false);
@@ -105,39 +106,58 @@ export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl 
     })();
   }, [verifyFromUrl, appClient, loading, authConfigId, updateAppClientInCache, toast, router, searchParams]);
 
-  // Generate PKCE example URL for "Your App login URLs" direct link (include first provider type so auth redirects to it)
+  // Generate PKCE example URLs for "Your App login URLs" (All + one per provider)
   useEffect(() => {
     const external = appClient ? getFirstExternalCallbackUrl(appClient.authorizedCallbackUrls) : null;
     if (!external || !appClient) {
-      setLoginUrlWithPkce(null);
+      setLoginUrlsWithPkce(null);
       return;
     }
     let cancelled = false;
     (async () => {
-      let firstProviderType: string | undefined;
+      let providers: { type?: string }[] = [];
       try {
-        const providers = await api.listProviders(authConfigId, appClient.id);
-        firstProviderType = Array.isArray(providers) && providers.length > 0 ? providers[0].type : undefined;
+        const list = await api.listProviders(authConfigId, appClient.id);
+        providers = Array.isArray(list) && list.length > 0 ? list : [{ type: '' }];
       } catch {
-        // ignore; build URL without provider param
+        providers = [{ type: '' }];
       }
       if (cancelled) return;
-      const baseUrl = buildAppLoginAuthorizeUrl(appClient.clientId, external, appClient.scopes ?? [], firstProviderType);
-      const urlWithPkce = await addPkceToAuthorizeUrl(baseUrl);
-      if (!cancelled) setLoginUrlWithPkce(urlWithPkce);
+      const scopes = appClient.scopes ?? [];
+      const allBaseUrl = buildAppLoginAuthorizeUrl(appClient.clientId, external, scopes, undefined);
+      const allUrlWithPkce = await addPkceToAuthorizeUrl(allBaseUrl);
+      if (cancelled) return;
+      const arr = await Promise.all(
+        providers.map(async (p) => {
+          const baseUrl = buildAppLoginAuthorizeUrl(appClient.clientId, external, scopes, p.type || undefined);
+          const urlWithPkce = await addPkceToAuthorizeUrl(baseUrl);
+          return { type: p.type ?? '', url: urlWithPkce };
+        })
+      );
+      if (!cancelled) {
+        const withAll = providers.length > 1 ? [{ type: 'all', url: allUrlWithPkce }, ...arr] : arr;
+        setLoginUrlsWithPkce(withAll);
+      }
     })();
     return () => { cancelled = true; };
   }, [appClient, authConfigId]);
 
-  const handleCopy = async (text: string) => {
+  const handleCopy = async (text: string, key?: string) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
+      if (key !== undefined) setCopiedLoginUrlKey(key);
+      const isLoginUrl = key !== undefined && key.startsWith('login-');
       toast({
         title: 'Copied',
-        description: 'Copied to clipboard',
+        description: isLoginUrl
+          ? 'Generate your own code_verifier and code_challenge (PKCE) for each request, then replace the example in the link before using in production.'
+          : 'Copied to clipboard',
       });
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => {
+        setCopied(false);
+        if (key !== undefined) setCopiedLoginUrlKey(null);
+      }, 2000);
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
       toast({
@@ -483,32 +503,40 @@ export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl 
                 </div>
               </CardHeader>
               <CardContent>
-                {loginUrlWithPkce ? (
-                  <div className="flex items-center gap-2">
-                    <a
-                      href={loginUrlWithPkce}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
-                    >
-                      Open login page
-                    </a>
-                    <a href={loginUrlWithPkce} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800" title="Open in new tab">
-                      <ExternalLink className="h-4 w-4" />
-                    </a>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      onClick={() => handleCopy(loginUrlWithPkce)}
-                      title="Copy URL"
-                    >
-                      {copied ? (
-                        <Check className="h-4 w-4 text-green-600" />
-                      ) : (
-                        <Copy className="h-4 w-4" />
-                      )}
-                    </Button>
+                {loginUrlsWithPkce && loginUrlsWithPkce.length > 0 ? (
+                  <div className="space-y-2">
+                    {loginUrlsWithPkce.map(({ type, url }) => {
+                      const label = type === 'all' ? 'All' : type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Default';
+                      const copyKey = `login-${type || 'default'}`;
+                      return (
+                        <div key={type || 'default'} className="flex items-center gap-2">
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                          >
+                            Open login page ({label})
+                          </a>
+                          <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800" title="Open in new tab">
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleCopy(url, copyKey)}
+                            title="Copy URL"
+                          >
+                            {copiedLoginUrlKey === copyKey ? (
+                              <Check className="h-4 w-4 text-green-600" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <span className="text-sm text-muted-foreground italic">Generating…</span>

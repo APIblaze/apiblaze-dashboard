@@ -23,6 +23,7 @@ import type { Project } from '@/types/project';
 import { getFirstExternalCallbackUrl, buildAppLoginAuthorizeUrl } from '@/lib/build-app-login-url';
 import { addPkceToAuthorizeUrl } from '@/lib/add-pkce-to-url';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useToast } from '@/hooks/use-toast';
 
 // API response may have snake_case fields from the database
 type AppClientResponse = AppClient & {
@@ -176,6 +177,7 @@ function EditModeManagementUI({
   initialAuthConfigId?: string;
   teamId?: string;
 }) {
+  const { toast } = useToast();
   const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
@@ -381,6 +383,9 @@ function EditModeManagementUI({
         const scopes = (details?.scopes ?? client.scopes ?? []) as string[];
         const providerList = currentAuthConfigId ? getProviders(currentAuthConfigId, client.id) : [];
         const list = providerList.length > 0 ? providerList : [{ type: '' }];
+        const allBaseUrl = buildAppLoginAuthorizeUrl(oauthClientId, external, scopes, undefined);
+        const allUrlWithPkce = await addPkceToAuthorizeUrl(allBaseUrl);
+        if (cancelled) continue;
         const arr = await Promise.all(
           list.map(async (p) => {
             const baseUrl = buildAppLoginAuthorizeUrl(oauthClientId, external, scopes, p.type || undefined);
@@ -388,7 +393,7 @@ function EditModeManagementUI({
             return { type: p.type, url: urlWithPkce };
           })
         );
-        next[client.id] = arr;
+        next[client.id] = list.length > 1 ? [{ type: 'all', url: allUrlWithPkce }, ...arr] : arr;
       }
       if (!cancelled) setAppLoginUrlWithPkce((prev) => ({ ...prev, ...next }));
     })();
@@ -902,6 +907,12 @@ function EditModeManagementUI({
       if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(text);
         setCopiedField(field);
+        if (field.startsWith('appLogin-')) {
+          toast({
+            title: 'Copied',
+            description: 'Generate your own code_verifier and code_challenge (PKCE) for each request, then replace the example in the link before using in production.',
+          });
+        }
         setTimeout(() => setCopiedField(null), 2000);
         return;
       }
@@ -946,6 +957,12 @@ function EditModeManagementUI({
       
       if (successful) {
         setCopiedField(field);
+        if (field.startsWith('appLogin-')) {
+          toast({
+            title: 'Copied',
+            description: 'Generate your own code_verifier and code_challenge (PKCE) for each request, then replace the example in the link before using in production.',
+          });
+        }
         setTimeout(() => setCopiedField(null), 2000);
       } else {
         throw new Error('Copy command returned false');
@@ -956,6 +973,12 @@ function EditModeManagementUI({
       const userConfirmed = confirm(`Copy this value manually:\n\n${text}\n\nClick OK to continue.`);
       if (userConfirmed) {
         setCopiedField(field);
+        if (field.startsWith('appLogin-')) {
+          toast({
+            title: 'Copied',
+            description: 'Generate your own code_verifier and code_challenge (PKCE) for each request, then replace the example in the link before using in production.',
+          });
+        }
         setTimeout(() => setCopiedField(null), 2000);
       }
     }
@@ -1197,7 +1220,7 @@ function EditModeManagementUI({
                               const externalRedirect = getFirstExternalCallbackUrl(urls);
                               if (!externalRedirect) return null;
                               const loginUrls = appLoginUrlWithPkce[client.id];
-                              const providerLabel = (t: string) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : '');
+                              const providerLabel = (t: string) => (t === 'all' ? 'All' : t ? t.charAt(0).toUpperCase() + t.slice(1) : '');
                               return (
                                 <div className="space-y-1">
                                   <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
