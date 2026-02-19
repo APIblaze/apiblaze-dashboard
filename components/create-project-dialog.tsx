@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { 
   Dialog, 
@@ -110,7 +111,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
   const routesRef = useRef<RouteEntry[]>([]);
   const [preloadedGitHubRepos, setPreloadedGitHubRepos] = useState<Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>>([]);
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
+  const router = useRouter();
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
 
   // Initialize config from project if in edit mode
   const getInitialConfig = (): ProjectConfig => {
@@ -1113,6 +1116,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     setIsDeleting(true);
     try {
       await deleteProject(currentProject.project_id, currentProject.api_version);
+      const teamId = session?.user?.id ? `team_${(session.user as { id?: string }).id}` : undefined;
+      await invalidateAndRefetch(teamId);
+      router.refresh();
       toast({ title: 'Project Deleted', description: `${currentProject.display_name || currentProject.project_id} has been deleted.` });
       setCurrentProject(null);
       onOpenChange(false);
@@ -1127,7 +1133,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     } finally {
       setIsDeleting(false);
     }
-  }, [currentProject, onOpenChange, onSuccess, toast]);
+  }, [currentProject, onOpenChange, onSuccess, toast, session?.user?.id, invalidateAndRefetch, router]);
 
   const isEditMode = !!currentProject;
 
@@ -1164,7 +1170,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                 validationError={validationError}
                 preloadedGitHubRepos={preloadedGitHubRepos}
                 onProjectNameCheckResult={(blockDeploy) => setProjectNameCheckBlockDeploy(blockDeploy)}
-                editingProject={currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null}
+                editingProject={currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version, display_name: currentProject.display_name } : null}
                 onDeleteAndRedeploy={currentProject ? handleDeploy : undefined}
                 onDelete={currentProject ? handleDelete : undefined}
                 isDeploying={isDeploying}

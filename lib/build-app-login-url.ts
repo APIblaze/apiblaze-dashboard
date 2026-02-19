@@ -48,40 +48,6 @@ export function buildAppLoginAuthorizeUrl(
 }
 
 /**
- * Generate a PKCE code_verifier (43-128 chars, base64url).
+ * addPkceToAuthorizeUrl is a Server Action - import from '@/lib/add-pkce-to-url'.
+ * It uses Node's crypto and runs only on the server.
  */
-function generateCodeVerifier(): string {
-  const bytes = new Uint8Array(32);
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(bytes);
-  }
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
-
-/**
- * Compute S256 code_challenge from code_verifier (browser-safe).
- */
-async function computeCodeChallenge(verifier: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(verifier);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const base64 = btoa(String.fromCharCode(...hashArray));
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
-/**
- * Append an example code_challenge to the authorize URL so the link can be opened directly.
- * The token exchange will still require the matching code_verifier (which we do not expose);
- * this is only so the login page loads without error. For a real flow, the app must generate
- * its own code_verifier/code_challenge.
- */
-export async function addPkceToAuthorizeUrl(baseUrl: string): Promise<string> {
-  const verifier = generateCodeVerifier();
-  const challenge = await computeCodeChallenge(verifier);
-  const sep = baseUrl.includes('?') ? '&' : '?';
-  return `${baseUrl}${sep}code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=S256`;
-}

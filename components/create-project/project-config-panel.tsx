@@ -650,7 +650,7 @@ export function ProjectConfigPanel({
       await deleteProject(currentProject.project_id, currentProject.api_version);
       toast({ title: 'Project Deleted', description: `${currentProject.display_name || currentProject.project_id} has been deleted.` });
       setCurrentProject(null);
-      onDeploySuccess?.();
+      await onDeploySuccess?.();
     } catch (error) {
       console.error('Failed to delete project:', error);
       toast({
@@ -702,7 +702,7 @@ export function ProjectConfigPanel({
               validationError={validationError}
               preloadedGitHubRepos={preloadedGitHubRepos}
               onProjectNameCheckResult={(blockDeploy) => setProjectNameCheckBlockDeploy(blockDeploy)}
-              editingProject={currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null}
+              editingProject={currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version, display_name: currentProject.display_name } : null}
               onDeleteAndRedeploy={currentProject ? handleDeploy : undefined}
               onDelete={currentProject ? handleDelete : undefined}
               isDeploying={isDeploying}

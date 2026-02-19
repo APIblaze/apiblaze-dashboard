@@ -324,6 +324,7 @@ class ApiClient {
     authorizedCallbackUrls?: string[];
     signoutUris?: string[];
     scopes?: string[];
+    branding?: import('@/types/auth-config').AppClientBranding;
   }) {
     return this.request(`/auth-configs/${authConfigId}/app-clients`, {
       method: 'POST',
@@ -340,6 +341,7 @@ class ApiClient {
     signoutUris?: string[];
     scopes?: string[];
     verified?: boolean;
+    branding?: import('@/types/auth-config').AppClientBranding;
   }) {
     return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
       method: 'PATCH',

@@ -1,3 +1,11 @@
+export interface AppClientBranding {
+  loginPageLogo?: string;
+  loginPageHeaderText?: string;
+  loginPageSubtitle?: string;
+  primaryColor?: string;
+  useGradient?: boolean;
+}
+
 export interface AuthConfig {
   id: string;
   name: string;
@@ -37,6 +45,7 @@ export interface AppClient {
   updated_at: string;
   providers_count?: number;
   verified?: boolean;
+  branding?: AppClientBranding;
 }
 
 export interface SocialProvider {
@@ -72,6 +81,7 @@ export interface CreateAppClientRequest {
   authorizedCallbackUrls?: string[];
   signoutUris?: string[];
   scopes?: string[];
+  branding?: AppClientBranding;
 }
 
 export interface UpdateAppClientRequest {
@@ -83,6 +93,7 @@ export interface UpdateAppClientRequest {
   signoutUris?: string[];
   scopes?: string[];
   verified?: boolean;
+  branding?: AppClientBranding;
 }
 
 export interface CreateProviderRequest {

@@ -108,7 +108,8 @@ function DashboardContent() {
   const handleDeploySuccess = useCallback(async () => {
     await invalidateAndRefetch(teamId);
     setSelectorValue({ type: 'team' });
-  }, [invalidateAndRefetch, teamId]);
+    router.refresh();
+  }, [invalidateAndRefetch, teamId, router]);
 
   const handleCancelProject = useCallback(() => {
     setSelectorValue({ type: 'team' });

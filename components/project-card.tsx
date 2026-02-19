@@ -19,7 +19,8 @@ import { MoreVertical } from 'lucide-react';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AppClient } from '@/types/auth-config';
 import { cn } from '@/lib/utils';
-import { getFirstExternalCallbackUrl, buildAppLoginAuthorizeUrl, addPkceToAuthorizeUrl } from '@/lib/build-app-login-url';
+import { getFirstExternalCallbackUrl, buildAppLoginAuthorizeUrl } from '@/lib/build-app-login-url';
+import { addPkceToAuthorizeUrl } from '@/lib/add-pkce-to-url';
 
 interface ProjectCardProps {
   project: Project;
@@ -163,39 +164,41 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
             </CardDescription>
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {onUpdateConfig && (
-                <DropdownMenuItem onClick={() => onUpdateConfig(project)}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Update Config
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onClick={() => handleOpenPortal()}>
-                <ExternalLink className="mr-2 h-4 w-4" />
-                Open Portal
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {onDelete && (
-                <DropdownMenuItem
-                  onClick={() => onDelete(project)}
-                  className="text-red-600 focus:text-red-600"
+          <div onClick={(e) => e.stopPropagation()} className="relative">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Project
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                {onUpdateConfig && (
+                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onUpdateConfig(project); }}>
+                    <Settings className="mr-2 h-4 w-4" />
+                    Update Config
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenPortal(); }}>
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Open Portal
                 </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuSeparator />
+                {onDelete && (
+                  <DropdownMenuItem
+                    onClick={(e) => { e.stopPropagation(); onDelete(project); }}
+                    className="text-red-600 focus:text-red-600"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete Project
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </CardHeader>
 

@@ -58,43 +58,43 @@ export function DashboardShell({
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
       {/* Sticky header: logo + nav */}
       <div className="sticky top-0 z-50 bg-white/95 dark:bg-gray-950/95 backdrop-blur-sm border-b">
-        {/* Logo header - avatar aligned with APIBlaze v3.0 */}
+        {/* Header: [APIblaze icon + name] [project selector ▾] ———————— [avatar] */}
         <header className="w-full">
-          <div className="w-full px-4 py-4 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
-                <Zap className="w-6 h-6 text-white" />
+          <div className="w-full px-4 py-3 flex items-center gap-4">
+            <Link
+              href="/dashboard"
+              onClick={() => onSelectorChange({ type: 'team' })}
+              className="flex items-center gap-2 shrink-0 hover:opacity-90 transition-opacity"
+            >
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center shrink-0">
+                <Zap className="w-4 h-4 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-bold">APIBlaze v3.0</h1>
-                <p className="text-xs text-muted-foreground">Host secure serverless APIs in seconds</p>
-              </div>
-            </div>
+              <span className="text-base font-semibold tracking-tight">APIblaze</span>
+            </Link>
+            {showNavAndSubmenu && (
+              <UnifiedNav
+                selectorValue={selectorValue}
+                onSelectorChange={onSelectorChange}
+                githubHandle={githubHandle}
+                teamId={teamId}
+                userId={userId}
+                authConfigId={authConfigsSubmenu?.authConfigId ?? undefined}
+                clientId={authConfigsSubmenu?.clientId ?? undefined}
+                providerId={authConfigsSubmenu?.providerId ?? undefined}
+                showProjectsSection={!isAuthConfigs}
+                showAuthConfigsSection={isAuthConfigs}
+                className="min-w-[180px] shrink-0"
+              />
+            )}
+            <div className="flex-1 min-w-0" />
             <UserMenu />
           </div>
         </header>
 
-        {/* Nav + Submenu block - collated together (below logo). Hidden in zero state (no projects). */}
+        {/* Submenu block - below logo. Hidden in zero state (no projects). */}
         {showNavAndSubmenu && (
         <div className="w-full border-t">
-          <div className="w-full px-4 pt-3 pb-2 flex items-center gap-3 flex-wrap">
-            {/* Unified nav: Team | Projects | Auth Configs - two distinct dimensions, one dropdown */}
-            <UnifiedNav
-              selectorValue={selectorValue}
-              onSelectorChange={onSelectorChange}
-              githubHandle={githubHandle}
-              teamId={teamId}
-              userId={userId}
-              authConfigId={authConfigsSubmenu?.authConfigId ?? undefined}
-              clientId={authConfigsSubmenu?.clientId ?? undefined}
-              providerId={authConfigsSubmenu?.providerId ?? undefined}
-              showProjectsSection={!isAuthConfigs}
-              showAuthConfigsSection={isAuthConfigs}
-              className="min-w-[220px]"
-            />
-          </div>
-
-          {/* Sub-menu bar - directly below nav, no gap */}
+          {/* Sub-menu bar - directly below header */}
           {showTeamSubMenu && (
       <nav className="w-full bg-white dark:bg-gray-950 px-4 pt-0">
         <div className="w-full">

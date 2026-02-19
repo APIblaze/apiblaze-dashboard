@@ -276,17 +276,7 @@ export function UnifiedNav({
           {/* Projects section - only when Projects submenu is highlighted */}
           {showProjectsSection && (
             <div className="flex-1 min-w-0 flex flex-col">
-              <button
-                type="button"
-                onClick={() => {
-                  handleProjectSelect({ type: 'team' });
-                  setOpen(false);
-                }}
-                className="px-3 py-2 font-medium text-sm text-left hover:bg-accent rounded-t-md transition-colors flex items-center gap-2 w-full"
-              >
-                {projectsHeaderLabel}
-              </button>
-              <div className="border-b px-2 pb-2">
+              <div className="border-b px-2 py-2">
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -299,6 +289,20 @@ export function UnifiedNav({
                 </div>
               </div>
               <div className="overflow-y-auto max-h-[200px] py-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleProjectSelect({ type: 'team' });
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    'w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-accent rounded-sm font-medium',
+                    selectorValue.type === 'team' && !isAuthConfigs && 'bg-accent'
+                  )}
+                >
+                  <FolderCog className="h-4 w-4 text-muted-foreground shrink-0" />
+                  {projectsHeaderLabel}
+                </button>
                 {isBootstrapping && projects.length === 0 ? (
                   <div className="px-3 py-4 text-sm text-muted-foreground text-center">Loading...</div>
                 ) : filteredProjects.length === 0 ? (

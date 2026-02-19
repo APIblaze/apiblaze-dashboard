@@ -14,6 +14,7 @@ import { GitHubAppInstallModal } from './github-app-install-modal';
 import { fetchGitHubAPI } from '@/lib/github-api';
 import { api } from '@/lib/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { DeleteProjectConfirmDialog } from '@/components/delete-project-confirm-dialog';
 
 const REDEPLOY_TOOLTIP = "Project name and API version cannot be changed without a full redeploy. Use 'Delete and Redeploy' in the Danger Zone to change these.";
 
@@ -24,8 +25,8 @@ interface GeneralSectionProps {
   preloadedGitHubRepos?: Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>;
   /** Called when project name check completes. blockDeploy=true disables deploy; message is shown under the field. */
   onProjectNameCheckResult?: (blockDeploy: boolean, message?: string) => void;
-  /** When editing an existing project, pass its project_id and api_version so "already exists" for this project is treated as valid. */
-  editingProject?: { project_id: string; api_version: string } | null;
+  /** When editing an existing project, pass its project_id, api_version, and display_name for "already exists" check and delete confirmation. */
+  editingProject?: { project_id: string; api_version: string; display_name?: string } | null;
   /** Danger Zone: called when user clicks Delete and Redeploy (edit mode only) */
   onDeleteAndRedeploy?: () => void;
   /** Danger Zone: called when user clicks Delete (edit mode only) */
@@ -596,6 +597,7 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
         <DangerZone
           onDeleteAndRedeploy={onDeleteAndRedeploy}
           onDelete={onDelete}
+          projectDisplayName={editingProject.display_name ?? config.projectName ?? editingProject.project_id}
           isDeploying={isDeploying}
           isDeleting={isDeleting}
         />
@@ -607,16 +609,28 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
 function DangerZone({
   onDeleteAndRedeploy,
   onDelete,
+  projectDisplayName,
   isDeploying,
   isDeleting,
 }: {
   onDeleteAndRedeploy?: () => void;
   onDelete?: () => void;
+  projectDisplayName: string;
   isDeploying?: boolean;
   isDeleting?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const busy = isDeploying || isDeleting;
+
+  const handleDeleteClick = () => {
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    await onDelete?.();
+    setDeleteConfirmOpen(false);
+  };
 
   return (
     <div>
@@ -653,7 +667,7 @@ function DangerZone({
           {onDelete && (
             <Button
               variant="destructive"
-              onClick={onDelete}
+              onClick={handleDeleteClick}
               disabled={busy}
             >
               {isDeleting ? (
@@ -668,6 +682,13 @@ function DangerZone({
           )}
         </div>
       )}
+      <DeleteProjectConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        projectDisplayName={projectDisplayName}
+        onConfirm={handleDeleteConfirm}
+        isDeleting={isDeleting}
+      />
     </div>
   );
 }

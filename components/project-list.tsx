@@ -1,20 +1,14 @@
 'use client';
 
 import { useCallback, useState, useImperativeHandle, forwardRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { Project } from '@/types/project';
 import { ProjectCard } from '@/components/project-card';
 import { deleteProject } from '@/lib/api/projects';
 import { Button } from '@/components/ui/button';
 import { Loader2, Plus, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { DeleteProjectConfirmDialog } from '@/components/delete-project-confirm-dialog';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
 
 interface ProjectListProps {
@@ -31,6 +25,7 @@ export interface ProjectListRef {
 
 export const ProjectList = forwardRef<ProjectListRef, ProjectListProps>(
   ({ teamId, onUpdateConfig, onDelete: onDeleteCallback, onRefresh, onNewProject }, ref) => {
+    const router = useRouter();
     const projects = useDashboardCacheStore((s) => s.projects);
     const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
     const error = useDashboardCacheStore((s) => s.error);
@@ -84,6 +79,7 @@ export const ProjectList = forwardRef<ProjectListRef, ProjectListProps>(
         setDeleting(true);
         await deleteProject(projectToDelete.project_id, projectToDelete.api_version);
         await invalidateAndRefetch(teamId);
+        router.refresh();
         toast({
           title: 'Project deleted',
           description: `${projectToDelete.display_name} has been removed.`,
@@ -161,35 +157,13 @@ export const ProjectList = forwardRef<ProjectListRef, ProjectListProps>(
           </div>
         </div>
 
-        <Dialog open={deleteDialogOpen} onOpenChange={handleDialogOpenChange}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Delete project?</DialogTitle>
-              <DialogDescription>
-                This action cannot be undone.{' '}
-                {projectToDelete
-                  ? `${projectToDelete.display_name} (${projectToDelete.project_id})`
-                  : 'This project'}{' '}
-                will be removed.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={closeDeleteDialog} disabled={deleting}>
-                Cancel
-              </Button>
-              <Button variant="destructive" onClick={handleDeleteConfirm} disabled={deleting}>
-                {deleting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Deleting…
-                  </>
-                ) : (
-                  'Delete Project'
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <DeleteProjectConfirmDialog
+          open={deleteDialogOpen}
+          onOpenChange={handleDialogOpenChange}
+          projectDisplayName={projectToDelete?.display_name ?? ''}
+          onConfirm={handleDeleteConfirm}
+          isDeleting={deleting}
+        />
       </>
     );
   }

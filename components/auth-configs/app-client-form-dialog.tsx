@@ -12,11 +12,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Loader2, Plus, X, Star, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Plus, X, Star, ChevronDown, ChevronUp, Check } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
-import type { AppClient, CreateAppClientRequest } from '@/types/auth-config';
+import type { AppClient, AppClientBranding, CreateAppClientRequest } from '@/types/auth-config';
+
+const PRESET_COLORS = [
+  '#101727', '#FFFFFF', '#F3F4F6', '#E5E7EB', '#D1D5DB', '#9CA3AF', '#6B7280',
+  '#2563eb', '#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe',
+  '#059669', '#047857', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0',
+  '#0891b2', '#0e7490', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc',
+  '#7c3aed', '#6d28d9', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe',
+  '#db2777', '#be185d', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8',
+];
 
 type CreateAppClientResponse = AppClient & {
   clientSecret?: string;
@@ -57,6 +68,16 @@ export function AppClientFormDialog({
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [loginPageLogo, setLoginPageLogo] = useState('');
+  const [loginPageHeaderText, setLoginPageHeaderText] = useState('');
+  const [loginPageSubtitle, setLoginPageSubtitle] = useState('');
+  const [primaryColor, setPrimaryColor] = useState('#101727');
+  const [useGradient, setUseGradient] = useState(false);
+  const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) setColorPopoverOpen(false);
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -69,6 +90,12 @@ export function AppClientFormDialog({
         setSignoutUris(appClient.signoutUris ?? []);
         setScopes(appClient.scopes ?? ['email', 'openid', 'profile']);
         setClientSecret(null);
+        const b = appClient.branding;
+        setLoginPageLogo(b?.loginPageLogo ?? '');
+        setLoginPageHeaderText(b?.loginPageHeaderText ?? '');
+        setLoginPageSubtitle(b?.loginPageSubtitle ?? '');
+        setPrimaryColor(b?.primaryColor ?? '#101727');
+        setUseGradient(b?.useGradient ?? false);
       } else {
         setName('');
         setProjectName(initialProjectName ?? '');
@@ -80,6 +107,11 @@ export function AppClientFormDialog({
         setSignoutUris([]);
         setScopes(['email', 'openid', 'profile']);
         setClientSecret(null);
+        setLoginPageLogo('');
+        setLoginPageHeaderText('');
+        setLoginPageSubtitle('');
+        setPrimaryColor('#101727');
+        setUseGradient(false);
       }
     }
   }, [open, appClient, initialProjectName, initialApiVersion]);
@@ -88,12 +120,25 @@ export function AppClientFormDialog({
     try {
       const urlObj = new URL(url);
       if (urlObj.protocol !== 'https:') {
+        if (urlObj.protocol === 'http:' && urlObj.hostname.toLowerCase() === 'localhost') {
+          return { valid: true };
+        }
         return { valid: false, error: 'URL must use HTTPS protocol' };
       }
       return { valid: true };
     } catch {
       return { valid: false, error: 'Invalid URL format' };
     }
+  };
+
+  const buildBrandingPayload = (): AppClientBranding | undefined => {
+    const b: AppClientBranding = {};
+    if (loginPageLogo.trim()) b.loginPageLogo = loginPageLogo.trim();
+    if (loginPageHeaderText.trim()) b.loginPageHeaderText = loginPageHeaderText.trim();
+    if (loginPageSubtitle.trim()) b.loginPageSubtitle = loginPageSubtitle.trim();
+    if (primaryColor && primaryColor !== '#101727') b.primaryColor = primaryColor;
+    if (useGradient) b.useGradient = true;
+    return Object.keys(b).length > 0 ? b : undefined;
   };
 
   const addAuthorizedCallbackUrl = () => {
@@ -150,6 +195,18 @@ export function AppClientFormDialog({
       return;
     }
 
+    if (loginPageLogo.trim()) {
+      const logoValidation = validateHttpsUrl(loginPageLogo);
+      if (!logoValidation.valid) {
+        toast({
+          title: 'Validation Error',
+          description: logoValidation.error ?? 'Invalid logo URL',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
     if (!appClient && (!projectName.trim() || !apiVersion.trim())) {
       toast({
         title: 'Validation Error',
@@ -171,6 +228,7 @@ export function AppClientFormDialog({
           authorizedCallbackUrls,
           signoutUris,
           scopes,
+          branding: buildBrandingPayload(),
         });
         toast({
           title: 'Success',
@@ -187,6 +245,7 @@ export function AppClientFormDialog({
           authorizedCallbackUrls,
           signoutUris,
           scopes,
+          branding: buildBrandingPayload(),
         };
         const result = await api.createAppClient(authConfigId, createData) as CreateAppClientResponse;
         if (result.clientSecret) {
@@ -251,7 +310,7 @@ export function AppClientFormDialog({
                   <Input
                     value={clientSecret}
                     readOnly
-                    className="font-mono text-sm"
+                    className="font-mono text-sm bg-white"
                   />
                   <Button
                     type="button"
@@ -295,6 +354,7 @@ export function AppClientFormDialog({
                     onChange={(e) => setName(e.target.value)}
                     placeholder="My App Client"
                     disabled={submitting}
+                    className="bg-white"
                   />
                 </div>
 
@@ -308,6 +368,7 @@ export function AppClientFormDialog({
                         onChange={(e) => setProjectName(e.target.value)}
                         placeholder="my-project"
                         disabled={submitting}
+                        className="bg-white"
                       />
                     </div>
                     <div className="space-y-2">
@@ -318,6 +379,7 @@ export function AppClientFormDialog({
                         onChange={(e) => setApiVersion(e.target.value)}
                         placeholder="1.0.0"
                         disabled={submitting}
+                        className="bg-white"
                       />
                     </div>
                   </div>
@@ -360,6 +422,7 @@ export function AppClientFormDialog({
                             onChange={(e) => setNewScope(e.target.value)}
                             placeholder="Add custom scope"
                             disabled={submitting}
+                            className="bg-white"
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
                                 e.preventDefault();
@@ -388,6 +451,103 @@ export function AppClientFormDialog({
                           </Button>
                         </div>
                       </div>
+                      <div className="space-y-2 pt-2 border-t border-border">
+                        <Label className="text-sm font-medium">Login Page Branding</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Customize the /authorize login page for this app client.
+                        </p>
+                        <div className="space-y-3">
+                          <div className="space-y-1">
+                            <Label htmlFor="loginPageLogo" className="text-xs">Logo URL</Label>
+                            <Input
+                              id="loginPageLogo"
+                              value={loginPageLogo}
+                              onChange={(e) => setLoginPageLogo(e.target.value)}
+                              placeholder="https://example.com/logo.png"
+                              disabled={submitting}
+                              className="font-mono text-sm bg-white"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="loginPageHeaderText" className="text-xs">Header Text</Label>
+                            <Input
+                              id="loginPageHeaderText"
+                              value={loginPageHeaderText}
+                              onChange={(e) => setLoginPageHeaderText(e.target.value)}
+                              placeholder="Login into your App"
+                              disabled={submitting}
+                              className="bg-white"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="loginPageSubtitle" className="text-xs">Subtitle</Label>
+                            <Input
+                              id="loginPageSubtitle"
+                              value={loginPageSubtitle}
+                              onChange={(e) => setLoginPageSubtitle(e.target.value)}
+                              placeholder="Get started now"
+                              disabled={submitting}
+                              className="bg-white"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-3">
+                            <div className="flex items-center gap-2">
+                              <Label className="text-xs shrink-0">Primary Color</Label>
+                              <Popover open={colorPopoverOpen} onOpenChange={setColorPopoverOpen}>
+                                <PopoverTrigger asChild>
+                                  <button
+                                    type="button"
+                                    disabled={submitting}
+                                    className="flex items-center gap-1.5 rounded-md border-2 border-border/60 px-2 py-1.5 hover:border-muted-foreground/50 hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                                  >
+                                    <span
+                                      className="h-6 w-6 rounded border border-border/60 shrink-0"
+                                      style={{ backgroundColor: primaryColor || '#101727' }}
+                                    />
+                                    <span className="text-xs text-muted-foreground">{primaryColor || '#101727'}</span>
+                                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-4" align="start">
+                                  <p className="text-xs font-medium mb-3 text-muted-foreground">Choose a color</p>
+                                  <div className="grid grid-cols-6 gap-1.5 mb-4">
+                                    {PRESET_COLORS.map((color) => (
+                                      <button
+                                        key={color}
+                                        type="button"
+                                        onClick={() => {
+                                          setPrimaryColor(color);
+                                        }}
+                                        disabled={submitting}
+                                        className={`h-7 w-7 rounded-md border-2 flex items-center justify-center transition-all hover:scale-110 disabled:pointer-events-none ${
+                                          primaryColor === color
+                                            ? 'border-foreground ring-2 ring-offset-1 ring-offset-background'
+                                            : 'border-transparent hover:border-muted-foreground/50'
+                                        }`}
+                                        style={{ backgroundColor: color }}
+                                        title={color}
+                                      >
+                                        {primaryColor === color && (
+                                          <Check className={`h-3.5 w-3.5 ${['#FFFFFF', '#F3F4F6', '#E5E7EB', '#D1D5DB', '#9CA3AF', '#bfdbfe', '#a7f3d0', '#a5f3fc', '#ddd6fe', '#fbcfe8'].includes(color) ? 'text-gray-800' : 'text-white'}`} />
+                                        )}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <div className="flex items-center justify-between pt-3 border-t border-border/60">
+                                    <Label htmlFor="useGradient" className="text-xs font-medium cursor-pointer">Use gradient</Label>
+                                    <Switch
+                                      id="useGradient"
+                                      checked={useGradient}
+                                      onCheckedChange={setUseGradient}
+                                      disabled={submitting}
+                                    />
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                       <div className="grid grid-cols-3 gap-4">
                         <div className="space-y-2">
                           <Label htmlFor="refreshTokenExpiry">Refresh Token Expiry (seconds)</Label>
@@ -397,6 +557,7 @@ export function AppClientFormDialog({
                             value={refreshTokenExpiry}
                             onChange={(e) => setRefreshTokenExpiry(Number(e.target.value))}
                             disabled={submitting}
+                            className="bg-white"
                           />
                         </div>
                         <div className="space-y-2">
@@ -407,6 +568,7 @@ export function AppClientFormDialog({
                             value={idTokenExpiry}
                             onChange={(e) => setIdTokenExpiry(Number(e.target.value))}
                             disabled={submitting}
+                            className="bg-white"
                           />
                         </div>
                         <div className="space-y-2">
@@ -417,6 +579,7 @@ export function AppClientFormDialog({
                             value={accessTokenExpiry}
                             onChange={(e) => setAccessTokenExpiry(Number(e.target.value))}
                             disabled={submitting}
+                            className="bg-white"
                           />
                         </div>
                       </div>
@@ -438,6 +601,7 @@ export function AppClientFormDialog({
                       onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)}
                       placeholder="https://example.com/callback"
                       disabled={submitting}
+                      className="bg-white"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -485,6 +649,7 @@ export function AppClientFormDialog({
                       onChange={(e) => setNewSignoutUri(e.target.value)}
                       placeholder="https://example.com/signout"
                       disabled={submitting}
+                      className="bg-white"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();

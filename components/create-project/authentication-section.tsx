@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AlertCircle, Plus, X, Users, Key, Copy, Check, Search, ChevronDown, Star, ExternalLink, Loader2, Pencil, HelpCircle } from 'lucide-react';
 import { ProjectConfig, SocialProvider } from './types';
 import { useState, useEffect, useRef, useMemo } from 'react';
@@ -19,7 +20,8 @@ import { updateProjectConfig } from '@/lib/api/projects';
 import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AppClient, AuthConfig, SocialProvider as AuthConfigSocialProvider } from '@/types/auth-config';
 import type { Project } from '@/types/project';
-import { getFirstExternalCallbackUrl, buildAppLoginAuthorizeUrl, addPkceToAuthorizeUrl } from '@/lib/build-app-login-url';
+import { getFirstExternalCallbackUrl, buildAppLoginAuthorizeUrl } from '@/lib/build-app-login-url';
+import { addPkceToAuthorizeUrl } from '@/lib/add-pkce-to-url';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 // API response may have snake_case fields from the database
@@ -53,6 +55,15 @@ const PROVIDER_DOMAINS: Record<SocialProvider, string> = {
   auth0: 'https://YOUR_DOMAIN.auth0.com',
   other: '',
 };
+
+const PRESET_COLORS = [
+  '#101727', '#FFFFFF', '#F3F4F6', '#E5E7EB', '#D1D5DB', '#9CA3AF', '#6B7280',
+  '#2563eb', '#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe',
+  '#059669', '#047857', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0',
+  '#0891b2', '#0e7490', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc',
+  '#7c3aed', '#6d28d9', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe',
+  '#db2777', '#be185d', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8',
+];
 
 /** Default scopes per provider type (e.g. for project create/add provider) */
 const DEFAULT_SCOPES: Record<SocialProvider, string[]> = {
@@ -296,8 +307,7 @@ function EditModeManagementUI({
   }>>({});
   const [newCallbackUrlByClient, setNewCallbackUrlByClient] = useState<Record<string, string>>({});
   const [savingCallbackUrlsForClient, setSavingCallbackUrlsForClient] = useState<string | null>(null);
-  const [editingAppClientId, setEditingAppClientId] = useState<string | null>(null);
-  const [editAppClientForm, setEditAppClientForm] = useState<{
+  type EditAppClientForm = {
     name: string;
     authorizedCallbackUrls: string[];
     newUrl: string;
@@ -308,8 +318,37 @@ function EditModeManagementUI({
     newSignoutUri: string;
     scopes: string[];
     newScope: string;
-  } | null>(null);
-  const [savingAppClientEdit, setSavingAppClientEdit] = useState(false);
+    loginPageLogo: string;
+    loginPageHeaderText: string;
+    loginPageSubtitle: string;
+    primaryColor: string;
+    useGradient: boolean;
+  };
+  const buildFormFromClient = (client: AppClient, details?: AppClientResponse): EditAppClientForm => {
+    const d = details ?? (client as AppClientResponse);
+    const urls = (d?.authorizedCallbackUrls ?? (d as { authorized_callback_urls?: string[] })?.authorized_callback_urls ?? []) as string[];
+    const b = (d as AppClientResponse)?.branding;
+    return {
+      name: client.name,
+      authorizedCallbackUrls: urls,
+      newUrl: '',
+      refreshTokenExpiry: details?.refreshTokenExpiry ?? 2592000,
+      idTokenExpiry: details?.idTokenExpiry ?? 3600,
+      accessTokenExpiry: details?.accessTokenExpiry ?? 3600,
+      signoutUris: (details?.signoutUris ?? details?.signout_uris ?? []) as string[],
+      newSignoutUri: '',
+      scopes: (details?.scopes ?? ['email', 'openid', 'profile']) as string[],
+      newScope: '',
+      loginPageLogo: b?.loginPageLogo ?? '',
+      loginPageHeaderText: b?.loginPageHeaderText ?? '',
+      loginPageSubtitle: b?.loginPageSubtitle ?? '',
+      primaryColor: b?.primaryColor ?? '#101727',
+      useGradient: b?.useGradient ?? false,
+    };
+  };
+  const [editAppClientForms, setEditAppClientForms] = useState<Record<string, EditAppClientForm>>({});
+  const [savingAppClientId, setSavingAppClientId] = useState<string | null>(null);
+  const [colorPopoverOpenClientId, setColorPopoverOpenClientId] = useState<string | null>(null);
   const [appLoginUrlWithPkce, setAppLoginUrlWithPkce] = useState<Record<string, { type: string; url: string }[]>>({});
   const [editingProviderKey, setEditingProviderKey] = useState<string | null>(null);
   const [editProviderForm, setEditProviderForm] = useState<{
@@ -468,6 +507,34 @@ function EditModeManagementUI({
     setAppClientDetails(next);
     setExpiryValues(prev => ({ ...prev, ...nextExpiry }));
   }, [currentAuthConfigId, appClients, getAppClient]);
+
+  // Initialize and sync edit forms from app client details (populate when API data arrives)
+  useEffect(() => {
+    setEditAppClientForms(prev => {
+      let changed = false;
+      const merged = { ...prev };
+      for (const client of appClients) {
+        const details = appClientDetails[client.id] as AppClientResponse | undefined;
+        const built = buildFormFromClient(client, details);
+        if (!(client.id in merged)) {
+          merged[client.id] = built;
+          changed = true;
+        } else if (details) {
+          const current = merged[client.id];
+          const needsPopulate =
+            (current.authorizedCallbackUrls.length === 0 && built.authorizedCallbackUrls.length > 0) ||
+            (!current.loginPageLogo && built.loginPageLogo) ||
+            (!current.loginPageHeaderText && built.loginPageHeaderText) ||
+            (!current.loginPageSubtitle && built.loginPageSubtitle);
+          if (needsPopulate) {
+            merged[client.id] = built;
+            changed = true;
+          }
+        }
+      }
+      return changed ? merged : prev;
+    });
+  }, [appClients, appClientDetails]);
 
   const revealClientSecret = async (authConfigId: string, clientId: string) => {
     setLoadingSecret(clientId);
@@ -683,55 +750,64 @@ function EditModeManagementUI({
     }
   };
 
-  const startEditAppClient = (client: AppClient) => {
-    const details = appClientDetails[client.id] as AppClientResponse | undefined;
-    const urls = (details?.authorizedCallbackUrls ?? details?.authorized_callback_urls ?? []) as string[];
-    setEditingAppClientId(client.id);
-    setEditAppClientForm({
-      name: client.name,
-      authorizedCallbackUrls: urls,
-      newUrl: '',
-      refreshTokenExpiry: details?.refreshTokenExpiry ?? 2592000,
-      idTokenExpiry: details?.idTokenExpiry ?? 3600,
-      accessTokenExpiry: details?.accessTokenExpiry ?? 3600,
-      signoutUris: (details?.signoutUris ?? details?.signout_uris ?? []) as string[],
-      newSignoutUri: '',
-      scopes: (details?.scopes ?? ['email', 'openid', 'profile']) as string[],
-      newScope: '',
-    });
-  };
-
-  const saveAppClientEdit = async () => {
-    if (!currentAuthConfigId || !editingAppClientId || !editAppClientForm) return;
-    if (!editAppClientForm.name.trim()) {
+  const saveAppClientEdit = async (clientId: string) => {
+    const form = editAppClientForms[clientId];
+    if (!currentAuthConfigId || !form) return;
+    if (!form.name.trim()) {
       alert('Name is required');
       return;
     }
-    setSavingAppClientEdit(true);
+    setSavingAppClientId(clientId);
     try {
-      await api.updateAppClient(currentAuthConfigId, editingAppClientId, {
-        name: editAppClientForm.name.trim(),
-        authorizedCallbackUrls: editAppClientForm.authorizedCallbackUrls,
-        refreshTokenExpiry: editAppClientForm.refreshTokenExpiry,
-        idTokenExpiry: editAppClientForm.idTokenExpiry,
-        accessTokenExpiry: editAppClientForm.accessTokenExpiry,
-        signoutUris: editAppClientForm.signoutUris,
-        scopes: editAppClientForm.scopes,
+      const brandingPayload =
+        form.loginPageLogo.trim() ||
+        form.loginPageHeaderText.trim() ||
+        form.loginPageSubtitle.trim() ||
+        (form.primaryColor && form.primaryColor !== '#101727') ||
+        form.useGradient
+          ? {
+              loginPageLogo: form.loginPageLogo.trim() || undefined,
+              loginPageHeaderText: form.loginPageHeaderText.trim() || undefined,
+              loginPageSubtitle: form.loginPageSubtitle.trim() || undefined,
+              primaryColor: form.primaryColor !== '#101727' ? form.primaryColor : undefined,
+              useGradient: form.useGradient,
+            }
+          : undefined;
+      await api.updateAppClient(currentAuthConfigId, clientId, {
+        name: form.name.trim(),
+        authorizedCallbackUrls: form.authorizedCallbackUrls,
+        refreshTokenExpiry: form.refreshTokenExpiry,
+        idTokenExpiry: form.idTokenExpiry,
+        accessTokenExpiry: form.accessTokenExpiry,
+        signoutUris: form.signoutUris,
+        scopes: form.scopes,
+        branding: brandingPayload,
       });
       await invalidateAndRefetch(teamId);
-      setEditingAppClientId(null);
-      setEditAppClientForm(null);
+      setColorPopoverOpenClientId(null);
     } catch (err) {
       console.error('Error updating app client:', err);
       alert(err instanceof Error ? err.message : 'Failed to update app client');
     } finally {
-      setSavingAppClientEdit(false);
+      setSavingAppClientId(null);
     }
   };
 
-  const cancelAppClientEdit = () => {
-    setEditingAppClientId(null);
-    setEditAppClientForm(null);
+  const cancelAppClientEdit = (clientId: string) => {
+    const client = appClients.find(c => c.id === clientId);
+    const details = appClientDetails[clientId] as AppClientResponse | undefined;
+    if (client) {
+      setEditAppClientForms(prev => ({ ...prev, [clientId]: buildFormFromClient(client, details) }));
+    }
+    setColorPopoverOpenClientId(null);
+  };
+
+  const updateAppClientForm = (clientId: string, updates: Partial<EditAppClientForm>) => {
+    setEditAppClientForms(prev => {
+      const form = prev[clientId];
+      if (!form) return prev;
+      return { ...prev, [clientId]: { ...form, ...updates } };
+    });
   };
 
   const startEditProvider = async (clientId: string, provider: SocialProviderResponse) => {
@@ -934,7 +1010,7 @@ function EditModeManagementUI({
                     value={newAppClientName}
                     onChange={(e) => setNewAppClientName(e.target.value)}
                     placeholder="my-app-client"
-                    className="mt-1"
+                    className="mt-1 bg-white"
                   />
                 </div>
                 <div className="space-y-2">
@@ -944,7 +1020,7 @@ function EditModeManagementUI({
                       value={newAuthorizedCallbackUrl}
                       onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)}
                       placeholder="https://example.com/callback"
-                      className="text-xs"
+                      className="text-xs bg-white"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -1023,38 +1099,185 @@ function EditModeManagementUI({
                   : null;
                 const isLoadingProviders = false;
                 const isShowingAddProvider = showAddProvider[client.id];
+                const form = editAppClientForms[client.id] ?? buildFormFromClient(client, clientDetails);
                 return (
                   <div key={client.id} className="space-y-4">
-                    {/* App Client Card - Inline edit form when editing */}
-                    {editingAppClientId === client.id && editAppClientForm ? (
-                      <Card className="border-2 border-blue-200 bg-blue-50/50">
+                    {/* App Client Card - Always in edit mode */}
+                    <Card className="border-2 border-blue-200 bg-blue-50/50">
                         <CardHeader className="pb-3">
-                          <CardTitle className="text-sm">Edit AppClient</CardTitle>
+                          <div className="flex items-center justify-between">
+                            <CardTitle className="text-sm">Edit AppClient</CardTitle>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteAppClient(client.id)}
+                              className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
+                              title="Delete app client"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </CardHeader>
                         <CardContent className="space-y-3">
+                          {/* JWKS, Portal login & App login links - at top */}
+                          <div className="space-y-3 pb-3 border-b border-blue-100">
+                            {(() => {
+                              const oauthClientId = clientDetails?.client_id || clientDetails?.clientId || client.clientId || client.id;
+                              if (!oauthClientId) return null;
+                              const jwksUrl = `https://auth.apiblaze.com/${oauthClientId}/.well-known/jwks.json`;
+                              return (
+                                <div className="space-y-1">
+                                  <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">JWKS (RS256 Public Key)</div>
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <a
+                                      href={jwksUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-blue-600 hover:text-blue-800 hover:underline truncate min-w-0"
+                                      title={jwksUrl}
+                                    >
+                                      {jwksUrl}
+                                    </a>
+                                    <a href={jwksUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
+                                      <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                            {(() => {
+                              const oauthClientId = clientDetails?.client_id || clientDetails?.clientId;
+                              const projectName = project?.project_id || 'project';
+                              const apiVersion = project?.api_version || '1.0.0';
+                              const isDefault = config.defaultAppClient === client.id;
+                              const portalUrl = isDefault
+                                ? `https://${projectName}.portal.apiblaze.com/${apiVersion}`
+                                : oauthClientId
+                                  ? `https://${projectName}.portal.apiblaze.com/${apiVersion}/login?clientId=${oauthClientId}`
+                                  : `https://${projectName}.portal.apiblaze.com/${apiVersion}/login`;
+                              return (
+                                <div className="space-y-1">
+                                  <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">API Portal login</div>
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <a
+                                      href={portalUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-blue-600 hover:text-blue-800 hover:underline truncate min-w-0"
+                                      title={portalUrl}
+                                    >
+                                      {portalUrl}
+                                    </a>
+                                    <a href={portalUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
+                                      <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                    {!isDefault && project && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={async () => {
+                                          updateConfig({ defaultAppClient: client.id });
+                                          await saveConfigImmediately({ defaultAppClient: client.id });
+                                        }}
+                                        className="h-6 px-2 text-xs shrink-0"
+                                        title="Set as default"
+                                      >
+                                        <Star className="h-3 w-3 mr-1" />
+                                        Default
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                            {(() => {
+                              const urls = getClientCallbackUrls(client.id);
+                              const externalRedirect = getFirstExternalCallbackUrl(urls);
+                              if (!externalRedirect) return null;
+                              const loginUrls = appLoginUrlWithPkce[client.id];
+                              const providerLabel = (t: string) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : '');
+                              return (
+                                <div className="space-y-1">
+                                  <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                                    Your App login URLs
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span className="inline-flex text-muted-foreground hover:text-foreground cursor-help">
+                                          <HelpCircle className="h-3.5 w-3.5 shrink-0" />
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" className="max-w-xs">
+                                        <p>We generated an example code_challenge so this link opens the login page. For your own app you must generate your own code_verifier and code_challenge (PKCE) for each request. You can select which provider to link simply by adding the parameter provider=google or others to the url.</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </div>
+                                  {loginUrls && loginUrls.length > 0 ? (
+                                    <div className="space-y-1.5">
+                                      {loginUrls.map(({ type, url }) => (
+                                        <div key={type || 'default'} className="flex items-center gap-2 min-w-0">
+                                          <a
+                                            href={url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline shrink-0"
+                                          >
+                                            Open login page ({providerLabel(type) || 'default'})
+                                          </a>
+                                          <a href={url} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
+                                            <ExternalLink className="h-3 w-3" />
+                                          </a>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 p-0 shrink-0"
+                                            onClick={async (e) => {
+                                              e.preventDefault();
+                                              await copyToClipboard(url, `appLogin-${client.id}-${type || 'default'}`);
+                                            }}
+                                            title="Copy URL"
+                                          >
+                                            {copiedField === `appLogin-${client.id}-${type || 'default'}` ? (
+                                              <Check className="h-3 w-3 text-green-600" />
+                                            ) : (
+                                              <Copy className="h-3 w-3" />
+                                            )}
+                                          </Button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground italic">Generating…</span>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </div>
                           <div>
                             <Label htmlFor={`editAppClientName-${client.id}`} className="text-xs">Name</Label>
                             <Input
                               id={`editAppClientName-${client.id}`}
-                              value={editAppClientForm.name}
-                              onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, name: e.target.value } : null)}
+                              value={form.name}
+                              onChange={(e) => updateAppClientForm(client.id, { name: e.target.value })}
                               placeholder="my-app-client"
-                              className="mt-1"
+                              className="mt-1 bg-white"
                             />
                           </div>
                           <div className="space-y-2">
                             <Label className="text-xs">Authorized Callback URLs</Label>
                             <div className="flex gap-2">
                               <Input
-                                value={editAppClientForm.newUrl}
-                                onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, newUrl: e.target.value } : null)}
+                                value={form.newUrl}
+                                onChange={(e) => updateAppClientForm(client.id, { newUrl: e.target.value })}
                                 placeholder="https://example.com/callback"
-                                className="text-xs"
+                                className="text-xs bg-white"
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
                                     e.preventDefault();
-                                    if (editAppClientForm.newUrl.trim()) {
-                                      setEditAppClientForm(prev => prev ? { ...prev, authorizedCallbackUrls: [...prev.authorizedCallbackUrls, prev.newUrl.trim()], newUrl: '' } : null);
+                                    if (form.newUrl.trim()) {
+                                      updateAppClientForm(client.id, { authorizedCallbackUrls: [...form.authorizedCallbackUrls, form.newUrl.trim()], newUrl: '' });
                                     }
                                   }
                                 }}
@@ -1063,8 +1286,8 @@ function EditModeManagementUI({
                                 type="button"
                                 size="sm"
                                 onClick={() => {
-                                  if (editAppClientForm.newUrl.trim()) {
-                                    setEditAppClientForm(prev => prev ? { ...prev, authorizedCallbackUrls: [...prev.authorizedCallbackUrls, prev.newUrl.trim()], newUrl: '' } : null);
+                                  if (form.newUrl.trim()) {
+                                    updateAppClientForm(client.id, { authorizedCallbackUrls: [...form.authorizedCallbackUrls, form.newUrl.trim()], newUrl: '' });
                                   }
                                 }}
                               >
@@ -1072,7 +1295,7 @@ function EditModeManagementUI({
                               </Button>
                             </div>
                             <div className="flex flex-wrap gap-2 mt-2">
-                              {editAppClientForm.authorizedCallbackUrls.map((url, index) => (
+                              {form.authorizedCallbackUrls.map((url, index) => (
                                 <div key={url} className="flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded text-xs">
                                   {index === 0 && (
                                     <Badge variant="secondary" className="mr-1 text-xs">
@@ -1086,12 +1309,90 @@ function EditModeManagementUI({
                                     variant="ghost"
                                     size="sm"
                                     className="h-4 w-4 p-0"
-                                    onClick={() => setEditAppClientForm(prev => prev ? { ...prev, authorizedCallbackUrls: prev.authorizedCallbackUrls.filter(u => u !== url) } : null)}
+                                    onClick={() => updateAppClientForm(client.id, { authorizedCallbackUrls: form.authorizedCallbackUrls.filter(u => u !== url) })}
                                   >
                                     <X className="h-2 w-2" />
                                   </Button>
                                 </div>
                               ))}
+                            </div>
+                          </div>
+                          <div className="space-y-2 pt-2 border-t border-blue-100">
+                            <Label className="text-xs">Login Page Branding</Label>
+                            <div className="space-y-2">
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Logo URL</Label>
+                                <Input
+                                  placeholder="https://example.com/logo.png"
+                                  value={form.loginPageLogo}
+                                  onChange={(e) => updateAppClientForm(client.id, { loginPageLogo: e.target.value })}
+                                  className="mt-1 text-xs font-mono bg-white"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Header Text</Label>
+                                <Input
+                                  placeholder="Login into your App"
+                                  value={form.loginPageHeaderText}
+                                  onChange={(e) => updateAppClientForm(client.id, { loginPageHeaderText: e.target.value })}
+                                  className="mt-1 text-xs bg-white"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Subtitle</Label>
+                                <Input
+                                  placeholder="Get started now"
+                                  value={form.loginPageSubtitle}
+                                  onChange={(e) => updateAppClientForm(client.id, { loginPageSubtitle: e.target.value })}
+                                  className="mt-1 text-xs bg-white"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Primary Color</Label>
+                                <Popover open={colorPopoverOpenClientId === client.id} onOpenChange={(open) => setColorPopoverOpenClientId(open ? client.id : null)}>
+                                  <PopoverTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="flex items-center gap-2 rounded-md border border-border/60 px-2.5 py-1.5 mt-1 hover:border-muted-foreground/50 hover:bg-muted/50 transition-colors text-left w-full max-w-[140px]"
+                                    >
+                                      <span
+                                        className="h-6 w-6 rounded border border-border/60 shrink-0"
+                                        style={{ backgroundColor: form.primaryColor || '#101727' }}
+                                      />
+                                      <span className="text-xs text-muted-foreground truncate">{form.primaryColor || '#101727'}</span>
+                                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-auto" />
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-auto p-4" align="start">
+                                    <p className="text-xs font-medium mb-3 text-muted-foreground">Choose color</p>
+                                    <div className="grid grid-cols-6 gap-1.5 mb-4">
+                                      {PRESET_COLORS.map((color) => (
+                                        <button
+                                          key={color}
+                                          type="button"
+                                          onClick={() => updateAppClientForm(client.id, { primaryColor: color })}
+                                          className={`h-7 w-7 rounded-md border-2 flex items-center justify-center transition-all hover:scale-110 ${
+                                            form.primaryColor === color ? 'border-foreground ring-2 ring-offset-1 ring-offset-background' : 'border-transparent hover:border-muted-foreground/50'
+                                          }`}
+                                          style={{ backgroundColor: color }}
+                                          title={color}
+                                        >
+                                          {form.primaryColor === color && (
+                                            <Check className={`h-3.5 w-3.5 ${['#FFFFFF', '#F3F4F6', '#E5E7EB', '#D1D5DB', '#9CA3AF', '#bfdbfe', '#a7f3d0', '#a5f3fc', '#ddd6fe', '#fbcfe8'].includes(color) ? 'text-gray-800' : 'text-white'}`} />
+                                          )}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <div className="flex items-center justify-between pt-3 border-t border-border/60">
+                                      <Label className="text-xs font-medium">Use gradient</Label>
+                                      <Switch
+                                        checked={form.useGradient}
+                                        onCheckedChange={(checked) => updateAppClientForm(client.id, { useGradient: checked })}
+                                      />
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
                             </div>
                           </div>
                           <div className="pt-2 border-t border-blue-100">
@@ -1116,27 +1417,27 @@ function EditModeManagementUI({
                                       <Label className="text-xs text-muted-foreground">Refresh</Label>
                                       <Input
                                         type="number"
-                                        value={editAppClientForm.refreshTokenExpiry}
-                                        onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, refreshTokenExpiry: parseInt(e.target.value, 10) || 2592000 } : null)}
-                                        className="mt-1"
+                                        value={form.refreshTokenExpiry}
+                                        onChange={(e) => updateAppClientForm(client.id, { refreshTokenExpiry: parseInt(e.target.value, 10) || 2592000 })}
+                                        className="mt-1 bg-white"
                                       />
                                     </div>
                                     <div>
                                       <Label className="text-xs text-muted-foreground">ID Token</Label>
                                       <Input
                                         type="number"
-                                        value={editAppClientForm.idTokenExpiry}
-                                        onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, idTokenExpiry: parseInt(e.target.value, 10) || 3600 } : null)}
-                                        className="mt-1"
+                                        value={form.idTokenExpiry}
+                                        onChange={(e) => updateAppClientForm(client.id, { idTokenExpiry: parseInt(e.target.value, 10) || 3600 })}
+                                        className="mt-1 bg-white"
                                       />
                                     </div>
                                     <div>
                                       <Label className="text-xs text-muted-foreground">Access</Label>
                                       <Input
                                         type="number"
-                                        value={editAppClientForm.accessTokenExpiry}
-                                        onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, accessTokenExpiry: parseInt(e.target.value, 10) || 3600 } : null)}
-                                        className="mt-1"
+                                        value={form.accessTokenExpiry}
+                                        onChange={(e) => updateAppClientForm(client.id, { accessTokenExpiry: parseInt(e.target.value, 10) || 3600 })}
+                                        className="mt-1 bg-white"
                                       />
                                     </div>
                                   </div>
@@ -1147,12 +1448,12 @@ function EditModeManagementUI({
                                     Scopes for /authorize and /token; requested scopes must be a subset. Add or remove below.
                                   </p>
                                   <div className="flex flex-wrap gap-1 mb-2">
-                                    {(editAppClientForm.scopes ?? []).map((scope) => (
+                                    {(form.scopes ?? []).map((scope) => (
                                       <Badge key={scope} variant="secondary" className="gap-1 text-xs">
                                         {scope}
                                         <button
                                           type="button"
-                                          onClick={() => setEditAppClientForm(prev => prev ? { ...prev, scopes: (prev.scopes ?? []).filter((s) => s !== scope) } : null)}
+                                          onClick={() => updateAppClientForm(client.id, { scopes: (form.scopes ?? []).filter((s) => s !== scope) })}
                                           className="ml-0.5 rounded hover:bg-muted"
                                         >
                                           <X className="h-3 w-3" />
@@ -1163,15 +1464,15 @@ function EditModeManagementUI({
                                   <div className="flex gap-2">
                                     <Input
                                       placeholder="e.g. openid, email, profile"
-                                      value={editAppClientForm.newScope}
-                                      onChange={(e) => setEditAppClientForm(prev => prev ? { ...prev, newScope: e.target.value } : null)}
-                                      className="text-xs"
+                                      value={form.newScope}
+                                      onChange={(e) => updateAppClientForm(client.id, { newScope: e.target.value })}
+                                      className="text-xs bg-white"
                                       onKeyDown={(e) => {
                                         if (e.key === 'Enter') {
                                           e.preventDefault();
-                                          const s = editAppClientForm.newScope.trim();
-                                          if (s && !(editAppClientForm.scopes ?? []).includes(s)) {
-                                            setEditAppClientForm(prev => prev ? { ...prev, scopes: [...(prev.scopes ?? []), s], newScope: '' } : null);
+                                          const s = form.newScope.trim();
+                                          if (s && !(form.scopes ?? []).includes(s)) {
+                                            updateAppClientForm(client.id, { scopes: [...(form.scopes ?? []), s], newScope: '' });
                                           }
                                         }
                                       }}
@@ -1182,9 +1483,9 @@ function EditModeManagementUI({
                                       variant="outline"
                                       className="h-9"
                                       onClick={() => {
-                                        const s = editAppClientForm.newScope.trim();
-                                        if (s && !(editAppClientForm.scopes ?? []).includes(s)) {
-                                          setEditAppClientForm(prev => prev ? { ...prev, scopes: [...(prev.scopes ?? []), s], newScope: '' } : null);
+                                        const s = form.newScope.trim();
+                                        if (s && !(form.scopes ?? []).includes(s)) {
+                                          updateAppClientForm(client.id, { scopes: [...(form.scopes ?? []), s], newScope: '' });
                                         }
                                       }}
                                     >
@@ -1199,711 +1500,18 @@ function EditModeManagementUI({
                             <Button
                               type="button"
                               size="sm"
-                              onClick={saveAppClientEdit}
-                              disabled={savingAppClientEdit || !editAppClientForm.name.trim()}
+                              onClick={() => saveAppClientEdit(client.id)}
+                              disabled={savingAppClientId === client.id || !form.name.trim()}
                             >
-                              {savingAppClientEdit ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                              {savingAppClientId === client.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                               Save
                             </Button>
-                            <Button type="button" variant="ghost" size="sm" onClick={cancelAppClientEdit}>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => cancelAppClientEdit(client.id)}>
                               Cancel
                             </Button>
                           </div>
                         </CardContent>
                       </Card>
-                    ) : (
-                    <Card className="border-2 border-blue-200 bg-blue-50/30 shadow-sm">
-                      <CardContent className="p-4">
-                        <div className="space-y-4">
-                          {/* Header row: name + badges left, Edit/Delete right */}
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Key className="h-4 w-4 text-blue-600 shrink-0" />
-                              <div className="flex items-center gap-2 flex-wrap min-w-0">
-                                <span className="font-semibold text-base">{client.name}</span>
-                                <div className="flex items-center gap-1.5">
-                                  {config.defaultAppClient === client.id && (
-                                    <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600 text-xs">
-                                      <Star className="h-3 w-3 mr-1" />
-                                      Default
-                                    </Badge>
-                                  )}
-                                  {(clientDetails?.verified ?? client?.verified) === false ? (
-                                    <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-xs">
-                                      Unverified
-                                    </Badge>
-                                  ) : (
-                                    <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
-                                      Verified
-                                    </Badge>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              {(clientDetails?.verified ?? client?.verified) === false && (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={async () => {
-                                    if (!selectedAuthConfigId) return;
-                                    try {
-                                      await api.updateAppClient(selectedAuthConfigId, client.id, { verified: true });
-                                      await invalidateAndRefetch(teamId);
-                                    } catch (err) {
-                                      console.error('Failed to verify app client:', err);
-                                      alert('Failed to verify app client');
-                                    }
-                                  }}
-                                  className="h-8 text-xs"
-                                  title="Mark as verified"
-                                >
-                                  Verify
-                                </Button>
-                              )}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => startEditAppClient(client)}
-                                className="h-8 w-8 p-0 text-muted-foreground hover:text-blue-600 hover:bg-blue-50"
-                                title="Edit app client"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteAppClient(client.id)}
-                                className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                          {/* Login & keys links - below header */}
-                          <div className="space-y-3">
-                                  {(() => {
-                                    const clientId = clientDetails?.client_id || clientDetails?.clientId || client.clientId || client.id;
-                                    if (!clientId) return null;
-                                    const jwksUrl = `https://auth.apiblaze.com/${clientId}/.well-known/jwks.json`;
-                                    return (
-                                      <div className="space-y-1">
-                                        <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">JWKS (RS256 Public Key)</div>
-                                        <div className="flex items-center gap-2 min-w-0">
-                                          <a
-                                            href={jwksUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline truncate min-w-0"
-                                            title={jwksUrl}
-                                          >
-                                            {jwksUrl}
-                                          </a>
-                                          <a href={jwksUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
-                                            <ExternalLink className="h-3 w-3" />
-                                          </a>
-                                        </div>
-                                      </div>
-                                    );
-                                  })()}
-                                  {(() => {
-                                    const clientId = clientDetails?.client_id || clientDetails?.clientId;
-                                    const projectName = project?.project_id || 'project';
-                                    const apiVersion = project?.api_version || '1.0.0';
-                                    const isDefault = config.defaultAppClient === client.id;
-                                    const portalUrl = isDefault
-                                      ? `https://${projectName}.portal.apiblaze.com/${apiVersion}`
-                                      : clientId
-                                        ? `https://${projectName}.portal.apiblaze.com/${apiVersion}/login?clientId=${clientId}`
-                                        : `https://${projectName}.portal.apiblaze.com/${apiVersion}/login`;
-                                    return (
-                                      <div className="space-y-1">
-                                        <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">API Portal login</div>
-                                        <div className="flex items-center gap-2 min-w-0">
-                                          <a
-                                            href={portalUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline truncate min-w-0"
-                                            title={portalUrl}
-                                          >
-                                            {portalUrl}
-                                          </a>
-                                          <a href={portalUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
-                                            <ExternalLink className="h-3 w-3" />
-                                          </a>
-                                          {!isDefault && (
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              size="sm"
-                                              onClick={async () => {
-                                                updateConfig({ defaultAppClient: client.id });
-                                                await saveConfigImmediately({ defaultAppClient: client.id });
-                                              }}
-                                              className="h-6 px-2 text-xs shrink-0"
-                                              title="Set as default"
-                                            >
-                                              <Star className="h-3 w-3 mr-1" />
-                                              Default
-                                            </Button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })()}
-                                  {(() => {
-                                    const urls = getClientCallbackUrls(client.id);
-                                    const externalRedirect = getFirstExternalCallbackUrl(urls);
-                                    if (!externalRedirect) return null;
-                                    const loginUrls = appLoginUrlWithPkce[client.id];
-                                    const providerLabel = (t: string) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : '');
-                                    return (
-                                      <div className="space-y-1">
-                                        <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                                          Your App login URLs
-                                          <Tooltip>
-                                            <TooltipTrigger asChild>
-                                              <span className="inline-flex text-muted-foreground hover:text-foreground cursor-help">
-                                                <HelpCircle className="h-3.5 w-3.5 shrink-0" />
-                                              </span>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="top" className="max-w-xs">
-                                              <p>We generated an example code_challenge so this link opens the login page. For your own app you must generate your own code_verifier and code_challenge (PKCE) for each request. You can select which provider to link simply by adding the parameter provider=google or others to the url.</p>
-                                            </TooltipContent>
-                                          </Tooltip>
-                                        </div>
-                                        {loginUrls && loginUrls.length > 0 ? (
-                                          <div className="space-y-1.5">
-                                            {loginUrls.map(({ type, url }) => (
-                                              <div key={type || 'default'} className="flex items-center gap-2 min-w-0">
-                                                <a
-                                                  href={url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline shrink-0"
-                                                >
-                                                  Open login page ({providerLabel(type) || 'default'})
-                                                </a>
-                                                <a href={url} target="_blank" rel="noopener noreferrer" className="shrink-0 text-blue-600 hover:text-blue-800" title="Open in new tab">
-                                                  <ExternalLink className="h-3 w-3" />
-                                                </a>
-                                                <Button
-                                                  type="button"
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="h-6 w-6 p-0 shrink-0"
-                                                  onClick={async (e) => {
-                                                    e.preventDefault();
-                                                    await copyToClipboard(url, `appLogin-${client.id}-${type || 'default'}`);
-                                                  }}
-                                                  title="Copy URL"
-                                                >
-                                                  {copiedField === `appLogin-${client.id}-${type || 'default'}` ? (
-                                                    <Check className="h-3 w-3 text-green-600" />
-                                                  ) : (
-                                                    <Copy className="h-3 w-3" />
-                                                  )}
-                                                </Button>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        ) : (
-                                          <span className="text-xs text-muted-foreground italic">Generating…</span>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                </div>
-                          {clientDetails && (
-                            <>
-                            <div className="space-y-3 pt-2 border-t border-blue-100">
-                              <div className="space-y-2">
-                                <div>
-                                  <Label className="text-xs font-medium text-muted-foreground">Client ID</Label>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <code className="flex-1 text-xs bg-white px-3 py-2 rounded-md border border-gray-200 font-mono break-all">
-                                      {clientDetails.client_id || clientDetails.clientId || '••••••••'}
-                                    </code>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        e.preventDefault();
-                                        await copyToClipboard(clientDetails.client_id || clientDetails.clientId || '', `clientId-${client.id}`);
-                                      }}
-                                      className="h-8 w-8 p-0 hover:bg-blue-100"
-                                    >
-                                      {copiedField === `clientId-${client.id}` ? (
-                                        <Check className="h-4 w-4 text-green-600" />
-                                      ) : (
-                                        <Copy className="h-4 w-4" />
-                                      )}
-                                    </Button>
-                                  </div>
-                                </div>
-                                <div>
-                                  <Label className="text-xs font-medium text-muted-foreground">Client Secret</Label>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <code className="flex-1 text-xs bg-white px-3 py-2 rounded-md border border-gray-200 font-mono break-all">
-                                      {(() => {
-                                        const secret = revealedSecrets[client.id] || 
-                                                      (clientDetails as AppClientResponse).clientSecret;
-                                        const isRevealed = !!revealedSecrets[client.id];
-                                        if (secret) {
-                                          // When revealed, show full secret; otherwise partial only
-                                          if (isRevealed) {
-                                            return secret;
-                                          }
-                                          if (secret.length <= 8) {
-                                            return secret;
-                                          }
-                                          return `${secret.substring(0, 4)}...${secret.substring(secret.length - 4)}`;
-                                        }
-                                        return '••••••••••••••••';
-                                      })()}
-                                    </code>
-                                    {revealedSecrets[client.id] ? (
-                                      <>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => setRevealedSecrets(prev => {
-                                            const next = { ...prev };
-                                            delete next[client.id];
-                                            return next;
-                                          })}
-                                          className="h-8 px-3 text-xs hover:bg-blue-100"
-                                          title="Hide secret"
-                                        >
-                                          Hide
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={async (e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                            const secret = revealedSecrets[client.id];
-                                            if (secret) {
-                                              await copyToClipboard(secret, `clientSecret-${client.id}`);
-                                            }
-                                          }}
-                                          className="h-8 w-8 p-0 hover:bg-blue-100"
-                                        >
-                                          {copiedField === `clientSecret-${client.id}` ? (
-                                            <Check className="h-4 w-4 text-green-600" />
-                                          ) : (
-                                            <Copy className="h-4 w-4" />
-                                          )}
-                                        </Button>
-                                      </>
-                                    ) : (clientDetails as AppClientResponse).clientSecret ? (
-                                      <>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={async (e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                            const secret = (clientDetails as AppClientResponse).clientSecret;
-                                            if (secret) {
-                                              await copyToClipboard(secret, `clientSecret-${client.id}`);
-                                            }
-                                          }}
-                                          className="h-8 w-8 p-0 hover:bg-blue-100"
-                                        >
-                                          {copiedField === `clientSecret-${client.id}` ? (
-                                            <Check className="h-4 w-4 text-green-600" />
-                                          ) : (
-                                            <Copy className="h-4 w-4" />
-                                          )}
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => {
-                                            if (selectedAuthConfigId) {
-                                              revealClientSecret(selectedAuthConfigId, client.id);
-                                            }
-                                          }}
-                                          className="h-8 px-3 text-xs hover:bg-blue-100"
-                                          disabled={loadingSecret === client.id}
-                                        >
-                                          {loadingSecret === client.id ? '...' : 'Reveal'}
-                                        </Button>
-                                      </>
-                                    ) : (
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          if (selectedAuthConfigId) {
-                                            revealClientSecret(selectedAuthConfigId, client.id);
-                                          }
-                                        }}
-                                        className="h-8 px-3 text-xs hover:bg-blue-100"
-                                        disabled={loadingSecret === client.id}
-                                      >
-                                        {loadingSecret === client.id ? '...' : 'Reveal'}
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
-                                {/* Authorized callback URLs - below Client Secret, before Advanced Settings (editable, same UX as create mode) */}
-                                <div className="space-y-2">
-                                  <Label className="text-xs font-medium text-muted-foreground">Authorized callback URLs</Label>
-                                  <div className="flex gap-2">
-                                    <Input
-                                      value={newCallbackUrlByClient[client.id] ?? ''}
-                                      onChange={(e) => setNewCallbackUrlByClient(prev => ({ ...prev, [client.id]: e.target.value }))}
-                                      placeholder="https://example.com/callback"
-                                      className="text-xs"
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          addCallbackUrlForClient(client.id);
-                                        }
-                                      }}
-                                    />
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => addCallbackUrlForClient(client.id)}
-                                      disabled={savingCallbackUrlsForClient === client.id}
-                                    >
-                                      {savingCallbackUrlsForClient === client.id ? (
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                      ) : (
-                                        <Plus className="h-3 w-3" />
-                                      )}
-                                    </Button>
-                                  </div>
-                                  <div className="flex flex-wrap gap-2 mt-2">
-                                    {getClientCallbackUrls(client.id).length === 0 ? (
-                                      <p className="text-xs text-muted-foreground italic">None configured</p>
-                                    ) : (
-                                      getClientCallbackUrls(client.id).map((url: string, index: number) => (
-                                        <div
-                                          key={url}
-                                          className="flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded text-xs"
-                                        >
-                                          {index === 0 && (
-                                            <Badge variant="secondary" className="mr-1 text-xs">
-                                              <Star className="h-2 w-2 mr-1" />
-                                              Default
-                                            </Badge>
-                                          )}
-                                          <span className="break-all">{url}</span>
-                                          <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-4 w-4 p-0 shrink-0"
-                                            onClick={() => removeCallbackUrlForClient(client.id, url)}
-                                            disabled={savingCallbackUrlsForClient === client.id}
-                                          >
-                                            <X className="h-2 w-2" />
-                                          </Button>
-                                        </div>
-                                      ))
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                              
-                              {/* Advanced Settings - Expiry Configuration */}
-                              <div className="pt-2 border-t border-blue-100">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setShowAdvancedSettings(prev => ({
-                                    ...prev,
-                                    [client.id]: !prev[client.id]
-                                  }))}
-                                  className="w-full justify-between h-8 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-blue-50"
-                                >
-                                  <span className="flex items-center gap-2">
-                                    <ChevronDown className={`h-3 w-3 transition-transform ${showAdvancedSettings[client.id] ? 'rotate-180' : ''}`} />
-                                    Advanced Settings
-                                  </span>
-                                </Button>
-                                
-                                {showAdvancedSettings[client.id] && (
-                                  <div className="mt-3 space-y-4">
-                                    {/* Authorized Scopes (read-only) */}
-                                    <div className="space-y-2">
-                                      <Label className="text-xs font-medium text-muted-foreground">Authorized Scopes</Label>
-                                      {(clientDetails?.scopes ?? client?.scopes ?? []).length > 0 ? (
-                                        <div className="flex flex-wrap gap-1">
-                                          {(clientDetails?.scopes ?? client?.scopes ?? []).map((scope) => (
-                                            <Badge key={scope} variant="secondary" className="text-xs">
-                                              {scope}
-                                            </Badge>
-                                          ))}
-                                        </div>
-                                      ) : (
-                                        <span className="text-xs text-muted-foreground">—</span>
-                                      )}
-                                    </div>
-                                    {/* Access Token Expiry */}
-                                    <div className="space-y-2">
-                                      <Label className="text-xs font-medium">Access Token Expiry</Label>
-                                      <div className="flex items-end gap-2">
-                                        <div className="w-20">
-                                          <Label htmlFor={`accessTokenDays-${client.id}`} className="text-xs text-muted-foreground">Days</Label>
-                                          <Input
-                                            id={`accessTokenDays-${client.id}`}
-                                            type="number"
-                                            value={(() => {
-                                              const seconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
-                                              return secondsToDaysAndMinutes(seconds).days;
-                                            })()}
-                                            onChange={(e) => {
-                                              const days = parseInt(e.target.value) || 0;
-                                              const currentSeconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
-                                              const { minutes } = secondsToDaysAndMinutes(currentSeconds);
-                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
-                                              setExpiryValues(prev => ({
-                                                ...prev,
-                                                [client.id]: {
-                                                  ...(prev[client.id] || {
-                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
-                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
-                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
-                                                  }),
-                                                  accessTokenExpiry: newSeconds,
-                                                }
-                                              }));
-                                            }}
-                                            className="mt-1 text-xs"
-                                            min="0"
-                                          />
-                                        </div>
-                                        <span className="text-xs text-muted-foreground pb-2">and</span>
-                                        <div className="w-20">
-                                          <Label htmlFor={`accessTokenMinutes-${client.id}`} className="text-xs text-muted-foreground">Minutes</Label>
-                                          <Input
-                                            id={`accessTokenMinutes-${client.id}`}
-                                            type="number"
-                                            value={(() => {
-                                              const seconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
-                                              return secondsToDaysAndMinutes(seconds).minutes;
-                                            })()}
-                                            onChange={(e) => {
-                                              const minutes = parseInt(e.target.value) || 0;
-                                              const currentSeconds = expiryValues[client.id]?.accessTokenExpiry || clientDetails?.accessTokenExpiry || 3600;
-                                              const { days } = secondsToDaysAndMinutes(currentSeconds);
-                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
-                                              setExpiryValues(prev => ({
-                                                ...prev,
-                                                [client.id]: {
-                                                  ...(prev[client.id] || {
-                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
-                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
-                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
-                                                  }),
-                                                  accessTokenExpiry: newSeconds,
-                                                }
-                                              }));
-                                            }}
-                                            className="mt-1 text-xs"
-                                            min="0"
-                                          />
-                                        </div>
-                                      </div>
-                                    </div>
-                                    
-                                    {/* Refresh Token Expiry */}
-                                    <div className="space-y-2">
-                                      <Label className="text-xs font-medium">Refresh Token Expiry</Label>
-                                      <div className="flex items-end gap-2">
-                                        <div className="w-20">
-                                          <Label htmlFor={`refreshTokenDays-${client.id}`} className="text-xs text-muted-foreground">Days</Label>
-                                          <Input
-                                            id={`refreshTokenDays-${client.id}`}
-                                            type="number"
-                                            value={(() => {
-                                              const seconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
-                                              return secondsToDaysAndMinutes(seconds).days;
-                                            })()}
-                                            onChange={(e) => {
-                                              const days = parseInt(e.target.value) || 0;
-                                              const currentSeconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
-                                              const { minutes } = secondsToDaysAndMinutes(currentSeconds);
-                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
-                                              setExpiryValues(prev => ({
-                                                ...prev,
-                                                [client.id]: {
-                                                  ...(prev[client.id] || {
-                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
-                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
-                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
-                                                  }),
-                                                  refreshTokenExpiry: newSeconds,
-                                                }
-                                              }));
-                                            }}
-                                            className="mt-1 text-xs"
-                                            min="0"
-                                          />
-                                        </div>
-                                        <span className="text-xs text-muted-foreground pb-2">and</span>
-                                        <div className="w-20">
-                                          <Label htmlFor={`refreshTokenMinutes-${client.id}`} className="text-xs text-muted-foreground">Minutes</Label>
-                                          <Input
-                                            id={`refreshTokenMinutes-${client.id}`}
-                                            type="number"
-                                            value={(() => {
-                                              const seconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
-                                              return secondsToDaysAndMinutes(seconds).minutes;
-                                            })()}
-                                            onChange={(e) => {
-                                              const minutes = parseInt(e.target.value) || 0;
-                                              const currentSeconds = expiryValues[client.id]?.refreshTokenExpiry || clientDetails?.refreshTokenExpiry || 2592000;
-                                              const { days } = secondsToDaysAndMinutes(currentSeconds);
-                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
-                                              setExpiryValues(prev => ({
-                                                ...prev,
-                                                [client.id]: {
-                                                  ...(prev[client.id] || {
-                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
-                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
-                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
-                                                  }),
-                                                  refreshTokenExpiry: newSeconds,
-                                                }
-                                              }));
-                                            }}
-                                            className="mt-1 text-xs"
-                                            min="0"
-                                          />
-                                        </div>
-                                      </div>
-                                    </div>
-                                    
-                                    {/* ID Token Expiry */}
-                                    <div className="space-y-2">
-                                      <Label className="text-xs font-medium">ID Token Expiry</Label>
-                                      <div className="flex items-end gap-2">
-                                        <div className="w-20">
-                                          <Label htmlFor={`idTokenDays-${client.id}`} className="text-xs text-muted-foreground">Days</Label>
-                                          <Input
-                                            id={`idTokenDays-${client.id}`}
-                                            type="number"
-                                            value={(() => {
-                                              const seconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
-                                              return secondsToDaysAndMinutes(seconds).days;
-                                            })()}
-                                            onChange={(e) => {
-                                              const days = parseInt(e.target.value) || 0;
-                                              const currentSeconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
-                                              const { minutes } = secondsToDaysAndMinutes(currentSeconds);
-                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
-                                              setExpiryValues(prev => ({
-                                                ...prev,
-                                                [client.id]: {
-                                                  ...(prev[client.id] || {
-                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
-                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
-                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
-                                                  }),
-                                                  idTokenExpiry: newSeconds,
-                                                }
-                                              }));
-                                            }}
-                                            className="mt-1 text-xs"
-                                            min="0"
-                                          />
-                                        </div>
-                                        <span className="text-xs text-muted-foreground pb-2">and</span>
-                                        <div className="w-20">
-                                          <Label htmlFor={`idTokenMinutes-${client.id}`} className="text-xs text-muted-foreground">Minutes</Label>
-                                          <Input
-                                            id={`idTokenMinutes-${client.id}`}
-                                            type="number"
-                                            value={(() => {
-                                              const seconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
-                                              return secondsToDaysAndMinutes(seconds).minutes;
-                                            })()}
-                                            onChange={(e) => {
-                                              const minutes = parseInt(e.target.value) || 0;
-                                              const currentSeconds = expiryValues[client.id]?.idTokenExpiry || clientDetails?.idTokenExpiry || 3600;
-                                              const { days } = secondsToDaysAndMinutes(currentSeconds);
-                                              const newSeconds = daysAndMinutesToSeconds(days, minutes);
-                                              setExpiryValues(prev => ({
-                                                ...prev,
-                                                [client.id]: {
-                                                  ...(prev[client.id] || {
-                                                    accessTokenExpiry: clientDetails?.accessTokenExpiry || 3600,
-                                                    refreshTokenExpiry: clientDetails?.refreshTokenExpiry || 2592000,
-                                                    idTokenExpiry: clientDetails?.idTokenExpiry || 3600,
-                                                  }),
-                                                  idTokenExpiry: newSeconds,
-                                                }
-                                              }));
-                                            }}
-                                            className="mt-1 text-xs"
-                                            min="0"
-                                          />
-                                        </div>
-                                      </div>
-                                    </div>
-                                    
-                                    <div className="flex gap-2 pt-2">
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        onClick={() => handleUpdateAppClientExpiries(client.id)}
-                                        className="text-xs"
-                                      >
-                                        Save Changes
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          // Reset to original values from clientDetails
-                                          if (clientDetails) {
-                                            setExpiryValues(prev => ({
-                                              ...prev,
-                                              [client.id]: {
-                                                accessTokenExpiry: clientDetails.accessTokenExpiry || 3600,
-                                                refreshTokenExpiry: clientDetails.refreshTokenExpiry || 2592000,
-                                                idTokenExpiry: clientDetails.idTokenExpiry || 3600,
-                                              }
-                                            }));
-                                          }
-                                        }}
-                                        className="text-xs"
-                                      >
-                                        Reset
-                                      </Button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                            </>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                    )}
-                    
                     {/* Providers nested under each app client - Clearly indented with visual connection */}
                     <div className="ml-8 pl-4 border-l-2 border-gray-200 space-y-3">
                       <div className="flex items-center justify-between">
@@ -1980,7 +1588,7 @@ function EditModeManagementUI({
                                     }
                                   }))}
                                   placeholder="https://accounts.google.com"
-                                  className="mt-1"
+                                  className="mt-1 bg-white"
                                 />
                               </div>
                               <div>
@@ -1996,7 +1604,7 @@ function EditModeManagementUI({
                                     }
                                   }))}
                                   placeholder="your-client-id"
-                                  className="mt-1"
+                                  className="mt-1 bg-white"
                                 />
                               </div>
                               <div>
@@ -2013,7 +1621,7 @@ function EditModeManagementUI({
                                     }
                                   }))}
                                   placeholder="your-client-secret"
-                                  className="mt-1"
+                                  className="mt-1 bg-white"
                                 />
                                 {(newProvider[client.id]?.clientSecret?.trim().length ?? 0) > 0 && (newProvider[client.id]?.clientSecret?.trim().length ?? 0) < CLIENT_SECRET_MIN_LENGTH && (
                                   <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
@@ -2052,7 +1660,7 @@ function EditModeManagementUI({
                                     placeholder="Add custom scope"
                                     value={newAuthorizedScopeByClient[client.id] ?? ''}
                                     onChange={(e) => setNewAuthorizedScopeByClient(prev => ({ ...prev, [client.id]: e.target.value }))}
-                                    className="mt-1 text-xs"
+                                    className="mt-1 text-xs bg-white"
                                     onKeyDown={(e) => {
                                       if (e.key === 'Enter') {
                                         e.preventDefault();
@@ -2322,7 +1930,7 @@ function EditModeManagementUI({
                                           value={editProviderForm.domain}
                                           onChange={(e) => setEditProviderForm(prev => prev ? { ...prev, domain: e.target.value } : null)}
                                           placeholder="https://accounts.google.com"
-                                          className="mt-1"
+                                          className="mt-1 bg-white"
                                         />
                                       </div>
                                       <div>
@@ -2331,7 +1939,7 @@ function EditModeManagementUI({
                                           value={editProviderForm.clientId}
                                           onChange={(e) => setEditProviderForm(prev => prev ? { ...prev, clientId: e.target.value } : null)}
                                           placeholder="your-client-id"
-                                          className="mt-1"
+                                          className="mt-1 bg-white"
                                         />
                                       </div>
                                       <div className="space-y-2">
@@ -2355,7 +1963,7 @@ function EditModeManagementUI({
                                             value={newProviderSecretOverride}
                                             onChange={(e) => setNewProviderSecretOverride(e.target.value)}
                                             placeholder="Enter new secret to change"
-                                            className="mt-1"
+                                            className="mt-1 bg-white"
                                           />
                                           {newProviderSecretOverride.trim().length > 0 && newProviderSecretOverride.trim().length < CLIENT_SECRET_MIN_LENGTH && (
                                             <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
@@ -2389,7 +1997,7 @@ function EditModeManagementUI({
                                             placeholder="Add custom scope"
                                             value={editProviderNewScope}
                                             onChange={(e) => setEditProviderNewScope(e.target.value)}
-                                            className="mt-1 text-xs"
+                                            className="mt-1 text-xs bg-white"
                                             onKeyDown={(e) => {
                                               if (e.key === 'Enter') {
                                                 e.preventDefault();
