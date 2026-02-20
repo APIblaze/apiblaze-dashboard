@@ -68,12 +68,12 @@ const PRESET_COLORS = [
 
 /** Default scopes per provider type (e.g. for project create/add provider) */
 const DEFAULT_SCOPES: Record<SocialProvider, string[]> = {
-  google: ['email', 'openid', 'profile'],
+  google: ['email', 'offline_access', 'openid', 'profile'],
   github: ['read:user', 'user:email'],
-  microsoft: ['email', 'openid', 'profile'],
+  microsoft: ['email', 'offline_access', 'openid', 'profile'],
   facebook: ['email', 'public_profile'],
-  auth0: ['openid', 'profile', 'email'],
-  other: ['openid', 'profile'],
+  auth0: ['offline_access', 'openid', 'profile', 'email'],
+  other: ['offline_access', 'openid', 'profile'],
 };
 
 function getDefaultNewProvider(type: SocialProvider = 'google') {
@@ -339,7 +339,7 @@ function EditModeManagementUI({
       accessTokenExpiry: details?.accessTokenExpiry ?? 3600,
       signoutUris: (details?.signoutUris ?? details?.signout_uris ?? []) as string[],
       newSignoutUri: '',
-      scopes: (details?.scopes ?? ['email', 'openid', 'profile']) as string[],
+      scopes: (details?.scopes ?? ['email', 'offline_access', 'openid', 'profile']) as string[],
       newScope: '',
       loginPageLogo: b?.loginPageLogo ?? '',
       loginPageHeaderText: b?.loginPageHeaderText ?? '',
@@ -630,7 +630,7 @@ function EditModeManagementUI({
     try {
       const newClient = await api.createAppClient(selectedAuthConfigId, {
         name: newAppClientName,
-        scopes: ['email', 'openid', 'profile'],
+        scopes: ['email', 'offline_access', 'openid', 'profile'],
         authorizedCallbackUrls: finalCallbackUrls,
         projectName: config.projectName || project?.project_id || 'project',
         apiVersion: config.apiVersion || project?.api_version || '1.0.0',

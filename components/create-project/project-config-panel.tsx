@@ -110,7 +110,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       identityProviderDomain: 'https://accounts.google.com',
       identityProviderClientId: '',
       identityProviderClientSecret: '',
-      scopes: ['email', 'openid', 'profile'], // Google defaults; switching provider in Auth section updates to that provider's defaults
+      scopes: ['email', 'offline_access', 'openid', 'profile'], // Google defaults; switching provider in Auth section updates to that provider's defaults
       tokenType: 'apiblaze',
       targetServerToken: 'apiblaze',
       includeApiblazeAccessTokenHeader: false,

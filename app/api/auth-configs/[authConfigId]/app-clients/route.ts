@@ -80,7 +80,7 @@ export async function POST(
       accessTokenExpiry: body.accessTokenExpiry ?? 3600, // 1 hour
       authorizedCallbackUrls: body.authorizedCallbackUrls ?? [],
       signoutUris: body.signoutUris ?? [],
-      scopes: body.scopes ?? ['email', 'openid', 'profile'],
+      scopes: body.scopes ?? ['email', 'offline_access', 'openid', 'profile'],
     };
     
     const client = createAPIBlazeClient({

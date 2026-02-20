@@ -63,7 +63,7 @@ export function AppClientFormDialog({
   const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
   const [signoutUris, setSignoutUris] = useState<string[]>([]);
   const [newSignoutUri, setNewSignoutUri] = useState('');
-  const [scopes, setScopes] = useState<string[]>(['email', 'openid', 'profile']);
+  const [scopes, setScopes] = useState<string[]>(['email', 'offline_access', 'openid', 'profile']);
   const [newScope, setNewScope] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -88,7 +88,7 @@ export function AppClientFormDialog({
         setAccessTokenExpiry(appClient.accessTokenExpiry ?? 3600);
         setAuthorizedCallbackUrls(appClient.authorizedCallbackUrls ?? []);
         setSignoutUris(appClient.signoutUris ?? []);
-        setScopes(appClient.scopes ?? ['email', 'openid', 'profile']);
+        setScopes(appClient.scopes ?? ['email', 'offline_access', 'openid', 'profile']);
         setClientSecret(null);
         const b = appClient.branding;
         setLoginPageLogo(b?.loginPageLogo ?? '');
@@ -105,7 +105,7 @@ export function AppClientFormDialog({
         setAccessTokenExpiry(3600);
         setAuthorizedCallbackUrls([]);
         setSignoutUris([]);
-        setScopes(['email', 'openid', 'profile']);
+        setScopes(['email', 'offline_access', 'openid', 'profile']);
         setClientSecret(null);
         setLoginPageLogo('');
         setLoginPageHeaderText('');
@@ -399,7 +399,7 @@ export function AppClientFormDialog({
                       <div className="space-y-2">
                         <Label>Authorized Scopes</Label>
                         <p className="text-xs text-muted-foreground">
-                          Default mandatory scopes: email, openid, profile (or provider-specific). Add or remove below.
+                          Default mandatory scopes: email, offline_access, openid, profile (or provider-specific). Add or remove below.
                         </p>
                         <div className="flex flex-wrap gap-1 mb-2">
                           {scopes.map((scope) => (
