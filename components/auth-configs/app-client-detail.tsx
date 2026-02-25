@@ -29,11 +29,12 @@ import {
 interface AppClientDetailProps {
   authConfigId: string;
   clientId: string;
+  teamId?: string;
   onBack: () => void;
   verifyFromUrl?: boolean;
 }
 
-export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl }: AppClientDetailProps) {
+export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verifyFromUrl }: AppClientDetailProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -569,6 +570,7 @@ export function AppClientDetail({ authConfigId, clientId, onBack, verifyFromUrl 
         onSuccess={handleSuccess}
         authConfigId={authConfigId}
         appClient={appClient}
+        teamId={teamId}
       />
 
       {/* Delete Confirmation Dialog */}

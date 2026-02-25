@@ -102,6 +102,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       opaqueTokenParams: '?access_token={token}',
       opaqueTokenBody: 'token={token}',
       useAuthConfig: false,
+      defaultTenant: 'MyDefaultTenant',
       authConfigId: undefined,
       appClientId: undefined,
       defaultAppClient: undefined,
@@ -149,6 +150,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     opaqueTokenParams: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.params as string || '?access_token={token}',
     opaqueTokenBody: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.body as string || 'token={token}',
     useAuthConfig: !!(projectConfig?.auth_config_id as string),
+    defaultTenant: (projectConfig?.default_tenant as string) || 'MyDefaultTenant',
     authConfigId: projectConfig?.auth_config_id as string | undefined,
     appClientId: undefined,
     defaultAppClient: (projectConfig?.default_app_client_id || projectConfig?.defaultAppClient) as string | undefined,
@@ -405,6 +407,7 @@ export function ProjectConfigPanel({
               : [defaultCallbackUrl, ...callbackUrls];
             const appClient = await api.createAppClient(currentAuthConfigId, {
               name: `${config.projectName}-appclient`,
+              tenant: (config.defaultTenant?.trim() || config.projectName || 'default'),
               scopes: config.scopes,
               authorizedCallbackUrls: finalCallbackUrls,
               projectName: config.projectName,

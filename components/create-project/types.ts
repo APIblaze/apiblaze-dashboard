@@ -72,6 +72,8 @@ export interface ProjectConfig {
   includeApiblazeAccessTokenHeader?: boolean;
   includeApiblazeIdTokenHeader?: boolean;
   whoCanRegisterToLogin?: 'anyone' | 'authorized_only';
+  /** Default tenant for app logins when creating the initial app client (bootstrap flow). */
+  defaultTenant?: string;
   // Multiple providers for create mode (when bringOwnProvider is true)
   providers?: Array<{
     type: SocialProvider;

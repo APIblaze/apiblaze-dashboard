@@ -169,6 +169,7 @@ function EditModeManagementUI({
   onProjectUpdate,
   initialAuthConfigId,
   teamId,
+  tenantOptions = [],
 }: { 
   config: ProjectConfig; 
   updateConfig: (updates: Partial<ProjectConfig>) => void; 
@@ -176,6 +177,7 @@ function EditModeManagementUI({
   onProjectUpdate?: (updatedProject: Project) => void;
   initialAuthConfigId?: string;
   teamId?: string;
+  tenantOptions?: string[];
 }) {
   const { toast } = useToast();
   const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
@@ -281,6 +283,7 @@ function EditModeManagementUI({
   const [loadingSecret, setLoadingSecret] = useState<string | null>(null);
   const [showAddAppClient, setShowAddAppClient] = useState(false);
   const [newAppClientName, setNewAppClientName] = useState('');
+  const [newAppClientTenant, setNewAppClientTenant] = useState('');
   const [authorizedCallbackUrls, setAuthorizedCallbackUrls] = useState<string[]>(() => {
     const projectName = config.projectName || project?.project_id || 'project';
     const apiVersion = config.apiVersion || '1.0.0';
@@ -311,6 +314,7 @@ function EditModeManagementUI({
   const [savingCallbackUrlsForClient, setSavingCallbackUrlsForClient] = useState<string | null>(null);
   type EditAppClientForm = {
     name: string;
+    tenant: string;
     authorizedCallbackUrls: string[];
     newUrl: string;
     refreshTokenExpiry: number;
@@ -332,6 +336,7 @@ function EditModeManagementUI({
     const b = (d as AppClientResponse)?.branding;
     return {
       name: client.name,
+      tenant: (client as AppClientResponse).tenant ?? 'default',
       authorizedCallbackUrls: urls,
       newUrl: '',
       refreshTokenExpiry: details?.refreshTokenExpiry ?? 2592000,
@@ -610,7 +615,7 @@ function EditModeManagementUI({
   };
 
   const handleCreateAppClient = async () => {
-    if (!selectedAuthConfigId || !newAppClientName.trim()) return;
+    if (!selectedAuthConfigId || !newAppClientName.trim() || !newAppClientTenant.trim()) return;
     
     // Generate default callback URL from project name
     const projectName = config.projectName || project?.project_id || 'project';
@@ -630,6 +635,7 @@ function EditModeManagementUI({
     try {
       const newClient = await api.createAppClient(selectedAuthConfigId, {
         name: newAppClientName,
+        tenant: newAppClientTenant.trim(),
         scopes: ['email', 'offline_access', 'openid', 'profile'],
         authorizedCallbackUrls: finalCallbackUrls,
         projectName: config.projectName || project?.project_id || 'project',
@@ -646,6 +652,7 @@ function EditModeManagementUI({
         await saveConfigImmediately({ defaultAppClient: clientId });
       }
       setNewAppClientName('');
+      setNewAppClientTenant('');
       setAuthorizedCallbackUrls([]);
       setNewAuthorizedCallbackUrl('');
       setShowAddAppClient(false);
@@ -762,6 +769,10 @@ function EditModeManagementUI({
       alert('Name is required');
       return;
     }
+    if (!form.tenant.trim()) {
+      alert('Tenant is required');
+      return;
+    }
     setSavingAppClientId(clientId);
     try {
       const brandingPayload =
@@ -780,6 +791,7 @@ function EditModeManagementUI({
           : undefined;
       await api.updateAppClient(currentAuthConfigId, clientId, {
         name: form.name.trim(),
+        tenant: form.tenant.trim(),
         authorizedCallbackUrls: form.authorizedCallbackUrls,
         refreshTokenExpiry: form.refreshTokenExpiry,
         idTokenExpiry: form.idTokenExpiry,
@@ -1013,7 +1025,11 @@ function EditModeManagementUI({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setShowAddAppClient(!showAddAppClient)}
+              onClick={() => {
+                const next = !showAddAppClient;
+                setShowAddAppClient(next);
+                if (next) setNewAppClientTenant(config.defaultTenant?.trim() || 'MyDefaultTenant');
+              }}
             >
               <Plus className="h-4 w-4 mr-2" />
               Add AppClient
@@ -1035,6 +1051,45 @@ function EditModeManagementUI({
                     placeholder="my-app-client"
                     className="mt-1 bg-white"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium">Who is this login page for?</Label>
+                  <p className="text-xs text-muted-foreground">
+                    The data of users who login under this tenant will be separate from the data of other users.
+                  </p>
+                  {tenantOptions.length > 0 ? (
+                    <div className="space-y-2">
+                      <Select
+                        value={tenantOptions.includes(newAppClientTenant) ? newAppClientTenant : '__new__'}
+                        onValueChange={(v) => setNewAppClientTenant(v === '__new__' ? '' : v)}
+                      >
+                        <SelectTrigger className="w-full max-w-[200px] h-9 bg-white">
+                          <SelectValue placeholder="Choose tenant" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {tenantOptions.map((t) => (
+                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                          ))}
+                          <SelectItem value="__new__">+ Create new tenant</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {!tenantOptions.includes(newAppClientTenant) && (
+                        <Input
+                          placeholder="Enter new tenant name"
+                          value={newAppClientTenant}
+                          onChange={(e) => setNewAppClientTenant(e.target.value)}
+                          className="bg-white max-w-[200px]"
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <Input
+                      placeholder="Tenant name"
+                      value={newAppClientTenant || 'MyDefaultTenant'}
+                      onChange={(e) => setNewAppClientTenant(e.target.value || 'MyDefaultTenant')}
+                      className="bg-white"
+                    />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs">Authorized Callback URLs</Label>
@@ -1086,7 +1141,7 @@ function EditModeManagementUI({
                     type="button"
                     size="sm"
                     onClick={handleCreateAppClient}
-                    disabled={!newAppClientName.trim()}
+                    disabled={!newAppClientName.trim() || !newAppClientTenant.trim()}
                   >
                     Create
                   </Button>
@@ -1097,6 +1152,7 @@ function EditModeManagementUI({
                     onClick={() => {
                       setShowAddAppClient(false);
                       setNewAppClientName('');
+                      setNewAppClientTenant('');
                       setAuthorizedCallbackUrls([]);
                       setNewAuthorizedCallbackUrl('');
                     }}
@@ -1287,6 +1343,45 @@ function EditModeManagementUI({
                               placeholder="my-app-client"
                               className="mt-1 bg-white"
                             />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-xs font-medium">Who is this login page for?</Label>
+                            <p className="text-xs text-muted-foreground">
+                              The data of users who login under this tenant will be separate from the data of other users.
+                            </p>
+                            {tenantOptions.length > 0 ? (
+                              <div className="space-y-2">
+                                <Select
+                                  value={tenantOptions.includes(form.tenant) ? form.tenant : '__new__'}
+                                  onValueChange={(v) => updateAppClientForm(client.id, { tenant: v === '__new__' ? '' : v })}
+                                >
+                                  <SelectTrigger className="w-full max-w-[200px] h-9 bg-white">
+                                    <SelectValue placeholder="Choose tenant" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {tenantOptions.map((t) => (
+                                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                                    ))}
+                                    <SelectItem value="__new__">+ Create new tenant</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {!tenantOptions.includes(form.tenant) && (
+                                  <Input
+                                    placeholder="Enter new tenant name"
+                                    value={form.tenant}
+                                    onChange={(e) => updateAppClientForm(client.id, { tenant: e.target.value })}
+                                    className="bg-white max-w-[200px]"
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <Input
+                                value={form.tenant || 'MyDefaultTenant'}
+                                onChange={(e) => updateAppClientForm(client.id, { tenant: e.target.value || 'MyDefaultTenant' })}
+                                placeholder="Tenant name"
+                                className="bg-white"
+                              />
+                            )}
                           </div>
                           <div className="space-y-2">
                             <Label className="text-xs">Authorized Callback URLs</Label>
@@ -1524,7 +1619,7 @@ function EditModeManagementUI({
                               type="button"
                               size="sm"
                               onClick={() => saveAppClientEdit(client.id)}
-                              disabled={savingAppClientId === client.id || !form.name.trim()}
+                              disabled={savingAppClientId === client.id || !form.name.trim() || !form.tenant.trim()}
                             >
                               {savingAppClientId === client.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                               Save
@@ -2191,7 +2286,16 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   const existingAuthConfigs = getAuthConfigs();
   const loadingAuthConfigs = isBootstrapping;
 
+  const [tenantOptions, setTenantOptions] = useState<string[]>([]);
   const [newScope, setNewScope] = useState('');
+
+  useEffect(() => {
+    if (teamId && (config.useAuthConfig || config.bringOwnProvider)) {
+      api.getTeamTenants(teamId).then(({ tenants }) => setTenantOptions(tenants)).catch(() => setTenantOptions([]));
+    } else {
+      setTenantOptions([]);
+    }
+  }, [teamId, config.useAuthConfig, config.bringOwnProvider]);
   // Save config changes immediately to backend (for edit mode, e.g. default_app_client_id, auth_config)
   const saveProjectConfigImmediately = async (updates: {
     default_app_client_id?: string | null;
@@ -2897,6 +3001,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                 onCheckedChange={(checked) => updateConfig({ bringOwnProvider: checked })}
               />
             </div>
+
             {isEditMode ? (
               <div className="space-y-4">
                 <EditModeManagementUI
@@ -2906,6 +3011,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   onProjectUpdate={onProjectUpdate}
                   initialAuthConfigId={config.authConfigId ?? (project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : undefined)}
                   teamId={teamId}
+                  tenantOptions={tenantOptions}
                 />
               </div>
             ) : (
@@ -2917,6 +3023,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                     project={project}
                     onProjectUpdate={onProjectUpdate}
                     teamId={teamId}
+                    tenantOptions={tenantOptions}
                   />
                 ) : (
                   <>
@@ -3131,6 +3238,52 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
               </div>
             )}
 
+            {/* Who is this login page for? - shown when configuring auth that creates an app client */}
+            {config.requestsAuthMode === 'authenticate' && (config.useAuthConfig || config.bringOwnProvider) && (
+              <div className="p-4 border rounded-lg bg-muted/30">
+                <Label htmlFor="defaultTenant" className="text-sm font-medium">
+                  Who is this login page for?
+                </Label>
+                <p className="text-xs text-muted-foreground mb-2 mt-1">
+                  The data of users who login under this tenant will be separate from the data of other users.
+                </p>
+                {tenantOptions.length > 0 ? (
+                  <div className="space-y-2 mt-2">
+                    <Select
+                      value={tenantOptions.includes(config.defaultTenant ?? '') ? (config.defaultTenant ?? '') : '__new__'}
+                      onValueChange={(v) => updateConfig({ defaultTenant: v === '__new__' ? '' : v })}
+                    >
+                      <SelectTrigger id="defaultTenant" className="w-fit min-w-[200px]">
+                        <SelectValue placeholder="Choose tenant" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {tenantOptions.map((t) => (
+                          <SelectItem key={t} value={t}>{t}</SelectItem>
+                        ))}
+                        <SelectItem value="__new__">+ Create new tenant</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!tenantOptions.includes(config.defaultTenant ?? '') && (
+                      <Input
+                        placeholder="Enter new tenant name"
+                        value={config.defaultTenant ?? ''}
+                        onChange={(e) => updateConfig({ defaultTenant: e.target.value })}
+                        className="w-fit min-w-[200px] max-w-[280px]"
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <Input
+                    id="defaultTenant"
+                    placeholder="Tenant name"
+                    value={config.defaultTenant || 'MyDefaultTenant'}
+                    onChange={(e) => updateConfig({ defaultTenant: e.target.value || 'MyDefaultTenant' })}
+                    className="mt-2 w-fit min-w-[200px] max-w-[280px]"
+                  />
+                )}
+              </div>
+            )}
+
             {/* Who can register to login and use the API */}
             <div className="p-4 border rounded-lg bg-muted/30">
               <Label htmlFor="whoCanRegisterToLogin" className="text-sm font-medium">
@@ -3165,6 +3318,8 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         onSelect={handleUseExistingAuthConfig}
         projectName={config.projectName || project?.project_id}
         apiVersion={config.apiVersion || project?.api_version || '1.0.0'}
+        defaultTenant={config.defaultTenant}
+        teamId={teamId}
       />
 
       {/* Simple Auth Config Name Selection Modal */}

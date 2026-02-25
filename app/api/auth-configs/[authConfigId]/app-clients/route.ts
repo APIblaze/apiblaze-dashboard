@@ -69,12 +69,20 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    if (!body.tenant || body.tenant.trim().length === 0) {
+      return NextResponse.json(
+        { error: 'Validation error', details: 'tenant is required' },
+        { status: 400 }
+      );
+    }
     
     // Set safe defaults for token expiries
     const appClientData = {
       name: body.name,
       projectName: body.projectName.trim(),
       apiVersion: body.apiVersion.trim(),
+      tenant: body.tenant.trim(),
       refreshTokenExpiry: body.refreshTokenExpiry ?? 2592000, // 30 days
       idTokenExpiry: body.idTokenExpiry ?? 3600, // 1 hour
       accessTokenExpiry: body.accessTokenExpiry ?? 3600, // 1 hour

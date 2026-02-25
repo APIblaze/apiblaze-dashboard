@@ -21,10 +21,11 @@ import {
 
 interface AuthConfigDetailProps {
   authConfigId: string;
+  teamId?: string;
   onBack: () => void;
 }
 
-export function AuthConfigDetail({ authConfigId, onBack }: AuthConfigDetailProps) {
+export function AuthConfigDetail({ authConfigId, teamId, onBack }: AuthConfigDetailProps) {
   const router = useRouter();
   const { toast } = useToast();
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
@@ -121,7 +122,7 @@ export function AuthConfigDetail({ authConfigId, onBack }: AuthConfigDetailProps
 
         {/* App Clients */}
         <div className="mt-6">
-          <AppClientList authConfigId={authConfigId} onRefresh={() => invalidateAndRefetch()} />
+          <AppClientList authConfigId={authConfigId} teamId={teamId} onRefresh={() => invalidateAndRefetch()} />
         </div>
       </div>
 

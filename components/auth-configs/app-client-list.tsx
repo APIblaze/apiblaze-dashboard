@@ -29,10 +29,11 @@ import { AppClientFormDialog } from './app-client-form-dialog';
 
 interface AppClientListProps {
   authConfigId: string;
+  teamId?: string;
   onRefresh?: () => void;
 }
 
-export function AppClientList({ authConfigId, onRefresh }: AppClientListProps) {
+export function AppClientList({ authConfigId, teamId, onRefresh }: AppClientListProps) {
   const router = useRouter();
   const { toast } = useToast();
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
@@ -261,6 +262,7 @@ export function AppClientList({ authConfigId, onRefresh }: AppClientListProps) {
         onOpenChange={setCreateDialogOpen}
         onSuccess={handleSuccess}
         authConfigId={authConfigId}
+        teamId={teamId}
       />
 
       {/* Edit Dialog */}
@@ -270,6 +272,7 @@ export function AppClientList({ authConfigId, onRefresh }: AppClientListProps) {
         onSuccess={handleSuccess}
         authConfigId={authConfigId}
         appClient={selectedClient}
+        teamId={teamId}
       />
 
       {/* Delete Confirmation Dialog */}

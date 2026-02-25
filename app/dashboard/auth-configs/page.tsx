@@ -131,6 +131,7 @@ function AuthConfigsContent() {
             <AppClientDetail
               authConfigId={authConfigId}
               clientId={clientId}
+              teamId={teamId}
               onBack={handleBack}
               verifyFromUrl={verify === '1'}
             />
@@ -148,6 +149,7 @@ function AuthConfigsContent() {
           ) : authConfigId ? (
             <AuthConfigDetail
               authConfigId={authConfigId}
+              teamId={teamId}
               onBack={handleBack}
             />
           ) : (

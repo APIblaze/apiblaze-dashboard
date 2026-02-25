@@ -84,6 +84,7 @@ export async function POST(request: NextRequest) {
       name: appClientName,
       projectName: String(projectName).trim(),
       apiVersion: String(apiVersion).trim(),
+      tenant: String(projectName).trim() || 'default',
       scopes: scopes || defaultGitHubScopes,
     });
     const appClientId = (appClient as { id: string }).id;

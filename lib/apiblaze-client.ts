@@ -358,6 +358,7 @@ export class APIBlazeClient {
       name: string;
       projectName: string;
       apiVersion: string;
+      tenant: string;
       refreshTokenExpiry?: number;
       idTokenExpiry?: number;
       accessTokenExpiry?: number;
@@ -413,12 +414,23 @@ export class APIBlazeClient {
     });
   }
 
+  async getTeamTenants(
+    userClaims: UserAssertionClaims,
+    teamId: string
+  ): Promise<{ tenants: string[] }> {
+    return this.request<{ tenants: string[] }>(`/teams/${encodeURIComponent(teamId)}/tenants`, {
+      method: 'GET',
+      userClaims,
+    });
+  }
+
   async updateAppClient(
     userClaims: UserAssertionClaims,
     authConfigId: string,
     clientId: string,
     data: {
       name?: string;
+      tenant?: string;
       refreshTokenExpiry?: number;
       idTokenExpiry?: number;
       accessTokenExpiry?: number;

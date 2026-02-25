@@ -38,6 +38,10 @@ interface AuthConfigModalProps {
   mode?: 'select' | 'manage'; // 'select' for project creation, 'manage' for standalone management
   projectName?: string;
   apiVersion?: string;
+  /** Default tenant when creating app client (e.g. from project config) */
+  defaultTenant?: string;
+  /** Team ID for fetching existing tenants */
+  teamId?: string;
 }
 
 const CLIENT_SECRET_MIN_LENGTH = 6;
@@ -67,6 +71,8 @@ export function AuthConfigModal({
   mode = 'select',
   projectName,
   apiVersion,
+  defaultTenant,
+  teamId,
 }: AuthConfigModalProps) {
   const { toast } = useToast();
   const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
@@ -82,6 +88,8 @@ export function AuthConfigModal({
   const [selectedAppClientId, setSelectedAppClientId] = useState<string>('');
   const [newAuthConfigName, setNewAuthConfigName] = useState('');
   const [newAppClientName, setNewAppClientName] = useState('');
+  const [newAppClientTenant, setNewAppClientTenant] = useState('');
+  const [tenantOptions, setTenantOptions] = useState<string[]>([]);
   const [isCreatingAuthConfig, setIsCreatingAuthConfig] = useState(false);
   const [isCreatingAppClient, setIsCreatingAppClient] = useState(false);
   const [newAppClientSecret, setNewAppClientSecret] = useState<string | null>(null);
@@ -120,6 +128,14 @@ export function AuthConfigModal({
       setSelectedAppClientId('');
     }
   }, [open]);
+
+  useEffect(() => {
+    if (open && teamId) {
+      api.getTeamTenants(teamId).then(({ tenants }) => setTenantOptions(tenants)).catch(() => setTenantOptions([]));
+    } else {
+      setTenantOptions([]);
+    }
+  }, [open, teamId]);
 
   useEffect(() => {
     if (!selectedAuthConfigId) setSelectedAppClientId('');
@@ -188,6 +204,16 @@ export function AuthConfigModal({
       return;
     }
 
+    const resolvedTenant = newAppClientTenant.trim() || defaultTenant?.trim() || projectName?.trim() || 'MyDefaultTenant';
+    if (!resolvedTenant) {
+      toast({
+        title: 'Validation Error',
+        description: 'Tenant is required. Enter who this app login is for (e.g. MyDefaultTenant, Acme Corp).',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (!projectName?.trim() || !apiVersion?.trim()) {
       toast({
         title: 'Validation Error',
@@ -201,6 +227,7 @@ export function AuthConfigModal({
     try {
       const data = await api.createAppClient(selectedAuthConfigId, {
         name: newAppClientName.trim(),
+        tenant: resolvedTenant,
         scopes: ['read:user', 'user:email'],
         projectName: projectName.trim(),
         apiVersion: apiVersion.trim(),
@@ -209,6 +236,7 @@ export function AuthConfigModal({
       setNewAppClientId(appClient.clientId);
       setNewAppClientSecret(appClient.clientSecret || null);
       setNewAppClientName('');
+      setNewAppClientTenant('');
       await invalidateAndRefetch();
       setSelectedAppClientId(appClient.id);
       toast({
@@ -583,27 +611,72 @@ export function AuthConfigModal({
                       ))}
                     </SelectContent>
                   </Select>
-                  <div className="flex gap-2 flex-1">
-                    <Input
-                      placeholder="Or create new AppClient"
-                      value={newAppClientName}
-                      onChange={(e) => setNewAppClientName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          handleCreateAppClient();
-                        }
-                      }}
-                    />
-                    <Button
-                      onClick={handleCreateAppClient}
-                      disabled={isCreatingAppClient || !newAppClientName.trim()}
-                    >
+                  <div className="flex flex-col gap-2 flex-1">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="AppClient name"
+                        value={newAppClientName}
+                        onChange={(e) => setNewAppClientName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleCreateAppClient();
+                          }
+                        }}
+                      />
+                      {tenantOptions.length > 0 ? (
+                        <div className="space-y-2 flex-1 min-w-0">
+                          <Select
+                            value={tenantOptions.includes(newAppClientTenant) ? newAppClientTenant : '__new__'}
+                            onValueChange={(v) => setNewAppClientTenant(v === '__new__' ? '' : v)}
+                          >
+                            <SelectTrigger className="w-full min-w-[140px]">
+                              <SelectValue placeholder="Choose tenant" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {tenantOptions.map((t) => (
+                                <SelectItem key={t} value={t}>{t}</SelectItem>
+                              ))}
+                              <SelectItem value="__new__">+ Create new tenant</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {!tenantOptions.includes(newAppClientTenant) && (
+                            <Input
+                              placeholder="Enter new tenant name"
+                              value={newAppClientTenant}
+                              onChange={(e) => setNewAppClientTenant(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleCreateAppClient();
+                                }
+                              }}
+                              className="w-full min-w-[140px]"
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <Input
+                          placeholder="Tenant name"
+                          value={newAppClientTenant || 'MyDefaultTenant'}
+                          onChange={(e) => setNewAppClientTenant(e.target.value || 'MyDefaultTenant')}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleCreateAppClient();
+                            }
+                          }}
+                          className="flex-1 min-w-[120px]"
+                        />
+                      )}
+                      <Button
+                        onClick={handleCreateAppClient}
+                        disabled={isCreatingAppClient || !newAppClientName.trim() || !(newAppClientTenant.trim() || defaultTenant?.trim() || projectName?.trim())}
+                      >
                       {isCreatingAppClient ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Plus className="h-4 w-4" />
                       )}
-                    </Button>
+                      </Button>
+                    </div>
                   </div>
                 </div>
 

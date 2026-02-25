@@ -45,6 +45,7 @@ export interface AppClient {
   updated_at: string;
   providers_count?: number;
   verified?: boolean;
+  tenant?: string;
   branding?: AppClientBranding;
 }
 
@@ -75,6 +76,7 @@ export interface CreateAppClientRequest {
   name: string;
   projectName: string;
   apiVersion: string;
+  tenant: string;
   refreshTokenExpiry?: number;
   idTokenExpiry?: number;
   accessTokenExpiry?: number;
@@ -86,6 +88,7 @@ export interface CreateAppClientRequest {
 
 export interface UpdateAppClientRequest {
   name?: string;
+  tenant?: string;
   refreshTokenExpiry?: number;
   idTokenExpiry?: number;
   accessTokenExpiry?: number;

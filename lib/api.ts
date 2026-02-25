@@ -264,6 +264,10 @@ class ApiClient {
     });
   }
 
+  async getTeamTenants(teamId: string): Promise<{ tenants: string[] }> {
+    return this.request<{ tenants: string[] }>(`/teams/${encodeURIComponent(teamId)}/tenants`);
+  }
+
   // AuthConfigs
   async listAuthConfigs() {
     return this.request<AuthConfig[]>('/auth-configs');
@@ -318,6 +322,7 @@ class ApiClient {
     name: string;
     projectName: string;
     apiVersion: string;
+    tenant: string;
     refreshTokenExpiry?: number;
     idTokenExpiry?: number;
     accessTokenExpiry?: number;
@@ -334,6 +339,7 @@ class ApiClient {
 
   async updateAppClient(authConfigId: string, clientId: string, data: {
     name?: string;
+    tenant?: string;
     refreshTokenExpiry?: number;
     idTokenExpiry?: number;
     accessTokenExpiry?: number;

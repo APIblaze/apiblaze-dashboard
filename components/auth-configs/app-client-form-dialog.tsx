@@ -16,6 +16,7 @@ import { Loader2, Plus, X, Star, ChevronDown, ChevronUp, Check } from 'lucide-re
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import type { AppClient, AppClientBranding, CreateAppClientRequest } from '@/types/auth-config';
@@ -41,6 +42,7 @@ interface AppClientFormDialogProps {
   appClient?: AppClient | null;
   projectName?: string;
   apiVersion?: string;
+  teamId?: string;
 }
 
 export function AppClientFormDialog({
@@ -51,11 +53,14 @@ export function AppClientFormDialog({
   appClient,
   projectName: initialProjectName,
   apiVersion: initialApiVersion,
+  teamId,
 }: AppClientFormDialogProps) {
   const { toast } = useToast();
   const [name, setName] = useState('');
   const [projectName, setProjectName] = useState(initialProjectName ?? '');
   const [apiVersion, setApiVersion] = useState(initialApiVersion ?? '1.0.0');
+  const [tenant, setTenant] = useState('');
+  const [tenantOptions, setTenantOptions] = useState<string[]>([]);
   const [refreshTokenExpiry, setRefreshTokenExpiry] = useState(2592000); // 30 days
   const [idTokenExpiry, setIdTokenExpiry] = useState(3600); // 1 hour
   const [accessTokenExpiry, setAccessTokenExpiry] = useState(3600); // 1 hour
@@ -80,9 +85,16 @@ export function AppClientFormDialog({
   }, [open]);
 
   useEffect(() => {
+    if (open && teamId) {
+      api.getTeamTenants(teamId).then(({ tenants }) => setTenantOptions(tenants)).catch(() => {});
+    }
+  }, [open, teamId]);
+
+  useEffect(() => {
     if (open) {
       if (appClient) {
         setName(appClient.name);
+        setTenant(appClient.tenant ?? '');
         setRefreshTokenExpiry(appClient.refreshTokenExpiry ?? 2592000);
         setIdTokenExpiry(appClient.idTokenExpiry ?? 3600);
         setAccessTokenExpiry(appClient.accessTokenExpiry ?? 3600);
@@ -98,6 +110,7 @@ export function AppClientFormDialog({
         setUseGradient(b?.useGradient ?? false);
       } else {
         setName('');
+        setTenant('');
         setProjectName(initialProjectName ?? '');
         setApiVersion(initialApiVersion ?? '1.0.0');
         setRefreshTokenExpiry(2592000);
@@ -216,12 +229,22 @@ export function AppClientFormDialog({
       return;
     }
 
+    if (!tenant.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Tenant is required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
       setSubmitting(true);
       
       if (appClient) {
         await api.updateAppClient(authConfigId, appClient.id, {
           name: name.trim(),
+          tenant: tenant.trim(),
           refreshTokenExpiry,
           idTokenExpiry,
           accessTokenExpiry,
@@ -239,6 +262,7 @@ export function AppClientFormDialog({
           name: name.trim(),
           projectName: projectName.trim(),
           apiVersion: apiVersion.trim(),
+          tenant: tenant.trim(),
           refreshTokenExpiry,
           idTokenExpiry,
           accessTokenExpiry,
@@ -356,6 +380,49 @@ export function AppClientFormDialog({
                     disabled={submitting}
                     className="bg-white"
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Who is this login page for?</Label>
+                  <p className="text-xs text-muted-foreground">
+                    The data of users who login under this tenant will be separate from the data of other users.
+                  </p>
+                  {tenantOptions.length > 0 ? (
+                    <div className="space-y-2">
+                      <Select
+                        value={tenantOptions.includes(tenant) ? tenant : '__new__'}
+                        onValueChange={(v) => setTenant(v === '__new__' ? '' : v)}
+                        disabled={submitting}
+                      >
+                        <SelectTrigger className="w-full max-w-[200px] bg-white" disabled={submitting}>
+                          <SelectValue placeholder="Choose tenant" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {tenantOptions.map((t) => (
+                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                          ))}
+                          <SelectItem value="__new__">+ Create new tenant</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {!tenantOptions.includes(tenant) && (
+                        <Input
+                          placeholder="Enter new tenant name"
+                          value={tenant}
+                          onChange={(e) => setTenant(e.target.value)}
+                          disabled={submitting}
+                          className="bg-white max-w-[200px]"
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <Input
+                      value={tenant || 'MyDefaultTenant'}
+                      onChange={(e) => setTenant(e.target.value || 'MyDefaultTenant')}
+                      placeholder="Tenant name"
+                      disabled={submitting}
+                      className="bg-white"
+                    />
+                  )}
                 </div>
 
                 {!appClient && (
