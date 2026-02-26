@@ -50,6 +50,9 @@ export async function GET(
     }
 
     const { projectName, apiVersion } = await params;
+    if (!/^[a-z0-9]+$/.test(projectName)) {
+      return NextResponse.json({ error: 'Invalid project name' }, { status: 400 });
+    }
     const url = `https://${projectName}.${POLICIES_API_DOMAIN}/routes?api_version=${encodeURIComponent(apiVersion)}`;
     const res = await fetch(url);
 

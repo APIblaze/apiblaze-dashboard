@@ -67,6 +67,9 @@ export async function PUT(
     }
 
     const { projectName, apiVersion, method, path: pathSegments } = await params;
+    if (!/^[a-z0-9]+$/.test(projectName)) {
+      return NextResponse.json({ error: 'Invalid project name' }, { status: 400 });
+    }
     const routePath = '/' + pathSegments.join('/');
     const body = await request.json() as Record<string, unknown>;
     const policiesBody = mapToPoliciesFormat(body as Parameters<typeof mapToPoliciesFormat>[0]);
@@ -114,6 +117,9 @@ export async function DELETE(
     }
 
     const { projectName, apiVersion, method, path: pathSegments } = await params;
+    if (!/^[a-z0-9]+$/.test(projectName)) {
+      return NextResponse.json({ error: 'Invalid project name' }, { status: 400 });
+    }
     const url = buildPoliciesUrl(projectName, apiVersion, method, pathSegments);
 
     const res = await fetch(url, { method: 'DELETE' });
