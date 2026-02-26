@@ -1343,6 +1343,14 @@ function EditModeManagementUI({
                               placeholder="my-app-client"
                               className="mt-1 bg-white"
                             />
+                            <Label htmlFor={`editAppClientId-${client.id}`} className="text-xs text-muted-foreground mt-2 block">Client ID</Label>
+                            <Input
+                              id={`editAppClientId-${client.id}`}
+                              value={clientDetails?.client_id ?? clientDetails?.clientId ?? (client as { client_id?: string }).client_id ?? client.clientId ?? client.id}
+                              readOnly
+                              disabled
+                              className="mt-1 bg-muted text-muted-foreground font-mono text-xs"
+                            />
                           </div>
                           <div className="space-y-2">
                             <Label className="text-xs font-medium">Who is this login page for?</Label>
@@ -2980,8 +2988,15 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           )}
         </div>
 
-        {/* OAuth config - Bring My Own OAuth Provider, etc. - always shown for dev portal */}
-        <div className="space-y-4 pl-4 border-l-2 border-blue-200">
+        {/* Login for API Portal and App Clients */}
+        <div className="flex flex-col gap-4 p-4 border rounded-lg">
+          <div>
+            <Label className="text-sm font-medium">Login for API Portal and App Clients</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              How the API portal and your client Apps that use the API offer a login form and obtain oAuth tokens
+            </p>
+          </div>
+          <div className="space-y-4">
             {/* Bring My Own OAuth Provider - first inside expanded section */}
             <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
               <div className="space-y-1">
@@ -3217,6 +3232,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                         </div>
                       </div>
                     )}
+                    {config.bringOwnProvider && (
                     <div className="space-y-2">
                       <Label className="text-sm">Authorized Callback URLs</Label>
                       <div className="flex gap-2 mb-2 mt-2">
@@ -3233,13 +3249,14 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                         ))}
                       </div>
                     </div>
+                    )}
                   </>
                 )}
               </div>
             )}
 
-            {/* Who is this login page for? - shown when configuring auth that creates an app client */}
-            {config.requestsAuthMode === 'authenticate' && (config.useAuthConfig || config.bringOwnProvider) && (
+            {/* Who is this login page for? - shown when creating (edit mode has it in app client box) */}
+            {!isEditMode && config.requestsAuthMode === 'authenticate' && (config.useAuthConfig || config.bringOwnProvider) && (
               <div className="p-4 border rounded-lg bg-muted/30">
                 <Label htmlFor="defaultTenant" className="text-sm font-medium">
                   Who is this login page for?
@@ -3309,6 +3326,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
               </Select>
             </div>
           </div>
+        </div>
       </div>
 
       <AuthConfigModal
