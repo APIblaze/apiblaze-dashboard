@@ -54,7 +54,9 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid project name' }, { status: 400 });
     }
     const url = `https://${projectName}.${POLICIES_API_DOMAIN}/routes?api_version=${encodeURIComponent(apiVersion)}`;
-    const res = await fetch(url);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
 
     if (res.status === 404) {
       return NextResponse.json({ project_id: projectName, api_version: apiVersion, routes: [] });
@@ -72,6 +74,6 @@ export async function GET(
     });
   } catch (error) {
     console.error('[route-configs GET]', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

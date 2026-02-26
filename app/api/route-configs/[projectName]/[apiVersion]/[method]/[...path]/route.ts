@@ -102,7 +102,7 @@ export async function PUT(
     return NextResponse.json(data, { status: res.status === 201 ? 201 : 200 });
   } catch (error) {
     console.error('[route-configs PUT]', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -132,6 +132,6 @@ export async function DELETE(
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('[route-configs DELETE]', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
