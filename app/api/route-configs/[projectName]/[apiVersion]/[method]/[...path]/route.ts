@@ -16,32 +16,35 @@ const POLICIES_API_DOMAIN = process.env.POLICIES_API_DOMAIN || 'policies.apiblaz
 // Map the dashboard RouteEntry schema to the policies-api request body.
 // Dashboard stores pre/post templates as single JSON strings; policies-api
 // expects arrays of OpenFGA check objects — we parse and wrap in [].
+// Throws on non-empty strings that contain invalid JSON so callers can return 400.
 function mapToPoliciesFormat(entry: {
   require_authentication?: boolean;
   pre_request_auth_template?: string;
   post_response_policy_template?: string;
   cache_rules?: string;
 }) {
-  function parseTemplate(s?: string): object[] | undefined {
+  function parseTemplate(s: string | undefined, fieldName: string): object[] | undefined {
     if (!s?.trim()) return undefined;
     try {
       const parsed = JSON.parse(s);
       return Array.isArray(parsed) ? parsed : [parsed];
     } catch {
-      return undefined;
+      throw new SyntaxError(`Invalid JSON in ${fieldName}`);
     }
   }
 
-  function parseConfig(s?: string): object | null {
+  function parseConfig(s: string | undefined, fieldName: string): object | null {
     if (!s?.trim()) return null;
-    try { return JSON.parse(s); } catch { return null; }
+    try { return JSON.parse(s); } catch {
+      throw new SyntaxError(`Invalid JSON in ${fieldName}`);
+    }
   }
 
   return {
-    on_request_read: parseTemplate(entry.pre_request_auth_template),
-    post_response_write: parseTemplate(entry.post_response_policy_template),
+    on_request_read: parseTemplate(entry.pre_request_auth_template, 'pre_request_auth_template'),
+    post_response_write: parseTemplate(entry.post_response_policy_template, 'post_response_policy_template'),
     authentication_config: { require_authentication: entry.require_authentication ?? true },
-    cache_config: parseConfig(entry.cache_rules),
+    cache_config: parseConfig(entry.cache_rules, 'cache_rules'),
   };
 }
 
@@ -71,8 +74,20 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid project name' }, { status: 400 });
     }
     const routePath = '/' + pathSegments.join('/');
-    const body = await request.json() as Record<string, unknown>;
-    const policiesBody = mapToPoliciesFormat(body as Parameters<typeof mapToPoliciesFormat>[0]);
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json() as Record<string, unknown>;
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+    }
+
+    let policiesBody: ReturnType<typeof mapToPoliciesFormat>;
+    try {
+      policiesBody = mapToPoliciesFormat(body as Parameters<typeof mapToPoliciesFormat>[0]);
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof SyntaxError ? e.message : 'Invalid config field' }, { status: 400 });
+    }
 
     const putUrl = buildPoliciesUrl(projectName, apiVersion, method, pathSegments);
 
