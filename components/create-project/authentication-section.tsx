@@ -99,14 +99,17 @@ const PROVIDER_TYPE_LABELS: Record<SocialProvider, string> = {
   other: 'Other',
 };
 
-/** APIBlaze default GitHub OAuth client ID - used to show "API Blaze via GitHub" in provider list. From env or known default. */
-const APIBLAZE_GITHUB_CLIENT_ID = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_APIBLAZE_GITHUB_CLIENT_ID?.trim()) || 'Iv23liwZOuwO0lPP9R9P';
+/** APIBlaze default GitHub OAuth client IDs - dashboard and portal use separate apps to avoid token invalidation. */
+const APIBLAZE_GITHUB_CLIENT_IDS = [
+  (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_APIBLAZE_GITHUB_CLIENT_ID?.trim()) || 'Iv23liwZOuwO0lPP9R9P',
+  (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_APIBLAZE_PORTAL_GITHUB_CLIENT_ID?.trim()) || '',
+].filter(Boolean);
 
 function isApiblazeDefaultProvider(provider: { type: string; clientId?: string; client_id?: string; isApiblazeDefault?: boolean }): boolean {
   if (provider.type !== 'github') return false;
   if (provider.isApiblazeDefault === true) return true;
   const clientId = (provider.clientId ?? provider.client_id ?? '').trim();
-  return !!APIBLAZE_GITHUB_CLIENT_ID && clientId === APIBLAZE_GITHUB_CLIENT_ID;
+  return APIBLAZE_GITHUB_CLIENT_IDS.some((id) => id && clientId === id);
 }
 
 const PROVIDER_SETUP_GUIDES: Record<SocialProvider, string[]> = {
@@ -2801,7 +2804,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
             onValueChange={(v) => {
               const updates: Partial<ProjectConfig> = { requestsAuthMode: v as 'authenticate' | 'passthrough' };
               if (v === 'authenticate' && !isEditMode) {
-                updates.requestsAuthMethods = ['jwt', 'api_key'];
+                updates.requestsAuthMethods = ['jwt'];
               }
               updateConfig(updates);
             }}
@@ -2969,7 +2972,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   <div className="flex items-center gap-2">
                     <Switch
                       id="requestsAuthApiKey"
-                      checked={config.requestsAuthMethods?.includes('api_key') ?? true}
+                      checked={config.requestsAuthMethods?.includes('api_key') ?? false}
                       onCheckedChange={(checked) => {
                         const methods = config.requestsAuthMethods ?? ['jwt'];
                         const next: ('jwt' | 'opaque' | 'api_key')[] = checked
@@ -2982,6 +2985,25 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                       {(config.requestsAuthMethods?.includes('jwt') && config.requestsAuthMethods?.includes('api_key')) ? 'or ' : ''}Authenticate by API key
                     </Label>
                   </div>
+                  {config.requestsAuthMethods?.includes('api_key') && (
+                    <div className="flex items-start justify-between gap-4 pl-6 mt-2">
+                      <div className="flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="requireApiKeyXEndUserId"
+                            checked={config.requireApiKeyXEndUserId ?? false}
+                            onCheckedChange={(checked) => updateConfig({ requireApiKeyXEndUserId: checked })}
+                          />
+                          <Label htmlFor="requireApiKeyXEndUserId" className="text-sm font-medium">
+                            Require X-End-User-Id header
+                          </Label>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Reject requests with X-API-Key that do not include X-End-User-Id
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -49,6 +49,7 @@ export interface ProjectConfig {
   // Requests Authentication (how each proxy request is authenticated)
   requestsAuthMode: 'authenticate' | 'passthrough';
   requestsAuthMethods: ('jwt' | 'opaque' | 'api_key')[];
+  requireApiKeyXEndUserId?: boolean;
   allowedIssuers: string[];
   allowedAudiences: string[];
   opaqueTokenEndpoint: string;

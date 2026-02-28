@@ -32,6 +32,10 @@ GITHUB_APP_INSTALL_URL=https://github.com/apps/apiblaze/installations/new
 GITHUB_CLIENT_ID=your-github-oauth-app-client-id
 GITHUB_CLIENT_SECRET=your-github-oauth-app-client-secret
 
+# Portal GitHub OAuth (separate app to avoid invalidating dashboard tokens when users log into portal)
+APIBLAZE_PORTAL_GITHUB_CLIENT_ID=your-portal-github-oauth-client-id
+NEXT_PUBLIC_APIBLAZE_PORTAL_GITHUB_CLIENT_ID=your-portal-github-oauth-client-id
+
 # NextAuth Configuration
 NEXTAUTH_URL=http://localhost:3000
 # In production: NEXTAUTH_URL=https://dashboard.apiblaze.com

@@ -94,7 +94,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       userGroupName: '',
       enableSocialAuth: true,
       requestsAuthMode: 'authenticate' as const,
-      requestsAuthMethods: ['jwt', 'api_key'] as ('jwt' | 'opaque' | 'api_key')[],
+      requestsAuthMethods: ['jwt'] as ('jwt' | 'opaque' | 'api_key')[],
       allowedIssuers: [],
       allowedAudiences: [],
       opaqueTokenEndpoint: '',
@@ -143,6 +143,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     enableSocialAuth: true,
     requestsAuthMode: ((projectConfig?.requests_auth as Record<string, unknown>)?.mode as 'authenticate' | 'passthrough') || 'passthrough',
     requestsAuthMethods: ((projectConfig?.requests_auth as Record<string, unknown>)?.methods as ('jwt' | 'opaque' | 'api_key')[]) || ['jwt'],
+    requireApiKeyXEndUserId: ((projectConfig?.requests_auth as Record<string, unknown>)?.api_key as Record<string, unknown>)?.require_x_end_user_id as boolean || false,
     allowedIssuers: ((projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown>)?.allowed_issuers as string[] || [],
     allowedAudiences: ((projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown>)?.allowed_audiences as string[] || [],
     opaqueTokenEndpoint: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.endpoint as string || '',
@@ -405,10 +406,12 @@ export function ProjectConfigPanel({
             const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
               ? [defaultCallbackUrl, ...callbackUrls.filter((u) => u !== defaultCallbackUrl)]
               : [defaultCallbackUrl, ...callbackUrls];
+            const firstProviderType = config.providers?.[0]?.type ?? config.socialProvider;
             const appClient = await api.createAppClient(currentAuthConfigId, {
               name: `${config.projectName}-appclient`,
               tenant: (config.defaultTenant?.trim() || config.projectName || 'default'),
               scopes: config.scopes,
+              providerType: firstProviderType,
               authorizedCallbackUrls: finalCallbackUrls,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
@@ -518,6 +521,7 @@ export function ProjectConfigPanel({
         methods?: ('jwt' | 'opaque' | 'api_key')[];
         jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
         opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
+        api_key?: { require_x_end_user_id: boolean };
       } | undefined;
       if (requestsAuthMode === 'passthrough') {
         requests_auth = { mode: 'passthrough', methods: [] };
@@ -530,6 +534,9 @@ export function ProjectConfigPanel({
           jwt: { allowed_issuers: jwtIssuers, allowed_audiences: jwtAudiences },
           opaque: requestsAuthMethods.includes('opaque') && config.opaqueTokenEndpoint
             ? { endpoint: config.opaqueTokenEndpoint, method: config.opaqueTokenMethod ?? 'GET', params: config.opaqueTokenParams ?? '?access_token={token}', body: config.opaqueTokenBody ?? 'token={token}' }
+            : undefined,
+          api_key: requestsAuthMethods.includes('api_key')
+            ? { require_x_end_user_id: config.requireApiKeyXEndUserId ?? false }
             : undefined,
         };
       }
@@ -608,6 +615,7 @@ export function ProjectConfigPanel({
         methods?: ('jwt' | 'opaque' | 'api_key')[];
         jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
         opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
+        api_key?: { require_x_end_user_id: boolean };
       } | undefined;
       if (requestsAuthMode === 'passthrough') {
         requests_auth = { mode: 'passthrough', methods: [] };
@@ -620,6 +628,9 @@ export function ProjectConfigPanel({
           jwt: { allowed_issuers: jwtIssuers, allowed_audiences: jwtAudiences },
           opaque: requestsAuthMethods.includes('opaque') && config.opaqueTokenEndpoint
             ? { endpoint: config.opaqueTokenEndpoint, method: config.opaqueTokenMethod ?? 'GET', params: config.opaqueTokenParams ?? '?access_token={token}', body: config.opaqueTokenBody ?? 'token={token}' }
+            : undefined,
+          api_key: requestsAuthMethods.includes('api_key')
+            ? { require_x_end_user_id: config.requireApiKeyXEndUserId ?? false }
             : undefined,
         };
       }

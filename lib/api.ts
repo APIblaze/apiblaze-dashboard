@@ -329,6 +329,7 @@ class ApiClient {
     authorizedCallbackUrls?: string[];
     signoutUris?: string[];
     scopes?: string[];
+    providerType?: string;
     branding?: import('@/types/auth-config').AppClientBranding;
   }) {
     return this.request(`/auth-configs/${authConfigId}/app-clients`, {

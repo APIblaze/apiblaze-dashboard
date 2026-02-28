@@ -365,6 +365,8 @@ export class APIBlazeClient {
       authorizedCallbackUrls?: string[];
       signoutUris?: string[];
       scopes?: string[];
+      /** When 'github', app client gets read:user user:email if scopes not provided */
+      providerType?: string;
     }
   ) {
     return this.request(`/auth-configs/${authConfigId}/app-clients`, {

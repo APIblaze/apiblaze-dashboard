@@ -83,6 +83,8 @@ export interface CreateAppClientRequest {
   authorizedCallbackUrls?: string[];
   signoutUris?: string[];
   scopes?: string[];
+  /** When 'github', app client gets read:user user:email if scopes not provided */
+  providerType?: string;
   branding?: AppClientBranding;
 }
 

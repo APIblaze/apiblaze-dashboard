@@ -29,10 +29,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get default GitHub OAuth credentials from environment (server-side only)
-    // Both client ID and secret are server-side only (no NEXT_PUBLIC_ prefix)
-    const defaultClientId = process.env.GITHUB_CLIENT_ID;
-    const defaultClientSecret = 'REPLACE_WITH_APIBLAZE_CLIENT_SECRET'; // process.env.GITHUB_CLIENT_SECRET; // DANGER: This is going to store the APIBLAZE client secret for every API simple auth
+    // Use portal-specific GitHub OAuth app when configured to avoid invalidating dashboard tokens.
+    // Dashboard uses GITHUB_CLIENT_ID (NextAuth); portal should use APIBLAZE_PORTAL_GITHUB_CLIENT_ID.
+    const defaultClientId = process.env.APIBLAZE_PORTAL_GITHUB_CLIENT_ID || process.env.GITHUB_CLIENT_ID;
+    const defaultClientSecret = 'REPLACE_WITH_APIBLAZE_CLIENT_SECRET'; // Auth worker injects from env
 
     if (!defaultClientId || !defaultClientSecret) {
       return NextResponse.json(
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 2. Create AppClient (default scopes for GitHub)
+    // 2. Create AppClient with GitHub scopes (providerType ensures correct defaults if scopes omitted)
     const defaultGitHubScopes = getDefaultScopesForProvider('github');
     const appClient = await client.createAppClient(userClaims, authConfigId, {
       name: appClientName,
@@ -86,6 +86,7 @@ export async function POST(request: NextRequest) {
       apiVersion: String(apiVersion).trim(),
       tenant: String(projectName).trim() || 'default',
       scopes: scopes || defaultGitHubScopes,
+      providerType: 'github',
     });
     const appClientId = (appClient as { id: string }).id;
 
