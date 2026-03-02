@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Rocket, ChevronRight, Save } from 'lucide-react';
 import { GeneralSection } from './general-section';
 import { AuthenticationSection } from './authentication-section';
+import { AuthorizationSection } from './authorization-section';
 import { TargetServersSection } from './target-servers-section';
 import { ThrottlingSection } from './throttling-section';
 import { RoutesSection } from './routes-section';
@@ -24,7 +25,7 @@ import { cn } from '@/lib/utils';
 
 const NEW_PROJECT_STEPS: { id: ProjectConfigTab; label: string }[] = [
   { id: 'general', label: 'General' },
-  { id: 'auth', label: 'Auth' },
+  { id: 'authentication', label: 'Authentication' },
   { id: 'targets', label: 'Targets' },
   { id: 'throttling', label: 'Throttling' },
   { id: 'preprocessing', label: 'Processing' },
@@ -355,7 +356,7 @@ export function ProjectConfigPanel({
                 description: 'The selected auth config has no app clients.',
                 variant: 'destructive',
               });
-              setActiveTab('auth');
+              setActiveTab('authentication');
               setIsDeploying(false);
               return;
             }
@@ -377,7 +378,7 @@ export function ProjectConfigPanel({
               description: 'Please add at least one OAuth provider with Client ID and Client Secret',
               variant: 'destructive',
             });
-            setActiveTab('auth');
+            setActiveTab('authentication');
             setIsDeploying(false);
             return;
           }
@@ -712,7 +713,7 @@ export function ProjectConfigPanel({
               isDeleting={isDeleting}
             />
           )}
-          {activeTab === 'auth' && (
+          {activeTab === 'authentication' && (
             <AuthenticationSection
               config={config}
               updateConfig={updateConfig}
@@ -723,6 +724,15 @@ export function ProjectConfigPanel({
                 onProjectUpdate?.(updated);
               }}
               teamId={teamId}
+            />
+          )}
+          {activeTab === 'authorization' && (
+            <AuthorizationSection
+              project={currentProject}
+              onProjectUpdate={(updated) => {
+                setCurrentProject(updated);
+                onProjectUpdate?.(updated);
+              }}
             />
           )}
           {activeTab === 'targets' && (
