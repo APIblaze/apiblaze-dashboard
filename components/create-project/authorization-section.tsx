@@ -46,7 +46,8 @@ function hasNoPolicy(route: RouteEntry): boolean {
 function getDefaultPolicy(project: Project): 'allow' | 'deny' {
   const cfg = project.config as Record<string, unknown> | undefined;
   const auth = cfg?.authorization as Record<string, unknown> | undefined;
-  return (auth?.default_policy as 'allow' | 'deny') ?? 'allow';
+  const policy = auth?.default_policy;
+  return policy === 'deny' ? 'deny' : 'allow';
 }
 
 function parseTuple(template: string): ParsedTuple | null {
@@ -200,6 +201,10 @@ function EnforcementCard({
   const { toast } = useToast();
   const [enforced, setEnforced] = useState(getDefaultPolicy(project) === 'deny');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setEnforced(getDefaultPolicy(project) === 'deny');
+  }, [project.project_id, project.config]);
 
   const uncoveredCount = routes.filter(hasNoPolicy).length;
   const coveredCount = routes.length - uncoveredCount;
