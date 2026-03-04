@@ -408,7 +408,7 @@ export function ProjectConfigPanel({
               : [defaultCallbackUrl, ...callbackUrls];
             const appClient = await api.createAppClient(currentAuthConfigId, {
               name: `${config.projectName}-appclient`,
-              tenant: (config.defaultTenant?.trim() || config.projectName || 'default'),
+              tenant: (config.defaultTenant?.trim() || 'MyDefaultTenant'),
               scopes: config.scopes,
               authorizedCallbackUrls: finalCallbackUrls,
               projectName: config.projectName,

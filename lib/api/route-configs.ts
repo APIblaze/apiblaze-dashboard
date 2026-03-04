@@ -84,7 +84,8 @@ export async function putRouteEntry(
   // e.g. PUT /api/route-configs/myproject/1.0.0/GET/api/v1/users/{id}
   // The [...path] catch-all in the Next.js handler rebuilds the route path from segments.
   // NOTE: path already starts with '/' so no separator needed between method and path.
-  const url = `/api/route-configs/${encodeURIComponent(projectId)}/${encodeURIComponent(apiVersion)}/${encodeURIComponent(method)}${path}`;
+  const normalizedPath = path.length > 1 ? path.replace(/\/+$/, '') : path;
+  const url = `/api/route-configs/${encodeURIComponent(projectId)}/${encodeURIComponent(apiVersion)}/${encodeURIComponent(method)}${normalizedPath}`;
   const response = await fetch(url, {
     method: 'PUT',
     credentials: 'include',
@@ -107,7 +108,8 @@ export async function deleteRouteEntry(
   method: string
 ): Promise<void> {
   // URL structure mirrors putRouteEntry — see comment there.
-  const url = `/api/route-configs/${encodeURIComponent(projectId)}/${encodeURIComponent(apiVersion)}/${encodeURIComponent(method)}${path}`;
+  const normalizedPath = path.length > 1 ? path.replace(/\/+$/, '') : path;
+  const url = `/api/route-configs/${encodeURIComponent(projectId)}/${encodeURIComponent(apiVersion)}/${encodeURIComponent(method)}${normalizedPath}`;
   const response = await fetch(url, {
     method: 'DELETE',
     credentials: 'include',

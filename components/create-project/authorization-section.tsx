@@ -69,7 +69,7 @@ function parseTuple(template: string): ParsedTuple | null {
 
 function getTenantId(project: Project): string {
   const cfg = project.config as Record<string, unknown> | undefined;
-  return (cfg?.default_tenant as string) || 'default';
+  return (cfg?.default_tenant as string) || 'MyDefaultTenant';
 }
 
 const POLICIES_API_DOMAIN =

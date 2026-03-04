@@ -140,10 +140,11 @@ export function RoutesSection({
   }, [hasSpecSource, hasUpload, hasLoadedProject, projectProp, project, loadSpec]);
 
   useEffect(() => {
-    if (projectProp && !config.routeConfig && !loading) {
+    if (projectProp && !config.routeConfig) {
       getRouteConfig(projectProp.project_id, projectProp.api_version)
         .then((rc) => {
           if (rc.routes.length > 0) {
+            if (routesRefProp) routesRefProp.current = [];
             updateConfig({ routeConfig: { routes: rc.routes } });
           }
         })
@@ -151,7 +152,7 @@ export function RoutesSection({
           // No existing route config is fine
         });
     }
-  }, [projectProp, config.routeConfig, loading, updateConfig]);
+  }, [projectProp?.project_id, projectProp?.api_version, config.routeConfig, updateConfig, routesRefProp]);
 
   const tableRef = useRef<RoutesTableRef>(null);
 

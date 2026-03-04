@@ -36,6 +36,7 @@ function mapFromPoliciesFormat(route: Record<string, unknown>) {
     pre_request_auth_template: onRead.length > 0 ? JSON.stringify(onRead[0]) : '',
     post_response_policy_template: postWrite.length > 0 ? JSON.stringify(postWrite[0]) : '',
     cache_rules: route.cache_config ? JSON.stringify(route.cache_config) : '',
+    priority: typeof route.priority === 'number' ? route.priority : undefined,
   };
 }
 

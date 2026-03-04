@@ -44,8 +44,9 @@ function extractOperationsFromSpec(spec: Record<string, unknown>): RouteEntry[] 
     for (const [method, op] of Object.entries(pathItem)) {
       if (!HTTP_METHODS.includes(method.toLowerCase())) continue;
       const operation = op as Record<string, unknown>;
+      const normalizedPath = path.length > 1 ? path.replace(/\/+$/, '') : path;
       operations.push({
-        path,
+        path: normalizedPath,
         method: method.toUpperCase(),
         description: (operation.summary ?? operation.description ?? '') as string,
         require_authentication: true,
@@ -78,13 +79,19 @@ function mergeWithExisting(
   const existingMap = new Map(
     existing.map((e) => [`${e.method}:${e.path}`, e])
   );
-  return fromSpec.map((specEntry) => {
+
+  // Overlay existing config onto matching spec routes
+  const specKeys = new Set(fromSpec.map(e => `${e.method}:${e.path}`));
+  const specMerged = fromSpec.map((specEntry) => {
     const key = `${specEntry.method}:${specEntry.path}`;
     const existingEntry = existingMap.get(key);
-    return existingEntry
-      ? { ...specEntry, ...existingEntry }
-      : specEntry;
+    return existingEntry ? { ...specEntry, ...existingEntry } : specEntry;
   });
+
+  // Also include policies-api routes not present in the spec so their templates are always visible
+  const extraRoutes = existing.filter(e => !specKeys.has(`${e.method}:${e.path}`));
+
+  return [...specMerged, ...extraRoutes];
 }
 
 export interface RoutesTableRef {
@@ -152,6 +159,7 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
             <thead>
               <tr className="border-b bg-muted/50">
                 <th className="text-left py-3 px-4 font-medium w-[180px]">Resource / Method</th>
+                <th className="text-left py-3 px-4 font-medium w-[70px]">Priority</th>
                 <th className="text-left py-3 px-4 font-medium w-[140px]">Description</th>
                 <th className="text-left py-3 px-4 font-medium w-[90px]">Require Authentication</th>
                 <th className="text-left py-3 px-4 font-medium min-w-[220px]">Require Authorization: Pre-request authorization template</th>
@@ -182,7 +190,7 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
                           </Badge>
                         </div>
                       </td>
-                      <td colSpan={5} className="py-2 px-4" />
+                      <td colSpan={6} className="py-2 px-4" />
                     </tr>
                     {isExpanded &&
                       group.entries.map((entry) => (
@@ -221,12 +229,14 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: Route
   const [localPostResp, setLocalPostResp] = useState(entry.post_response_policy_template);
   const [localCache, setLocalCache] = useState(entry.cache_rules);
   const [localAuth, setLocalAuth] = useState(entry.require_authentication);
+  const [localPriority, setLocalPriority] = useState<number | undefined>(entry.priority ?? undefined);
 
   useEffect(() => {
     setLocalPreReq(entry.pre_request_auth_template);
     setLocalPostResp(entry.post_response_policy_template);
     setLocalCache(entry.cache_rules);
     setLocalAuth(entry.require_authentication);
+    setLocalPriority(entry.priority ?? '');
   }, [
     entry.path,
     entry.method,
@@ -234,6 +244,7 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: Route
     entry.post_response_policy_template,
     entry.cache_rules,
     entry.require_authentication,
+    entry.priority,
   ]);
 
   const handleJsonBlur = (
@@ -266,6 +277,26 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: Route
             {entry.method}
           </Badge>
         </div>
+      </td>
+      <td className="py-2 px-4">
+        {readOnly ? (
+          <span className="text-xs">{entry.priority ?? '—'}</span>
+        ) : (
+          <input
+            type="number"
+            min={1}
+            value={localPriority ?? ''}
+            onChange={(e) => setLocalPriority(e.target.value === '' ? undefined : Number(e.target.value))}
+            onBlur={(e) => {
+              const val = e.target.value === '' ? undefined : Number(e.target.value);
+              if (val === undefined || (Number.isInteger(val) && val >= 1)) {
+                updateRouteInRef(entry.path, entry.method, { priority: val });
+              }
+            }}
+            className="w-16 text-xs border rounded px-2 py-1 bg-background"
+            placeholder="auto"
+          />
+        )}
       </td>
       <td className="py-2 px-4">
         <span className="text-muted-foreground text-xs whitespace-normal break-words block">
