@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { AlertCircle, Plus, X, Users, Key, Copy, Check, Search, ChevronDown, Star, ExternalLink, Loader2, Pencil, HelpCircle } from 'lucide-react';
+import { AlertCircle, Plus, X, Users, Key, Copy, Check, Search, ChevronDown, Star, ExternalLink, Loader2, Pencil, HelpCircle, Info } from 'lucide-react';
 import { ProjectConfig, SocialProvider } from './types';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { AuthConfigModal } from '@/components/auth-config/auth-config-modal';
@@ -99,14 +99,17 @@ const PROVIDER_TYPE_LABELS: Record<SocialProvider, string> = {
   other: 'Other',
 };
 
-/** APIBlaze default GitHub OAuth client ID - used to show "API Blaze via GitHub" in provider list. From env or known default. */
-const APIBLAZE_GITHUB_CLIENT_ID = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_APIBLAZE_GITHUB_CLIENT_ID?.trim()) || 'Iv23liwZOuwO0lPP9R9P';
+/** APIBlaze default GitHub OAuth client IDs - dashboard and portal use separate apps to avoid token invalidation. */
+const APIBLAZE_GITHUB_CLIENT_IDS = [
+  (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_APIBLAZE_GITHUB_CLIENT_ID?.trim()) || 'Iv23liwZOuwO0lPP9R9P',
+  (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_APIBLAZE_PORTAL_GITHUB_CLIENT_ID?.trim()) || '',
+].filter(Boolean);
 
 function isApiblazeDefaultProvider(provider: { type: string; clientId?: string; client_id?: string; isApiblazeDefault?: boolean }): boolean {
   if (provider.type !== 'github') return false;
   if (provider.isApiblazeDefault === true) return true;
   const clientId = (provider.clientId ?? provider.client_id ?? '').trim();
-  return !!APIBLAZE_GITHUB_CLIENT_ID && clientId === APIBLAZE_GITHUB_CLIENT_ID;
+  return APIBLAZE_GITHUB_CLIENT_IDS.some((id) => id && clientId === id);
 }
 
 const PROVIDER_SETUP_GUIDES: Record<SocialProvider, string[]> = {
@@ -2298,12 +2301,12 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   const [newScope, setNewScope] = useState('');
 
   useEffect(() => {
-    if (teamId && (config.useAuthConfig || config.bringOwnProvider)) {
+    if (teamId && (config.useAuthConfig || config.bringOwnProvider || isEditMode)) {
       api.getTeamTenants(teamId).then(({ tenants }) => setTenantOptions(tenants)).catch(() => setTenantOptions([]));
     } else {
       setTenantOptions([]);
     }
-  }, [teamId, config.useAuthConfig, config.bringOwnProvider]);
+  }, [teamId, config.useAuthConfig, config.bringOwnProvider, isEditMode]);
   // Save config changes immediately to backend (for edit mode, e.g. default_app_client_id, auth_config)
   const saveProjectConfigImmediately = async (updates: {
     default_app_client_id?: string | null;
@@ -2406,30 +2409,23 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [loadingProvider, setLoadingProvider] = useState(false);
   const [authConfigSelectModalOpen, setAuthConfigSelectModalOpen] = useState(false);
-  const [newAllowedIssuer, setNewAllowedIssuer] = useState('');
-  const [newAllowedAudience, setNewAllowedAudience] = useState('');
+  const [newAllowedPairIss, setNewAllowedPairIss] = useState('');
+  const [newAllowedPairAud, setNewAllowedPairAud] = useState('');
 
-  const addAllowedIssuer = () => {
-    const v = newAllowedIssuer.trim();
-    if (!v) return;
-    const current = config.allowedIssuers ?? [];
-    if (current.includes(v)) return;
-    setNewAllowedIssuer('');
-    updateConfig({ allowedIssuers: [...current, v] });
+  const addAllowedPair = () => {
+    const iss = newAllowedPairIss.trim();
+    const aud = newAllowedPairAud.trim();
+    if (!iss || !aud) return;
+    const current = config.allowedPairs ?? [];
+    const exists = current.some((p) => p.iss === iss && p.aud === aud);
+    if (exists) return;
+    setNewAllowedPairIss('');
+    setNewAllowedPairAud('');
+    updateConfig({ allowedPairs: [...current, { iss, aud }] });
   };
-  const removeAllowedIssuer = (iss: string) => {
-    updateConfig({ allowedIssuers: (config.allowedIssuers ?? []).filter((i) => i !== iss) });
-  };
-  const addAllowedAudience = () => {
-    const v = newAllowedAudience.trim();
-    if (!v) return;
-    const current = config.allowedAudiences ?? [];
-    if (current.includes(v)) return;
-    setNewAllowedAudience('');
-    updateConfig({ allowedAudiences: [...current, v] });
-  };
-  const removeAllowedAudience = (aud: string) => {
-    updateConfig({ allowedAudiences: (config.allowedAudiences ?? []).filter((a) => a !== aud) });
+  const removeAllowedPair = (idx: number) => {
+    const current = config.allowedPairs ?? [];
+    updateConfig({ allowedPairs: current.filter((_, i) => i !== idx) });
   };
 
   // Track if we've already loaded auth configs to prevent repeated API calls
@@ -2801,7 +2797,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
             onValueChange={(v) => {
               const updates: Partial<ProjectConfig> = { requestsAuthMode: v as 'authenticate' | 'passthrough' };
               if (v === 'authenticate' && !isEditMode) {
-                updates.requestsAuthMethods = ['jwt', 'api_key'];
+                updates.requestsAuthMethods = ['jwt'];
               }
               updateConfig(updates);
             }}
@@ -2840,52 +2836,46 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   {config.requestsAuthMethods?.includes('jwt') && isEditMode && (
                     <div className="space-y-2 ml-6 mt-2">
                       <div>
-                        <Label className="text-xs">Allowed issuers (iss)</Label>
-                        <div className="flex gap-2 mt-1">
-                          <Input
-                            value={newAllowedIssuer}
-                            onChange={(e) => setNewAllowedIssuer(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                addAllowedIssuer();
-                              }
-                            }}
-                            className="text-sm"
-                          />
-                          <Button type="button" size="sm" onClick={addAllowedIssuer}><Plus className="h-3 w-3" /></Button>
+                        <Label className="text-xs">Allowed (iss, aud) pairs</Label>
+                        <p className="text-xs text-muted-foreground mt-0.5">Both iss and aud required per entry.</p>
+                        <div className="flex flex-wrap gap-2 mt-1 items-end">
+                          <div className="flex-1 min-w-[120px]">
+                            <Label className="text-xs">iss</Label>
+                            <Input
+                              placeholder="https://auth.apiblaze.com/{clientId}"
+                              value={newAllowedPairIss}
+                              onChange={(e) => setNewAllowedPairIss(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAllowedPair(); } }}
+                              className="text-sm mt-0.5"
+                            />
+                          </div>
+                          <div className="flex-1 min-w-[120px]">
+                            <Label className="text-xs">aud</Label>
+                            <Input
+                              placeholder="https://…portal.apiblaze.com/…"
+                              value={newAllowedPairAud}
+                              onChange={(e) => setNewAllowedPairAud(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAllowedPair(); } }}
+                              className="text-sm mt-0.5"
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={addAllowedPair}
+                            disabled={!newAllowedPairIss.trim() || !newAllowedPairAud.trim()}
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
                         </div>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {(config.allowedIssuers ?? []).map((iss) => (
-                            <span key={iss} className="inline-flex items-center gap-0.5 bg-muted px-2 py-0.5 rounded text-xs">
-                              {iss}
-                              <button type="button" onClick={() => removeAllowedIssuer(iss)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <Label className="text-xs">Allowed audience (aud)</Label>
-                        <div className="flex gap-2 mt-1">
-                          <Input
-                            value={newAllowedAudience}
-                            onChange={(e) => setNewAllowedAudience(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                addAllowedAudience();
-                              }
-                            }}
-                            className="text-sm"
-                          />
-                          <Button type="button" size="sm" onClick={addAllowedAudience}><Plus className="h-3 w-3" /></Button>
-                        </div>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {(config.allowedAudiences ?? []).map((aud) => (
-                            <span key={aud} className="inline-flex items-center gap-0.5 bg-muted px-2 py-0.5 rounded text-xs">
-                              {aud}
-                              <button type="button" onClick={() => removeAllowedAudience(aud)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
-                            </span>
+                        <div className="flex flex-col gap-1 mt-2">
+                          {(config.allowedPairs ?? []).map((p, idx) => (
+                            <div key={`${p.iss}-${p.aud}-${idx}`} className="inline-flex items-center gap-2 bg-muted px-2 py-1 rounded text-xs flex-wrap">
+                              <span className="font-mono truncate max-w-[200px]" title={p.iss}>{p.iss}</span>
+                              <span className="text-muted-foreground">+</span>
+                              <span className="font-mono truncate max-w-[200px]" title={p.aud}>{p.aud}</span>
+                              <button type="button" onClick={() => removeAllowedPair(idx)} className="hover:text-destructive ml-1"><X className="h-3 w-3" /></button>
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -2919,7 +2909,19 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   {config.requestsAuthMethods?.includes('opaque') && (
                     <div className="space-y-2 ml-6 mt-2">
                       <div>
-                        <Label className="text-xs">Token verification endpoint</Label>
+                        <div className="flex items-center gap-1.5">
+                          <Label className="text-xs">Token verification endpoint</Label>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex text-muted-foreground hover:text-foreground cursor-help">
+                                <Info className="h-3.5 w-3.5 shrink-0" />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-xs">
+                              <p>Minimum response should be <code className="text-xs">{"{\"sub\":\"yourUserId\", \"exp\":\"timeOfTheOpaqueTokenExpiry\"}"}</code>. The optional field <code className="text-xs">tenantId</code> is necessary if you want to implement authorization segregated by tenants.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
                         <Input
                           placeholder="https://your-endpoint.com/introspect"
                           value={config.opaqueTokenEndpoint ?? ''}
@@ -2969,7 +2971,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   <div className="flex items-center gap-2">
                     <Switch
                       id="requestsAuthApiKey"
-                      checked={config.requestsAuthMethods?.includes('api_key') ?? true}
+                      checked={config.requestsAuthMethods?.includes('api_key') ?? false}
                       onCheckedChange={(checked) => {
                         const methods = config.requestsAuthMethods ?? ['jwt'];
                         const next: ('jwt' | 'opaque' | 'api_key')[] = checked
@@ -2982,6 +2984,25 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                       {(config.requestsAuthMethods?.includes('jwt') && config.requestsAuthMethods?.includes('api_key')) ? 'or ' : ''}Authenticate by API key
                     </Label>
                   </div>
+                  {config.requestsAuthMethods?.includes('api_key') && (
+                    <div className="flex items-start justify-between gap-4 pl-6 mt-2">
+                      <div className="flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="requireApiKeyXEndUserId"
+                            checked={config.requireApiKeyXEndUserId ?? false}
+                            onCheckedChange={(checked) => updateConfig({ requireApiKeyXEndUserId: checked })}
+                          />
+                          <Label htmlFor="requireApiKeyXEndUserId" className="text-sm font-medium">
+                            Require X-End-User-Id header
+                          </Label>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Reject requests with X-API-Key that do not include X-End-User-Id
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -187,7 +187,7 @@ class ApiClient {
     requests_auth?: {
       mode: 'authenticate' | 'passthrough';
       methods?: ('jwt' | 'opaque' | 'api_key')[];
-      jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
+      jwt?: { allowed_pairs?: Array<{ iss: string; aud: string }> };
       opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
     };
   }): Promise<Record<string, unknown>> {
@@ -329,6 +329,7 @@ class ApiClient {
     authorizedCallbackUrls?: string[];
     signoutUris?: string[];
     scopes?: string[];
+    providerType?: string;
     branding?: import('@/types/auth-config').AppClientBranding;
   }) {
     return this.request(`/auth-configs/${authConfigId}/app-clients`, {

@@ -77,7 +77,8 @@ export async function POST(
       );
     }
     
-    // Set safe defaults for token expiries
+    // Set safe defaults for token expiries. Do NOT default scopes here - let internal API
+    // use provider-appropriate defaults (e.g. read:user user:email for providerType: 'github').
     const appClientData = {
       name: body.name,
       projectName: body.projectName.trim(),
@@ -88,7 +89,8 @@ export async function POST(
       accessTokenExpiry: body.accessTokenExpiry ?? 3600, // 1 hour
       authorizedCallbackUrls: body.authorizedCallbackUrls ?? [],
       signoutUris: body.signoutUris ?? [],
-      scopes: body.scopes ?? ['email', 'offline_access', 'openid', 'profile'],
+      scopes: body.scopes,
+      providerType: body.providerType,
     };
     
     const client = createAPIBlazeClient({

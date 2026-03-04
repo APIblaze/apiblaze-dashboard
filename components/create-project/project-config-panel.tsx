@@ -95,9 +95,8 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       userGroupName: '',
       enableSocialAuth: true,
       requestsAuthMode: 'authenticate' as const,
-      requestsAuthMethods: ['jwt', 'api_key'] as ('jwt' | 'opaque' | 'api_key')[],
-      allowedIssuers: [],
-      allowedAudiences: [],
+      requestsAuthMethods: ['jwt'] as ('jwt' | 'opaque' | 'api_key')[],
+      allowedPairs: [],
       opaqueTokenEndpoint: '',
       opaqueTokenMethod: 'GET' as const,
       opaqueTokenParams: '?access_token={token}',
@@ -144,8 +143,20 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     enableSocialAuth: true,
     requestsAuthMode: ((projectConfig?.requests_auth as Record<string, unknown>)?.mode as 'authenticate' | 'passthrough') || 'passthrough',
     requestsAuthMethods: ((projectConfig?.requests_auth as Record<string, unknown>)?.methods as ('jwt' | 'opaque' | 'api_key')[]) || ['jwt'],
-    allowedIssuers: ((projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown>)?.allowed_issuers as string[] || [],
-    allowedAudiences: ((projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown>)?.allowed_audiences as string[] || [],
+    requireApiKeyXEndUserId: ((projectConfig?.requests_auth as Record<string, unknown>)?.api_key as Record<string, unknown>)?.require_x_end_user_id as boolean || false,
+    allowedPairs: (() => {
+      const jwt = (projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown> | undefined;
+      const pairs = jwt?.allowed_pairs as Array<{ iss?: string; aud?: string }> | undefined;
+      if (Array.isArray(pairs) && pairs.length > 0) {
+        return pairs.filter((p) => p?.iss && p?.aud).map((p) => ({ iss: p.iss!, aud: p.aud! }));
+      }
+      const issuers = jwt?.allowed_issuers as string[] | undefined;
+      const audiences = jwt?.allowed_audiences as string[] | undefined;
+      if (Array.isArray(issuers) && Array.isArray(audiences) && issuers.length > 0 && audiences.length > 0) {
+        return issuers.flatMap((iss) => audiences!.map((aud) => ({ iss, aud })));
+      }
+      return [];
+    })(),
     opaqueTokenEndpoint: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.endpoint as string || '',
     opaqueTokenMethod: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.method as 'GET' | 'POST' || 'GET',
     opaqueTokenParams: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.params as string || '?access_token={token}',
@@ -406,10 +417,12 @@ export function ProjectConfigPanel({
             const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
               ? [defaultCallbackUrl, ...callbackUrls.filter((u) => u !== defaultCallbackUrl)]
               : [defaultCallbackUrl, ...callbackUrls];
+            const firstProviderType = config.providers?.[0]?.type ?? config.socialProvider;
             const appClient = await api.createAppClient(currentAuthConfigId, {
               name: `${config.projectName}-appclient`,
               tenant: (config.defaultTenant?.trim() || 'MyDefaultTenant'),
               scopes: config.scopes,
+              providerType: firstProviderType,
               authorizedCallbackUrls: finalCallbackUrls,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
@@ -471,7 +484,7 @@ export function ProjectConfigPanel({
             const result = await api.createAuthConfigWithDefaultGitHub({
               authConfigName,
               appClientName,
-              scopes: config.scopes,
+              // Omit scopes so server uses GitHub defaults (read:user, user:email)
               enableSocialAuth: config.enableSocialAuth,
               enableApiKeyAuth: config.requestsAuthMethods?.includes('api_key'),
               bringMyOwnOAuth: config.bringOwnProvider,
@@ -517,20 +530,33 @@ export function ProjectConfigPanel({
       let requests_auth: {
         mode: 'authenticate' | 'passthrough';
         methods?: ('jwt' | 'opaque' | 'api_key')[];
-        jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
+        jwt?: { allowed_pairs: Array<{ iss: string; aud: string }> };
         opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
+        api_key?: { require_x_end_user_id: boolean };
       } | undefined;
       if (requestsAuthMode === 'passthrough') {
         requests_auth = { mode: 'passthrough', methods: [] };
       } else {
-        const jwtIssuers = (config.allowedIssuers ?? []).length > 0 ? config.allowedIssuers!.map(substitutePlaceholders) : (appClientIdVal ? [`https://auth.apiblaze.com/${appClientIdVal}`] : []);
-        const jwtAudiences = (config.allowedAudiences ?? []).length > 0 ? config.allowedAudiences!.map(substitutePlaceholders) : [...(projectNameVal ? [`https://${projectNameVal}.portal.apiblaze.com/${apiVersionVal}`] : []), ...(appClientIdVal ? [appClientIdVal] : [])];
+        const pairs = (config.allowedPairs ?? []).length > 0
+          ? (config.allowedPairs ?? []).map((p) => ({
+              iss: substitutePlaceholders(p.iss),
+              aud: substitutePlaceholders(p.aud),
+            }))
+          : (appClientIdVal
+            ? [
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}.portal.apiblaze.com/${apiVersionVal}` },
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: appClientIdVal },
+              ]
+            : []);
         requests_auth = {
           mode: 'authenticate',
           methods: requestsAuthMethods,
-          jwt: { allowed_issuers: jwtIssuers, allowed_audiences: jwtAudiences },
+          jwt: { allowed_pairs: pairs },
           opaque: requestsAuthMethods.includes('opaque') && config.opaqueTokenEndpoint
             ? { endpoint: config.opaqueTokenEndpoint, method: config.opaqueTokenMethod ?? 'GET', params: config.opaqueTokenParams ?? '?access_token={token}', body: config.opaqueTokenBody ?? 'token={token}' }
+            : undefined,
+          api_key: requestsAuthMethods.includes('api_key')
+            ? { require_x_end_user_id: config.requireApiKeyXEndUserId ?? false }
             : undefined,
         };
       }
@@ -607,20 +633,33 @@ export function ProjectConfigPanel({
       let requests_auth: {
         mode: 'authenticate' | 'passthrough';
         methods?: ('jwt' | 'opaque' | 'api_key')[];
-        jwt?: { allowed_issuers: string[]; allowed_audiences: string[] };
+        jwt?: { allowed_pairs: Array<{ iss: string; aud: string }> };
         opaque?: { endpoint: string; method: 'GET' | 'POST'; params: string; body: string };
+        api_key?: { require_x_end_user_id: boolean };
       } | undefined;
       if (requestsAuthMode === 'passthrough') {
         requests_auth = { mode: 'passthrough', methods: [] };
       } else {
-        const jwtIssuers = (config.allowedIssuers ?? []).length > 0 ? config.allowedIssuers!.map(substitutePlaceholders) : (appClientIdVal ? [`https://auth.apiblaze.com/${appClientIdVal}`] : []);
-        const jwtAudiences = (config.allowedAudiences ?? []).length > 0 ? config.allowedAudiences!.map(substitutePlaceholders) : [...(projectNameVal ? [`https://${projectNameVal}.portal.apiblaze.com/${apiVersionVal}`] : []), ...(appClientIdVal ? [appClientIdVal] : [])];
+        const pairs = (config.allowedPairs ?? []).length > 0
+          ? (config.allowedPairs ?? []).map((p) => ({
+              iss: substitutePlaceholders(p.iss),
+              aud: substitutePlaceholders(p.aud),
+            }))
+          : (appClientIdVal
+            ? [
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}.portal.apiblaze.com/${apiVersionVal}` },
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: appClientIdVal },
+              ]
+            : []);
         requests_auth = {
           mode: 'authenticate',
           methods: requestsAuthMethods,
-          jwt: { allowed_issuers: jwtIssuers, allowed_audiences: jwtAudiences },
+          jwt: { allowed_pairs: pairs },
           opaque: requestsAuthMethods.includes('opaque') && config.opaqueTokenEndpoint
             ? { endpoint: config.opaqueTokenEndpoint, method: config.opaqueTokenMethod ?? 'GET', params: config.opaqueTokenParams ?? '?access_token={token}', body: config.opaqueTokenBody ?? 'token={token}' }
+            : undefined,
+          api_key: requestsAuthMethods.includes('api_key')
+            ? { require_x_end_user_id: config.requireApiKeyXEndUserId ?? false }
             : undefined,
         };
       }
