@@ -50,8 +50,8 @@ export interface ProjectConfig {
   requestsAuthMode: 'authenticate' | 'passthrough';
   requestsAuthMethods: ('jwt' | 'opaque' | 'api_key')[];
   requireApiKeyXEndUserId?: boolean;
-  allowedIssuers: string[];
-  allowedAudiences: string[];
+  /** Allowed (iss, aud) pairs for JWT verification. Both required per entry. */
+  allowedPairs: Array<{ iss: string; aud: string }>;
   opaqueTokenEndpoint: string;
   opaqueTokenMethod: 'GET' | 'POST';
   opaqueTokenParams: string;
