@@ -792,6 +792,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               bringMyOwnOAuth: config.bringOwnProvider,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
+              defaultTenant: config.defaultTenant?.trim() || 'MyDefaultTenant',
             });
 
             // Track for rollback (server creates auth config + app client + provider)

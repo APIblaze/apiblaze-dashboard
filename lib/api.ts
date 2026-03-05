@@ -421,6 +421,7 @@ class ApiClient {
     appClientName: string;
     projectName: string;
     apiVersion: string;
+    defaultTenant?: string;
     scopes?: string[];
     enableSocialAuth?: boolean;
     enableApiKeyAuth?: boolean;
