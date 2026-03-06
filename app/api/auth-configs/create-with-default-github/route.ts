@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   try {
     const userClaims = await getUserClaims();
     const body = await request.json();
-    const { authConfigName, appClientName, scopes, enableSocialAuth, enableApiKeyAuth, bringMyOwnOAuth, projectName, apiVersion } = body;
+    const { authConfigName, appClientName, scopes, enableSocialAuth, enableApiKeyAuth, bringMyOwnOAuth, projectName, apiVersion, defaultTenant } = body;
 
     if (!authConfigName || !appClientName) {
       return NextResponse.json(
@@ -79,12 +79,14 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Create AppClient with GitHub scopes (providerType ensures correct defaults if scopes omitted)
+    // Use defaultTenant (e.g. MyDefaultTenant) so we don't create an extra tenant named after the project.
+    const tenantForClient = (defaultTenant != null && String(defaultTenant).trim()) ? String(defaultTenant).trim() : 'MyDefaultTenant';
     const defaultGitHubScopes = getDefaultScopesForProvider('github');
     const appClient = await client.createAppClient(userClaims, authConfigId, {
       name: appClientName,
       projectName: String(projectName).trim(),
       apiVersion: String(apiVersion).trim(),
-      tenant: 'MyDefaultTenant',
+      tenant: tenantForClient,
       scopes: scopes || defaultGitHubScopes,
       providerType: 'github',
     });

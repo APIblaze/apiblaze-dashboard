@@ -493,6 +493,7 @@ export function ProjectConfigPanel({
               bringMyOwnOAuth: config.bringOwnProvider,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
+              defaultTenant: config.defaultTenant?.trim() || 'MyDefaultTenant',
             });
             rollbackAuthConfigId = result.authConfigId;
             authConfigId = result.authConfigId;
