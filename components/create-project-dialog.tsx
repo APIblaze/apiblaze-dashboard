@@ -178,6 +178,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     
     // Domains (placeholder)
     customDomains: [],
+    enforceAuthorization: false,
       };
     }
 
@@ -291,6 +292,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       
       // Domains
       customDomains: [],
+      enforceAuthorization: (projectConfig?.authorization as Record<string, unknown>)?.enforce_authorization === true,
     };
   };
 

@@ -236,7 +236,7 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: Route
     setLocalPostResp(entry.post_response_policy_template);
     setLocalCache(entry.cache_rules);
     setLocalAuth(entry.require_authentication);
-    setLocalPriority(entry.priority ?? '');
+    setLocalPriority(entry.priority ?? undefined);
   }, [
     entry.path,
     entry.method,

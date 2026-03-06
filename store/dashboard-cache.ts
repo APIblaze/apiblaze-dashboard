@@ -42,6 +42,8 @@ export interface DashboardCacheActions {
   /** Find app client by client id across all auth configs. Returns authConfigId and appClient. */
   getAppClientWithAuthConfig: (clientId: string) => { authConfigId: string; appClient: AppClient } | undefined;
   getProviders: (authConfigId: string, clientId: string) => SocialProvider[];
+  /** Update a single project's config in cache after a PATCH save. Avoids full invalidateAndRefetch. */
+  updateProjectInCache: (projectId: string, apiVersion: string, configPatch: Record<string, unknown>) => void;
   /** Update a single app client in cache (e.g. after verify). Avoids full invalidateAndRefetch. */
   updateAppClientInCache: (authConfigId: string, clientId: string, patch: Partial<AppClient>) => void;
   /** Set app clients for a config (e.g. from lookup or lazy fetch). */
@@ -191,6 +193,20 @@ export const useDashboardCacheStore = create<DashboardCacheState & DashboardCach
   },
   getProviders: (authConfigId, clientId) =>
     get().providersByConfigClient[`${authConfigId}-${clientId}`] ?? [],
+
+  updateProjectInCache: (projectId, apiVersion, configPatch) => {
+    const projects = get().projects;
+    const idx = projects.findIndex(
+      (p) => p.project_id === projectId && p.api_version === apiVersion
+    );
+    if (idx < 0) return;
+    const existing = projects[idx];
+    const updated = {
+      ...existing,
+      config: { ...(existing.config as Record<string, unknown> ?? {}), ...configPatch },
+    };
+    set({ projects: [...projects.slice(0, idx), updated, ...projects.slice(idx + 1)] });
+  },
 
   updateAppClientInCache: (authConfigId, clientId, patch) => {
     const clients = get().appClientsByConfig[authConfigId] ?? [];

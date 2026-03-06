@@ -63,6 +63,16 @@ export async function putRouteConfig(
   routes: RouteEntry[]
 ): Promise<RouteConfig> {
   const toSave = getRoutesWithConfig(routes);
+  const toSaveKeys = new Set(toSave.map((r) => `${r.method}:${r.path}`));
+
+  // Delete routes that were cleared (in the full list but have no config now)
+  const toDelete = routes.filter((r) => !toSaveKeys.has(`${r.method}:${r.path}`));
+  await Promise.all(
+    toDelete.map((entry) =>
+      deleteRouteEntry(projectId, apiVersion, entry.path, entry.method).catch(() => {})
+    )
+  );
+
   const results = await Promise.all(
     toSave.map((entry) => putRouteEntry(projectId, apiVersion, entry.path, entry.method, entry))
   );

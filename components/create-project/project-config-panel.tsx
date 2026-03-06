@@ -124,6 +124,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       preProcessingPath: '',
       postProcessingPath: '',
       customDomains: [],
+      enforceAuthorization: false,
     };
   }
   const projectConfig = project?.config as Record<string, unknown> | undefined;
@@ -203,6 +204,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     preProcessingPath: '',
     postProcessingPath: '',
     customDomains: [],
+    enforceAuthorization: (projectConfig?.authorization as Record<string, unknown>)?.enforce_authorization === true,
   };
 }
 
@@ -240,6 +242,7 @@ export function ProjectConfigPanel({
   const routesRef = useRef<RouteEntry[]>([]);
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
+  const updateProjectInCache = useDashboardCacheStore((s) => s.updateProjectInCache);
 
   useEffect(() => {
     setCurrentProject(project);
@@ -667,12 +670,22 @@ export function ProjectConfigPanel({
       const payload: Record<string, unknown> = {
         default_app_client_id: config.defaultAppClient || null,
         requests_auth,
+        authorization: { enforce_authorization: config.enforceAuthorization },
       };
       await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
+
+      // Save route config if any routes are present
+      const routesToSave = routesRef.current?.length ? routesRef.current : (config.routeConfig?.routes ?? []);
+      if (routesToSave.length > 0) {
+        const { putRouteConfig } = await import('@/lib/api/route-configs');
+        await putRouteConfig(currentProject.project_id, currentProject.api_version, routesToSave);
+      }
+
       toast({ title: 'Config Saved', description: 'Project configuration has been updated successfully.' });
       const updatedConfig = { ...(currentProject.config as Record<string, unknown>), ...payload };
       const updatedProject = { ...currentProject, config: updatedConfig };
       setCurrentProject(updatedProject);
+      updateProjectInCache(currentProject.project_id, currentProject.api_version, payload);
       onProjectUpdate?.(updatedProject);
     } catch (error) {
       console.error('Failed to save config:', error);
@@ -768,6 +781,8 @@ export function ProjectConfigPanel({
           {activeTab === 'authorization' && (
             <AuthorizationSection
               project={currentProject}
+              config={config}
+              updateConfig={updateConfig}
               onProjectUpdate={(updated) => {
                 setCurrentProject(updated);
                 onProjectUpdate?.(updated);

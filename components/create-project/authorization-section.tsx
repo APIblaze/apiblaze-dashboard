@@ -13,12 +13,14 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { getRouteConfig } from '@/lib/api/route-configs';
 import type { RouteEntry } from '@/lib/api/route-configs';
-import { updateProjectConfig } from '@/lib/api/projects';
 import type { Project } from '@/types/project';
 import { useToast } from '@/hooks/use-toast';
+import type { ProjectConfig } from './types';
 
 interface AuthorizationSectionProps {
   project: Project | null;
+  config: ProjectConfig;
+  updateConfig: (updates: Partial<ProjectConfig>) => void;
   onProjectUpdate?: (updated: Project) => void;
 }
 
@@ -43,12 +45,6 @@ function hasNoPolicy(route: RouteEntry): boolean {
   );
 }
 
-function getDefaultPolicy(project: Project): 'allow' | 'deny' {
-  const cfg = project.config as Record<string, unknown> | undefined;
-  const auth = cfg?.authorization as Record<string, unknown> | undefined;
-  const policy = auth?.default_policy;
-  return policy === 'deny' ? 'deny' : 'allow';
-}
 
 function parseTuple(template: string): ParsedTuple | null {
   try {
@@ -186,67 +182,23 @@ function RouteRow({ route, enforced }: { route: RouteEntry; enforced: boolean })
 // ─── Enforcement Card ─────────────────────────────────────────────────────────
 
 function EnforcementCard({
-  project,
-  onProjectUpdate,
+  enforceAuthorization,
+  updateConfig,
   routes,
   routesLoading,
   onRefreshRoutes,
 }: {
-  project: Project;
-  onProjectUpdate?: (updated: Project) => void;
+  enforceAuthorization: boolean;
+  updateConfig: (updates: Partial<ProjectConfig>) => void;
   routes: RouteEntry[];
   routesLoading: boolean;
   onRefreshRoutes: () => void;
 }) {
-  const { toast } = useToast();
-  const [enforced, setEnforced] = useState(getDefaultPolicy(project) === 'deny');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setEnforced(getDefaultPolicy(project) === 'deny');
-  }, [project.project_id, project.config]);
-
   const uncoveredCount = routes.filter(hasNoPolicy).length;
   const coveredCount = routes.length - uncoveredCount;
 
-  const handleToggle = async (checked: boolean) => {
-    setEnforced(checked);
-    setSaving(true);
-    try {
-      const existingCfg = (project.config as Record<string, unknown>) ?? {};
-      const existingAuth = (existingCfg.authorization as Record<string, unknown>) ?? {};
-      await updateProjectConfig(project.project_id, project.api_version, {
-        ...existingCfg,
-        authorization: {
-          ...existingAuth,
-          default_policy: checked ? 'deny' : 'allow',
-        },
-      });
-      toast({
-        title: checked ? 'Authorization enforced' : 'Authorization relaxed',
-        description: checked
-          ? 'Routes without policies will now be denied.'
-          : 'Routes without policies will be allowed through.',
-      });
-      if (onProjectUpdate) {
-        onProjectUpdate({
-          ...project,
-          config: {
-            ...existingCfg,
-            authorization: { ...existingAuth, default_policy: checked ? 'deny' : 'allow' },
-          },
-        });
-      }
-    } catch (e) {
-      setEnforced(!checked); // revert
-      toast({
-        title: 'Failed to save',
-        description: e instanceof Error ? e.message : 'Unknown error',
-        variant: 'destructive',
-      });
-    } finally {
-      setSaving(false);
-    }
+  const handleToggle = (checked: boolean) => {
+    updateConfig({ enforceAuthorization: checked });
   };
 
   return (
@@ -260,16 +212,14 @@ function EnforcementCard({
             </CardDescription>
           </div>
           <div className="flex items-center gap-3 pt-0.5">
-            {saving && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
             <div className="flex items-center gap-2">
               <Switch
                 id="enforce-auth"
-                checked={enforced}
+                checked={enforceAuthorization}
                 onCheckedChange={handleToggle}
-                disabled={saving}
               />
               <Label htmlFor="enforce-auth" className="text-sm font-medium cursor-pointer">
-                {enforced ? 'On' : 'Off'}
+                {enforceAuthorization ? 'On' : 'Off'}
               </Label>
             </div>
           </div>
@@ -286,7 +236,7 @@ function EnforcementCard({
                 <span>{coveredCount} / {routes.length} routes covered</span>
               </span>
               {uncoveredCount > 0 && (
-                <span className={`flex items-center gap-1.5 ${enforced ? 'text-orange-600 dark:text-orange-400' : 'text-muted-foreground'}`}>
+                <span className={`flex items-center gap-1.5 ${enforceAuthorization ? 'text-orange-600 dark:text-orange-400' : 'text-muted-foreground'}`}>
                   <ShieldOff className="w-4 h-4" />
                   <span>{uncoveredCount} missing {uncoveredCount === 1 ? 'policy' : 'policies'}</span>
                 </span>
@@ -309,7 +259,7 @@ function EnforcementCard({
         </div>
 
         {/* Warning banner: only shown when enforced AND gaps exist */}
-        {enforced && uncoveredCount > 0 && !routesLoading && (
+        {enforceAuthorization && uncoveredCount > 0 && !routesLoading && (
           <div className="flex items-start gap-2 text-sm text-orange-700 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-900 rounded-lg p-3">
             <TriangleAlert className="w-4 h-4 mt-0.5 shrink-0" />
             <span>
@@ -542,7 +492,7 @@ function RouteCoverageCard({
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export function AuthorizationSection({ project, onProjectUpdate }: AuthorizationSectionProps) {
+export function AuthorizationSection({ project, config, updateConfig, onProjectUpdate }: AuthorizationSectionProps) {
   // Shared route state — lifted so EnforcementCard and RouteCoverageCard share the same data
   const [routes, setRoutes] = useState<RouteEntry[]>([]);
   const [routesLoading, setRoutesLoading] = useState(false);
@@ -582,8 +532,6 @@ export function AuthorizationSection({ project, onProjectUpdate }: Authorization
     );
   }
 
-  const enforced = getDefaultPolicy(project) === 'deny';
-
   return (
     <div className="space-y-6">
       {/* Info banner */}
@@ -600,8 +548,8 @@ export function AuthorizationSection({ project, onProjectUpdate }: Authorization
       </div>
 
       <EnforcementCard
-        project={project}
-        onProjectUpdate={onProjectUpdate}
+        enforceAuthorization={config.enforceAuthorization}
+        updateConfig={updateConfig}
         routes={routes}
         routesLoading={routesLoading}
         onRefreshRoutes={() => void loadRoutes(project)}
@@ -613,7 +561,7 @@ export function AuthorizationSection({ project, onProjectUpdate }: Authorization
         routes={routes}
         loading={routesLoading}
         error={routesError}
-        enforced={enforced}
+        enforced={config.enforceAuthorization}
       />
     </div>
   );

@@ -116,6 +116,9 @@ export interface ProjectConfig {
   // Domains
   customDomains: CustomDomain[];
 
+  // Authorization
+  enforceAuthorization: boolean;
+
   // Routes (per-route config from OpenAPI spec)
   routeConfig?: {
     routes: RouteEntry[];
