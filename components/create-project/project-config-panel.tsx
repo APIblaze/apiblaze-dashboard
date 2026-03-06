@@ -411,7 +411,7 @@ export function ProjectConfigPanel({
               currentAuthConfigId = (authConfig as { id: string }).id;
               rollbackAuthConfigId = currentAuthConfigId;
             }
-            const defaultCallbackUrl = `https://${config.projectName}.portal.apiblaze.com/${config.apiVersion || '1.0.0'}`;
+            const defaultCallbackUrl = `https://${config.projectName}-api.portal.apiblaze.com/${config.apiVersion || '1.0.0'}`;
             const callbackUrls = config.authorizedCallbackUrls?.length ? config.authorizedCallbackUrls : [defaultCallbackUrl];
             const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
               ? [defaultCallbackUrl, ...callbackUrls.filter((u) => u !== defaultCallbackUrl)]
@@ -544,7 +544,7 @@ export function ProjectConfigPanel({
             }))
           : (appClientIdVal
             ? [
-                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}.portal.apiblaze.com/${apiVersionVal}` },
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}-api.portal.apiblaze.com/${apiVersionVal}` },
                 { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: appClientIdVal },
               ]
             : []);
@@ -647,7 +647,7 @@ export function ProjectConfigPanel({
             }))
           : (appClientIdVal
             ? [
-                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}.portal.apiblaze.com/${apiVersionVal}` },
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}-api.portal.apiblaze.com/${apiVersionVal}` },
                 { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: appClientIdVal },
               ]
             : []);

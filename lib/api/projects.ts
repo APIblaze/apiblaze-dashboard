@@ -104,17 +104,19 @@ export async function deleteProject(projectId: string, apiVersion: string = '1.0
 export async function updateProjectConfig(
   projectId: string,
   apiVersion: string,
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
+  options?: { tenant?: string }
 ): Promise<void> {
   const url = `/api/projects/${projectId}/${apiVersion}`;
-  
+  const body = options?.tenant ? { ...config, tenant: options.tenant } : config;
+
   const response = await fetch(url, {
     method: 'PATCH',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(config),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

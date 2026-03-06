@@ -64,7 +64,7 @@ export function UnifiedNav({
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
 
   const teamLabel = getTeamLabel(teamId, userId, githubHandle);
-  const isAuthConfigs = pathname === '/dashboard/auth-configs';
+  const isAuthConfigs = pathname === '/dashboard/auth-configs' || (pathname === '/dashboard/tenants' && !!(authConfigId || clientId || providerId));
   const hasAuthDrillDown = !!(authConfigId || clientId || providerId);
   const authConfig = authConfigId ? getAuthConfig(authConfigId) : null;
   const appClient = authConfigId && clientId ? getAppClient(authConfigId, clientId) : null;
@@ -109,21 +109,21 @@ export function UnifiedNav({
   };
 
   const handleAuthSelect = (id: string | null) => {
-    if (id) router.push(`/dashboard/auth-configs?authConfig=${encodeURIComponent(id)}`);
-    else router.push('/dashboard/auth-configs');
+    if (id) router.push(`/dashboard/tenants?authConfig=${encodeURIComponent(id)}`);
+    else router.push('/dashboard/tenants');
     setOpen(false);
   };
 
   const projectsHeaderLabel = githubHandle ? `All ${githubHandle}'s projects` : 'All projects';
-  const authConfigsHeaderLabel = githubHandle ? `${githubHandle}'s auth configs` : 'auth configs';
+  const authConfigsHeaderLabel = githubHandle ? `${githubHandle}'s tenants` : 'Tenants';
 
   const navToProjectsList = () => {
     onSelectorChange({ type: 'team' });
     router.push('/dashboard');
   };
-  const navToAuthConfigsList = () => router.push('/dashboard/auth-configs');
-  const navToAuthConfig = () => authConfigId && router.push(`/dashboard/auth-configs?authConfig=${encodeURIComponent(authConfigId)}`);
-  const navToAppClient = () => authConfigId && clientId && router.push(`/dashboard/auth-configs?authConfig=${encodeURIComponent(authConfigId)}&client=${encodeURIComponent(clientId)}`);
+  const navToAuthConfigsList = () => router.push('/dashboard/tenants');
+  const navToAuthConfig = () => authConfigId && router.push(`/dashboard/tenants?authConfig=${encodeURIComponent(authConfigId)}`);
+  const navToAppClient = () => authConfigId && clientId && router.push(`/dashboard/tenants?authConfig=${encodeURIComponent(authConfigId)}&client=${encodeURIComponent(clientId)}`);
 
   const triggerBaseClass = 'flex items-center gap-2 rounded-md border bg-background px-3 py-2 min-h-9 text-left';
   const segmentClass = 'text-sm font-medium hover:underline truncate';

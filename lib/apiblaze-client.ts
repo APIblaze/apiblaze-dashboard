@@ -418,12 +418,68 @@ export class APIBlazeClient {
 
   async getTeamTenants(
     userClaims: UserAssertionClaims,
-    teamId: string
-  ): Promise<{ tenants: string[] }> {
-    return this.request<{ tenants: string[] }>(`/teams/${encodeURIComponent(teamId)}/tenants`, {
+    teamId: string,
+    detail?: boolean
+  ): Promise<{ tenants: string[] } | { tenants: Array<{ tenant_name: string; display_name: string; auth_config_id: string | null; app_clients_count: number; proxies: Array<{ project_id: string; api_version: string }> }> }> {
+    const q = detail ? '?detail=1' : '';
+    return this.request(`/teams/${encodeURIComponent(teamId)}/tenants${q}`, {
       method: 'GET',
       userClaims,
     });
+  }
+
+  async createTeamTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    data: { display_name: string; tenant_name?: string }
+  ) {
+    return this.request<{ tenant_name: string; display_name: string }>(`/teams/${encodeURIComponent(teamId)}/tenants`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+      userClaims,
+    });
+  }
+
+  async listProjectTenants(
+    userClaims: UserAssertionClaims,
+    projectId: string,
+    version: string
+  ): Promise<{ tenants: Array<{ tenant_name: string; display_name: string }> }> {
+    return this.request(`/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(version)}/tenants`, {
+      method: 'GET',
+      userClaims,
+    });
+  }
+
+  async attachTenantToProject(
+    userClaims: UserAssertionClaims,
+    projectId: string,
+    version: string,
+    data: { tenant_name: string; display_name?: string; auth_config_id?: string }
+  ) {
+    return this.request<{ success: boolean; tenant_name: string; display_name: string; url: string }>(
+      `/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(version)}/tenants`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+        userClaims,
+      }
+    );
+  }
+
+  async detachTenantFromProject(
+    userClaims: UserAssertionClaims,
+    projectId: string,
+    version: string,
+    tenantName: string
+  ): Promise<void> {
+    return this.request(
+      `/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(version)}/tenants/${encodeURIComponent(tenantName)}`,
+      {
+        method: 'DELETE',
+        userClaims,
+      }
+    );
   }
 
   async updateAppClient(

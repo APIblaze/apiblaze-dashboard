@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -47,12 +48,24 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
   const [installModalOpen, setInstallModalOpen] = useState(false);
   const [githubAppInstalled, setGithubAppInstalled] = useState(false);
   const [, setCheckingInstallation] = useState(true);
+  const [attachedTenants, setAttachedTenants] = useState<Array<{ tenant_name: string; display_name: string }>>([]);
+  const [selectedUrlTenant, setSelectedUrlTenant] = useState<string>('api');
 
   useEffect(() => {
     // Check if GitHub App is installed
     console.log('[General Section] Component mounted, checking GitHub installation');
     checkGitHubInstallation();
   }, []);
+
+  useEffect(() => {
+    if (!editingProject) return;
+    api.listProjectTenants(editingProject.project_id, editingProject.api_version)
+      .then((r) => {
+        setAttachedTenants(r.tenants ?? []);
+        setSelectedUrlTenant(r.tenants?.[0]?.tenant_name ?? 'api');
+      })
+      .catch(() => setAttachedTenants([]));
+  }, [editingProject?.project_id, editingProject?.api_version]);
 
   // Re-check if app was just installed
   useEffect(() => {
@@ -549,7 +562,7 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
               </>
             )}
           </div>
-          <span className="text-muted-foreground">.apiblaze.com</span>
+          <span className="text-muted-foreground shrink-0">-api.apiblaze.com</span>
           <span className="text-muted-foreground">/</span>
           {editingProject ? (
             <Tooltip>
@@ -578,10 +591,31 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
         </div>
         
         {config.projectName && (
-          <p className="text-sm text-muted-foreground mt-2">
-            Your API will be available at: <span className="font-mono text-blue-600">
-              {config.projectName}.apiblaze.com/{config.apiVersion}
-            </span>
+          <p className="text-sm text-muted-foreground mt-2 flex flex-wrap items-center gap-1.5">
+            <span>Your API will be available at:</span>
+            {editingProject && attachedTenants.length > 1 ? (
+              <span className="inline-flex items-center gap-1">
+                <Select value={selectedUrlTenant} onValueChange={setSelectedUrlTenant}>
+                  <SelectTrigger className="h-7 w-auto min-w-[80px] font-mono text-blue-600 border-0 p-0 shadow-none focus:ring-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {attachedTenants.map((t) => (
+                      <SelectItem key={t.tenant_name} value={t.tenant_name}>
+                        {t.tenant_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="font-mono text-blue-600">
+                  {config.projectName}-api.apiblaze.com/{config.apiVersion}
+                </span>
+              </span>
+            ) : (
+              <span className="font-mono text-blue-600">
+                {config.projectName}-{(editingProject && attachedTenants.length > 0 ? selectedUrlTenant : 'api')}.apiblaze.com/{config.apiVersion}
+              </span>
+            )}
           </p>
         )}
         {projectNameCheckMessage && nameAvailable === false && (

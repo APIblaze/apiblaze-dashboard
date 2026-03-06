@@ -288,7 +288,7 @@ export default function EnableLlmPage() {
       return selectedProject.urls.api.replace(/\/+$/, '');
     }
     if (selectedProject) {
-      return `https://${selectedProject.project_id}.apiblaze.com/${selectedProject.api_version}/${selectedEnvironment}`;
+      return `https://${selectedProject.project_id}-api.apiblaze.com/${selectedProject.api_version}/${selectedEnvironment}`;
     }
     return '';
   }, [selectedProject, selectedEnvironment]);

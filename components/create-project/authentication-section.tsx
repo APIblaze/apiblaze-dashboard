@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { AlertCircle, Plus, X, Users, Key, Copy, Check, Search, ChevronDown, Star, ExternalLink, Loader2, Pencil, HelpCircle, Info } from 'lucide-react';
+import { AlertCircle, Plus, X, Users, Key, Copy, Check, Search, ChevronDown, ChevronRight, Star, ExternalLink, Loader2, Pencil, HelpCircle, Info, AlertTriangle } from 'lucide-react';
 import { ProjectConfig, SocialProvider } from './types';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { AuthConfigModal } from '@/components/auth-config/auth-config-modal';
@@ -98,6 +98,88 @@ const PROVIDER_TYPE_LABELS: Record<SocialProvider, string> = {
   auth0: 'Auth0',
   other: 'Other',
 };
+
+function AddTenantModal({
+  open,
+  onOpenChange,
+  projectName,
+  apiVersion,
+  loading,
+  onAdd,
+  tenantName,
+  setTenantName,
+  tenantDescription,
+  setTenantDescription,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  projectName: string;
+  apiVersion: string;
+  loading: boolean;
+  onAdd: (displayName: string, description: string) => Promise<void>;
+  tenantName: string;
+  setTenantName: (v: string) => void;
+  tenantDescription: string;
+  setTenantDescription: (v: string) => void;
+}) {
+  const slug = tenantName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 32) || '';
+  const urlPreview = slug ? `${projectName}-${slug}.apiblaze.com/${apiVersion}` : '';
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantName.trim()) return;
+    await onAdd(tenantName.trim(), tenantDescription.trim());
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add tenant</DialogTitle>
+          <DialogDescription>Create a new tenant and attach it to this project.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <Label htmlFor="add-tenant-name">Tenant name</Label>
+            <Input
+              id="add-tenant-name"
+              placeholder="e.g. Nino (letters and numbers only)"
+              value={tenantName}
+              onChange={(e) => setTenantName(e.target.value)}
+              className="mt-1"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Slug: {slug || '(from name)'}. Only lowercase letters and numbers; no hyphens.</p>
+          </div>
+          <div>
+            <Label htmlFor="add-tenant-desc">Tenant description (optional)</Label>
+            <Input
+              id="add-tenant-desc"
+              placeholder="e.g. Nino pizzas"
+              value={tenantDescription}
+              onChange={(e) => setTenantDescription(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+          {slug && (
+            <div>
+              <Label className="text-muted-foreground text-xs">URL preview</Label>
+              <p className="text-sm font-mono text-muted-foreground mt-0.5">{urlPreview}</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!tenantName.trim() || loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Create tenant
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 /** APIBlaze default GitHub OAuth client IDs - dashboard and portal use separate apps to avoid token invalidation. */
 const APIBLAZE_GITHUB_CLIENT_IDS = [
@@ -290,7 +372,7 @@ function EditModeManagementUI({
   const [authorizedCallbackUrls, setAuthorizedCallbackUrls] = useState<string[]>(() => {
     const projectName = config.projectName || project?.project_id || 'project';
     const apiVersion = config.apiVersion || '1.0.0';
-    return [`https://${projectName}.portal.apiblaze.com/${apiVersion}`];
+    return [`https://${projectName}-api.portal.apiblaze.com/${apiVersion}`];
   });
   const [newAuthorizedCallbackUrl, setNewAuthorizedCallbackUrl] = useState('');
   const [showAddProvider, setShowAddProvider] = useState<Record<string, boolean>>({});
@@ -623,7 +705,7 @@ function EditModeManagementUI({
     // Generate default callback URL from project name
     const projectName = config.projectName || project?.project_id || 'project';
     const apiVersion = config.apiVersion || '1.0.0';
-    const defaultCallbackUrl = `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
+    const defaultCallbackUrl = `https://${projectName}-api.portal.apiblaze.com/${apiVersion}`;
     
     // Ensure default URL is included and is first
     const callbackUrls = authorizedCallbackUrls.length > 0 
@@ -1234,10 +1316,10 @@ function EditModeManagementUI({
                               const apiVersion = project?.api_version || '1.0.0';
                               const isDefault = config.defaultAppClient === client.id;
                               const portalUrl = isDefault
-                                ? `https://${projectName}.portal.apiblaze.com/${apiVersion}`
+                                ? `https://${projectName}-api.portal.apiblaze.com/${apiVersion}`
                                 : oauthClientId
-                                  ? `https://${projectName}.portal.apiblaze.com/${apiVersion}/login?clientId=${oauthClientId}`
-                                  : `https://${projectName}.portal.apiblaze.com/${apiVersion}/login`;
+                                  ? `https://${projectName}-api.portal.apiblaze.com/${apiVersion}/login?clientId=${oauthClientId}`
+                                  : `https://${projectName}-api.portal.apiblaze.com/${apiVersion}/login`;
                               return (
                                 <div className="space-y-1">
                                   <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">API Portal login</div>
@@ -2302,11 +2384,34 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
 
   useEffect(() => {
     if (teamId && (config.useAuthConfig || config.bringOwnProvider || isEditMode)) {
-      api.getTeamTenants(teamId).then(({ tenants }) => setTenantOptions(tenants)).catch(() => setTenantOptions([]));
+      api.getTeamTenants(teamId).then((res) => {
+        const t = res.tenants;
+        const names = Array.isArray(t) && t.length > 0
+          ? (typeof t[0] === 'string' ? t as string[] : (t as { tenant_name: string }[]).map((x) => x.tenant_name))
+          : [];
+        setTenantOptions(names);
+      }).catch(() => setTenantOptions([]));
     } else {
       setTenantOptions([]);
     }
   }, [teamId, config.useAuthConfig, config.bringOwnProvider, isEditMode]);
+  // Attached tenants for this project (edit mode)
+  const [attachedTenants, setAttachedTenants] = useState<Array<{ tenant_name: string; display_name: string }>>([]);
+  const [selectedTenant, setSelectedTenant] = useState<string>('api');
+  const [showAddTenantModal, setShowAddTenantModal] = useState(false);
+  const [addTenantLoading, setAddTenantLoading] = useState(false);
+  const [addTenantName, setAddTenantName] = useState('');
+  const [addTenantDescription, setAddTenantDescription] = useState('');
+  const [dangerZoneOpen, setDangerZoneOpen] = useState(false);
+  const [detachLoading, setDetachLoading] = useState(false);
+
+  useEffect(() => {
+    if (!project) return;
+    api.listProjectTenants(project.project_id, project.api_version)
+      .then((r) => setAttachedTenants(r.tenants ?? []))
+      .catch(() => setAttachedTenants([]));
+  }, [project?.project_id, project?.api_version]);
+
   // Save config changes immediately to backend (for edit mode, e.g. default_app_client_id, auth_config)
   const saveProjectConfigImmediately = async (updates: {
     default_app_client_id?: string | null;
@@ -2322,7 +2427,9 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
         configToSave.auth_config = updates.auth_config;
       }
       if (Object.keys(configToSave).length > 0) {
-        await updateProjectConfig(project.project_id, project.api_version, configToSave);
+        await updateProjectConfig(project.project_id, project.api_version, configToSave, {
+          tenant: selectedTenant !== 'api' ? selectedTenant : undefined,
+        });
         const existingConfig = project.config as Record<string, unknown> | undefined;
         let mergedConfig: Record<string, unknown>;
         if (existingConfig) {
@@ -2348,7 +2455,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   const getDefaultCallbackUrl = () => {
     const projectName = config.projectName || 'project';
     const apiVersion = config.apiVersion || '1.0.0';
-    return `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
+    return `https://${projectName}-api.portal.apiblaze.com/${apiVersion}`;
   };
   
   // Initialize with default URL if none exist
@@ -2772,6 +2879,154 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           </div>
 
           <Separator />
+
+          {/* Tenant section - per ux3/ux4 */}
+          {project && (
+            <>
+              <div>
+                <Label className="text-base font-semibold">Tenant</Label>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Each of your tenants can authenticate differently
+                </p>
+                {attachedTenants.length <= 1 ? (
+                  <Card>
+                    <CardContent className="pt-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-medium">
+                            {attachedTenants[0]?.display_name ?? 'MyDefaultTenant'} ({attachedTenants[0]?.tenant_name ?? 'api'})
+                          </p>
+                          <p className="text-sm text-muted-foreground font-mono">
+                            {config.projectName || project.project_id}-api.apiblaze.com/{config.apiVersion || project.api_version}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select value={selectedTenant} onValueChange={setSelectedTenant}>
+                      <SelectTrigger className="w-[220px]">
+                        <SelectValue placeholder="Select tenant" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {attachedTenants.map((t) => (
+                          <SelectItem key={t.tenant_name} value={t.tenant_name}>
+                            {t.display_name} ({t.tenant_name})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setShowAddTenantModal(true)}
+                      title="Add tenant"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                    <div className="text-sm text-muted-foreground font-mono">
+                      {config.projectName || project.project_id}-{selectedTenant}.apiblaze.com/{config.apiVersion || project.api_version}
+                    </div>
+                  </div>
+                )}
+                {attachedTenants.length === 1 && teamId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => setShowAddTenantModal(true)}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add tenant
+                  </Button>
+                )}
+              </div>
+              <AddTenantModal
+                open={showAddTenantModal}
+                onOpenChange={setShowAddTenantModal}
+                projectName={config.projectName || project.project_id}
+                apiVersion={config.apiVersion || project.api_version}
+                loading={addTenantLoading}
+                onAdd={async (displayName, _description) => {
+                  setAddTenantLoading(true);
+                  try {
+                    const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 32) || 'tenant';
+                    await api.attachTenantToProject(project.project_id, project.api_version, {
+                      tenant_name: slug,
+                      display_name: displayName || slug,
+                    });
+                    const next = await api.listProjectTenants(project.project_id, project.api_version);
+                    setAttachedTenants(next.tenants ?? []);
+                    setSelectedTenant(slug);
+                    setShowAddTenantModal(false);
+                    setAddTenantName('');
+                    setAddTenantDescription('');
+                    if (onProjectUpdate) {
+                      onProjectUpdate({ ...project });
+                    }
+                  } catch (e) {
+                    throw e;
+                  } finally {
+                    setAddTenantLoading(false);
+                  }
+                }}
+                tenantName={addTenantName}
+                setTenantName={setAddTenantName}
+                tenantDescription={addTenantDescription}
+                setTenantDescription={setAddTenantDescription}
+              />
+              {selectedTenant !== 'api' && (
+                <div className="border border-destructive/50 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setDangerZoneOpen(!dangerZoneOpen)}
+                    className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-destructive hover:bg-destructive/5"
+                  >
+                    {dangerZoneOpen ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                    <AlertTriangle className="h-4 w-4" />
+                    Danger Zone
+                  </button>
+                  {dangerZoneOpen && (
+                    <div className="border-t border-destructive/50 px-4 py-3 space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        Detaching removes this tenant from the proxy. The tenant and its auth config remain.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        disabled={detachLoading}
+                        onClick={async () => {
+                          if (!confirm('Are you sure you want to detach this tenant from the proxy? The tenant will no longer have access to this project.')) return;
+                          setDetachLoading(true);
+                          try {
+                            await api.detachTenantFromProject(project.project_id, project.api_version, selectedTenant);
+                            const next = await api.listProjectTenants(project.project_id, project.api_version);
+                            setAttachedTenants(next.tenants ?? []);
+                            setSelectedTenant(next.tenants?.[0]?.tenant_name ?? 'api');
+                            if (onProjectUpdate) onProjectUpdate({ ...project });
+                          } finally {
+                            setDetachLoading(false);
+                          }
+                        }}
+                      >
+                        {detachLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Detach this tenant from the proxy
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+              <Separator />
+            </>
+          )}
         </>
       )}
 

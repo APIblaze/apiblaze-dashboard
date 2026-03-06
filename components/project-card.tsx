@@ -168,7 +168,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
               </Badge>
             </div>
             <CardDescription className="font-mono text-xs">
-              {project.project_id}.apiblaze.com
+              {project.project_id}-api.apiblaze.com
             </CardDescription>
           </div>
 

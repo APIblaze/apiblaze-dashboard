@@ -668,7 +668,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             // Generate default callback URL from project name
             const projectName = config.projectName || 'project';
             const apiVersion = config.apiVersion || '1.0.0';
-            const defaultCallbackUrl = `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
+            const defaultCallbackUrl = `https://${projectName}-api.portal.apiblaze.com/${apiVersion}`;
             
             // Ensure default URL is included and is first
             const callbackUrls = config.authorizedCallbackUrls && config.authorizedCallbackUrls.length > 0
@@ -911,7 +911,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             }))
           : (appClientIdVal
             ? [
-                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}.portal.apiblaze.com/${apiVersionVal}` },
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}-api.portal.apiblaze.com/${apiVersionVal}` },
                 { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: appClientIdVal },
               ]
             : []);
@@ -1108,7 +1108,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             }))
           : (appClientIdVal
             ? [
-                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}.portal.apiblaze.com/${apiVersionVal}` },
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}-api.portal.apiblaze.com/${apiVersionVal}` },
                 { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: appClientIdVal },
               ]
             : []);

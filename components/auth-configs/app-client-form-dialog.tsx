@@ -86,7 +86,15 @@ export function AppClientFormDialog({
 
   useEffect(() => {
     if (open && teamId) {
-      api.getTeamTenants(teamId).then(({ tenants }) => setTenantOptions(tenants)).catch(() => {});
+      api.getTeamTenants(teamId).then((res) => {
+        const t = res.tenants;
+        const names = Array.isArray(t) && t.length > 0
+          ? (typeof t[0] === 'string' ? (t as string[]) : (t as { tenant_name: string }[]).map((x) => x.tenant_name))
+          : [];
+        setTenantOptions(names);
+      }).catch(() => setTenantOptions([]));
+    } else {
+      setTenantOptions([]);
     }
   }, [open, teamId]);
 

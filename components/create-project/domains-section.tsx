@@ -46,14 +46,14 @@ export function DomainsSection({ config }: DomainsSectionProps) {
             <Globe className="h-4 w-4 text-purple-600 mb-2" />
             <CardTitle className="text-sm">API Proxy Domain</CardTitle>
             <CardDescription className="text-xs">
-              Custom domain for {config.projectName}.apiblaze.com
+              Custom domain for {config.projectName}-api.apiblaze.com
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
               <Input placeholder="api.yourdomain.com" disabled />
               <div className="text-xs text-muted-foreground space-y-1">
-                <p>• CNAME: {config.projectName}.apiblaze.com</p>
+                <p>• CNAME: {config.projectName}-api.apiblaze.com</p>
                 <p>• TXT verification required</p>
                 <p>• Automatic SSL certificate</p>
               </div>
@@ -66,7 +66,7 @@ export function DomainsSection({ config }: DomainsSectionProps) {
             <Globe className="h-4 w-4 text-green-600 mb-2" />
             <CardTitle className="text-sm">Auth Domain</CardTitle>
             <CardDescription className="text-xs">
-              Custom domain for {config.projectName}.auth.apiblaze.com
+              Custom domain for {config.projectName}-api.auth.apiblaze.com
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -79,7 +79,7 @@ export function DomainsSection({ config }: DomainsSectionProps) {
             <Globe className="h-4 w-4 text-orange-600 mb-2" />
             <CardTitle className="text-sm">Portal Domain</CardTitle>
             <CardDescription className="text-xs">
-              Custom domain for {config.projectName}.portal.apiblaze.com
+              Custom domain for {config.projectName}-api.portal.apiblaze.com
             </CardDescription>
           </CardHeader>
           <CardContent>
