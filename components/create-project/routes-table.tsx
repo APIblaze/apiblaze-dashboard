@@ -50,6 +50,7 @@ function extractOperationsFromSpec(spec: Record<string, unknown>): RouteEntry[] 
         method: method.toUpperCase(),
         description: (operation.summary ?? operation.description ?? '') as string,
         require_authentication: true,
+        authorization_enabled: false,
         pre_request_auth_template: '',
         post_response_policy_template: '',
         cache_rules: '',
@@ -104,10 +105,12 @@ interface RoutesTableProps {
   readOnly?: boolean;
   /** Optional ref to keep routes in sync for parent (e.g. when section unmounts on tab switch) */
   routesRef?: React.MutableRefObject<RouteEntry[]>;
+  /** When false, the "Enable Authorization" column is hidden (API-level kill switch is OFF) */
+  enforceAuthorization?: boolean;
 }
 
 export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
-  function RoutesTable({ spec, existingRoutes, readOnly = false, routesRef: externalRoutesRef }, ref) {
+  function RoutesTable({ spec, existingRoutes, readOnly = false, routesRef: externalRoutesRef, enforceAuthorization = false }, ref) {
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
 
     const merged = useMemo(() => {
@@ -162,8 +165,9 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
                 <th className="text-left py-3 px-4 font-medium w-[70px]">Priority</th>
                 <th className="text-left py-3 px-4 font-medium w-[140px]">Description</th>
                 <th className="text-left py-3 px-4 font-medium w-[90px]">Require Authentication</th>
-                <th className="text-left py-3 px-4 font-medium min-w-[220px]">Require Authorization: Pre-request authorization template</th>
-                <th className="text-left py-3 px-4 font-medium min-w-[220px]">Post-response policy template</th>
+                {enforceAuthorization && <th className="text-left py-3 px-4 font-medium w-[90px]">Enable Authorization</th>}
+                <th className="text-left py-3 px-4 font-medium min-w-[220px]">Check Policy <span className="font-normal text-muted-foreground text-xs">(blocks request if denied)</span></th>
+                <th className="text-left py-3 px-4 font-medium min-w-[220px]">Write Policy <span className="font-normal text-muted-foreground text-xs">(runs after 2xx response)</span></th>
                 <th className="text-left py-3 px-4 font-medium min-w-[180px]">Cache rules</th>
               </tr>
             </thead>
@@ -190,7 +194,7 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
                           </Badge>
                         </div>
                       </td>
-                      <td colSpan={6} className="py-2 px-4" />
+                      <td colSpan={enforceAuthorization ? 7 : 6} className="py-2 px-4" />
                     </tr>
                     {isExpanded &&
                       group.entries.map((entry) => (
@@ -200,6 +204,7 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
                           updateRouteInRef={updateRouteInRef}
                           readOnly={readOnly}
                           showPath={showPathInRow}
+                          enforceAuthorization={enforceAuthorization}
                         />
                       ))}
                   </React.Fragment>
@@ -218,9 +223,10 @@ interface RouteRowProps {
   updateRouteInRef: (path: string, method: string, updates: Partial<RouteEntry>) => void;
   readOnly: boolean;
   showPath?: boolean;
+  enforceAuthorization?: boolean;
 }
 
-function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: RouteRowProps) {
+function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false, enforceAuthorization = false }: RouteRowProps) {
   const [preReqError, setPreReqError] = useState(false);
   const [postRespError, setPostRespError] = useState(false);
   const [cacheError, setCacheError] = useState(false);
@@ -229,6 +235,7 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: Route
   const [localPostResp, setLocalPostResp] = useState(entry.post_response_policy_template);
   const [localCache, setLocalCache] = useState(entry.cache_rules);
   const [localAuth, setLocalAuth] = useState(entry.require_authentication);
+  const [localAuthzEnabled, setLocalAuthzEnabled] = useState(entry.authorization_enabled);
   const [localPriority, setLocalPriority] = useState<number | undefined>(entry.priority ?? undefined);
 
   useEffect(() => {
@@ -236,6 +243,7 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: Route
     setLocalPostResp(entry.post_response_policy_template);
     setLocalCache(entry.cache_rules);
     setLocalAuth(entry.require_authentication);
+    setLocalAuthzEnabled(entry.authorization_enabled);
     setLocalPriority(entry.priority ?? undefined);
   }, [
     entry.path,
@@ -244,6 +252,7 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: Route
     entry.post_response_policy_template,
     entry.cache_rules,
     entry.require_authentication,
+    entry.authorization_enabled,
     entry.priority,
   ]);
 
@@ -316,6 +325,17 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: Route
           />
         )}
       </td>
+      {enforceAuthorization && (
+        <td className="py-2 px-4">
+          <Switch
+            checked={localAuthzEnabled}
+            onCheckedChange={(checked) => {
+              setLocalAuthzEnabled(checked);
+              updateRouteInRef(entry.path, entry.method, { authorization_enabled: checked });
+            }}
+          />
+        </td>
+      )}
       <td className="py-2 px-4">
         {readOnly ? (
           <pre className="font-mono text-xs whitespace-pre-wrap break-words">{entry.pre_request_auth_template || '—'}</pre>
@@ -334,7 +354,7 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: Route
               'font-mono text-xs min-h-[60px]',
               preReqError && 'border-red-500'
             )}
-            placeholder={'{"user":"user:{{userId}}","relation":"viewer","object":"reservation:{{path.id}}"}'}
+            placeholder={'{"user":"user:{{JWT.sub}}","relation":"viewer","object":"reservation:{{PATH.id}}"}'}
             rows={2}
           />
         )}
@@ -357,7 +377,7 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false }: Route
               'font-mono text-xs min-h-[60px]',
               postRespError && 'border-red-500'
             )}
-            placeholder={'{"user":"user:{{userId}}","relation":"owner","object":"reservation:{{response.id}}"}'}
+            placeholder={'{"user":"user:{{JWT.sub}}","relation":"owner","object":"reservation:{{RESPONSE.id}}"}'}
             rows={2}
           />
         )}
