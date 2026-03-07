@@ -38,22 +38,22 @@ interface AppClientFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
-  authConfigId: string;
+  teamId: string;
+  tenantName: string;
   appClient?: AppClient | null;
   projectName?: string;
   apiVersion?: string;
-  teamId?: string;
 }
 
 export function AppClientFormDialog({
   open,
   onOpenChange,
   onSuccess,
-  authConfigId,
+  teamId,
+  tenantName,
   appClient,
   projectName: initialProjectName,
   apiVersion: initialApiVersion,
-  teamId,
 }: AppClientFormDialogProps) {
   const { toast } = useToast();
   const [name, setName] = useState('');
@@ -97,6 +97,13 @@ export function AppClientFormDialog({
       setTenantOptions([]);
     }
   }, [open, teamId]);
+
+  // When creating, default tenant to tenantName
+  useEffect(() => {
+    if (open && tenantName && !appClient) {
+      setTenant(tenantName);
+    }
+  }, [open, tenantName, appClient]);
 
   useEffect(() => {
     if (open) {
@@ -248,9 +255,9 @@ export function AppClientFormDialog({
 
     try {
       setSubmitting(true);
-      
+
       if (appClient) {
-        await api.updateAppClient(authConfigId, appClient.id, {
+        await api.updateAppClientByTenant(teamId, tenantName, appClient.id, {
           name: name.trim(),
           tenant: tenant.trim(),
           refreshTokenExpiry,
@@ -266,7 +273,7 @@ export function AppClientFormDialog({
           description: 'App client updated successfully',
         });
       } else {
-        const createData: CreateAppClientRequest = {
+        const createData = {
           name: name.trim(),
           projectName: projectName.trim(),
           apiVersion: apiVersion.trim(),
@@ -279,7 +286,7 @@ export function AppClientFormDialog({
           scopes,
           branding: buildBrandingPayload(),
         };
-        const result = await api.createAppClient(authConfigId, createData) as CreateAppClientResponse;
+        const result = await api.createAppClientForTenant(teamId, tenantName, createData) as CreateAppClientResponse;
         if (result.clientSecret) {
           setClientSecret(result.clientSecret);
           toast({

@@ -1,88 +1,24 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { APIBlazeError, createAPIBlazeClient } from '@/lib/apiblaze-client';
-import { getUserClaims } from '../projects/_utils';
-import type { CreateAuthConfigRequest } from '@/types/auth-config';
+import { NextResponse } from 'next/server';
 
-const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
-
+/** Auth config API deprecated: use tenants and tenant-scoped app clients. */
 export async function GET() {
-  try {
-    const userClaims = await getUserClaims();
-    
-    const client = createAPIBlazeClient({
-      apiKey: INTERNAL_API_KEY,
-      jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
-    });
-
-    const data = await client.listAuthConfigs(userClaims);
-    return NextResponse.json(data);
-    
-  } catch (error: unknown) {
-    console.error('Error fetching auth configs:', error);
-    
-    const message = error instanceof Error ? error.message : 'Unknown error';
-
-    if (message.includes('Unauthorized')) {
-      return NextResponse.json(
-        { error: 'Unauthorized', details: 'Please sign in' },
-        { status: 401 }
-      );
-    }
-    
-    return NextResponse.json(
-      { error: 'Failed to fetch auth configs', details: message },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json(
+    {
+      error: 'Deprecated',
+      message: 'Use Tenants and tenant-scoped app clients. GET /api/teams/[teamId]/tenants and tenant app client APIs.',
+      migration: 'AuthConfig is removed; use Tenant → AppClients.',
+    },
+    { status: 410, headers: { 'Deprecation': 'true' } }
+  );
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const userClaims = await getUserClaims();
-    const body = (await request.json()) as CreateAuthConfigRequest;
-    
-    if (!body.name || body.name.trim().length === 0) {
-      return NextResponse.json(
-        { error: 'Validation error', details: 'AuthConfig name is required' },
-        { status: 400 }
-      );
-    }
-    
-    const client = createAPIBlazeClient({
-      apiKey: INTERNAL_API_KEY,
-      jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
-    });
-    
-    const data = await client.createAuthConfig(userClaims, body);
-    return NextResponse.json(data);
-    
-  } catch (error: unknown) {
-    console.error('Error creating auth config:', error);
-    
-    if (error instanceof APIBlazeError) {
-      return NextResponse.json(
-        {
-          error: error.body?.error || 'Failed to create auth config',
-          details: error.body?.details ?? error.body?.error,
-          suggestions: error.body?.suggestions,
-        },
-        { status: error.status }
-      );
-    }
-    
-    const message = error instanceof Error ? error.message : 'Unknown error';
-
-    if (message.includes('Unauthorized')) {
-      return NextResponse.json(
-        { error: 'Unauthorized', details: 'Please sign in' },
-        { status: 401 }
-      );
-    }
-    
-    return NextResponse.json(
-      { error: 'Failed to create auth config', details: message },
-      { status: 500 }
-    );
-  }
+export async function POST() {
+  return NextResponse.json(
+    {
+      error: 'Deprecated',
+      message: 'Use Tenants and tenant-scoped app clients. Create tenant via POST /api/teams/[teamId]/tenants, then create app client under tenant.',
+      migration: 'AuthConfig is removed; use Tenant → AppClients.',
+    },
+    { status: 410, headers: { 'Deprecation': 'true' } }
+  );
 }
-

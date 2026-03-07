@@ -16,7 +16,7 @@ export interface DashboardCacheState {
   authConfigs: AuthConfig[];
   appClientsByConfig: Record<string, AppClient[]>;
   providersByConfigClient: Record<string, SocialProvider[]>;
-  /** Per-key errors when provider fetch fails (key = `${authConfigId}-${clientId}`) */
+  /** Per-key errors when provider fetch fails (key = tenantKey or tenant:teamId:tenantName:clientId) */
   providersErrorByKey: Record<string, string>;
   lastTeamId: string | undefined;
   isBootstrapping: boolean;
@@ -37,23 +37,26 @@ export interface DashboardCacheActions {
   getProjects: () => Project[];
   getAuthConfigs: () => AuthConfig[];
   getAuthConfig: (id: string) => AuthConfig | undefined;
-  getAppClients: (authConfigId: string) => AppClient[];
-  getAppClient: (authConfigId: string, clientId: string) => AppClient | undefined;
-  /** Find app client by client id across all auth configs. Returns authConfigId and appClient. */
-  getAppClientWithAuthConfig: (clientId: string) => { authConfigId: string; appClient: AppClient } | undefined;
-  getProviders: (authConfigId: string, clientId: string) => SocialProvider[];
-  /** Update a single app client in cache (e.g. after verify). Avoids full invalidateAndRefetch. */
-  updateAppClientInCache: (authConfigId: string, clientId: string, patch: Partial<AppClient>) => void;
-  /** Set app clients for a config (e.g. from lookup or lazy fetch). */
-  setAppClientsForConfig: (authConfigId: string, clients: AppClient[]) => void;
-  /** Lazy-load app clients for a config. No-op if already loaded. */
-  fetchAppClientsForConfig: (authConfigId: string) => Promise<void>;
-  /** Lazy-load providers for an app client. No-op if already loaded. */
-  fetchProvidersForClient: (authConfigId: string, clientId: string) => Promise<void>;
-  /** Get provider fetch error for a client, if any. */
-  getProvidersError: (authConfigId: string, clientId: string) => string | null;
-  /** Clear provider error and cached providers for a client (allows retry). */
-  clearProvidersForRetry: (authConfigId: string, clientId: string) => void;
+  /** Get app clients for tenant (tenantKey = tenant:teamId:tenantName). */
+  getAppClients: (tenantKey: string) => AppClient[];
+  getAppClient: (tenantKey: string, clientId: string) => AppClient | undefined;
+  /** Find app client by client id across all tenants. Returns tenantKey and appClient. */
+  getAppClientWithTenant: (clientId: string) => { tenantKey: string; appClient: AppClient } | undefined;
+  getProviders: (tenantKey: string, clientId: string) => SocialProvider[];
+  /** Update a single app client in cache (e.g. after verify). */
+  updateAppClientInCache: (tenantKey: string, clientId: string, patch: Partial<AppClient>) => void;
+  /** Tenant-only: lazy-load app clients for a tenant. */
+  fetchAppClientsForTenant: (teamId: string, tenantName: string) => Promise<void>;
+  /** Tenant-only: lazy-load providers for an app client under a tenant. */
+  fetchProvidersForTenant: (teamId: string, tenantName: string, clientId: string) => Promise<void>;
+  /** Tenant-only: get app clients for a tenant (from cache). */
+  getAppClientsForTenant: (teamId: string, tenantName: string) => AppClient[];
+  /** Tenant-only: get providers for an app client under a tenant (from cache). */
+  getProvidersForTenant: (teamId: string, tenantName: string, clientId: string) => SocialProvider[];
+  /** Tenant-only: get provider fetch error for a tenant client, if any. */
+  getProvidersErrorForTenant: (teamId: string, tenantName: string, clientId: string) => string | null;
+  /** Tenant-only: clear provider error and cached providers for a tenant client (allows retry). */
+  clearProvidersForRetryForTenant: (teamId: string, tenantName: string, clientId: string) => void;
 }
 
 const initialState: DashboardCacheState = {
@@ -74,70 +77,79 @@ async function fetchBootstrapImpl(
 ): Promise<void> {
   set({ isBootstrapping: true, error: null });
   try {
-    // 1. Fetch auth configs and projects in parallel
-    const [configs, projectsRes] = await Promise.all([
-      api.listAuthConfigs() as Promise<AuthConfig[]>,
+    // 1. Fetch projects and, when we have a team, tenants for that team (tenant-only; no auth-configs).
+    const [projectsRes, tenantsRes] = await Promise.all([
       listProjects({
         team_id: teamId,
         page: 1,
         limit: 50,
         status: 'active',
       }),
+      teamId ? api.getTeamTenants(teamId, true).catch(() => ({ tenants: [] })) : Promise.resolve({ tenants: [] }),
     ]);
-    const authConfigs = Array.isArray(configs) ? configs : [];
     const allProjects = projectsRes.projects ?? [];
+    const tenantsList = Array.isArray((tenantsRes as { tenants?: unknown }).tenants)
+      ? (tenantsRes as { tenants: Array<{ tenant_name?: string; display_name?: string } | string> }).tenants
+      : [];
+    // Map tenants to AuthConfig-like shape so nav and other consumers see "tenants" as the list.
+    const authConfigs: AuthConfig[] = tenantsList.map((t) => {
+      if (typeof t === 'string') {
+        return { id: t, name: t, created_at: '', updated_at: '' };
+      }
+      const name = (t?.display_name ?? t?.tenant_name ?? '').trim() || (t?.tenant_name ?? '');
+      return {
+        id: t?.tenant_name ?? '',
+        name: name || (t?.tenant_name ?? ''),
+        created_at: '',
+        updated_at: '',
+      };
+    }).filter((c) => c.id);
+
+    // 2. Preload app clients and providers for each tenant so Auth tab is instant when opened.
+    let appClientsByConfig: Record<string, AppClient[]> = {};
+    let providersByConfigClient: Record<string, SocialProvider[]> = {};
+    const providersErrorByKey: Record<string, string> = {};
+
+    if (teamId && tenantsList.length > 0) {
+      const tenantNames = tenantsList.map((t) =>
+        typeof t === 'string' ? t : (t?.tenant_name ?? '')
+      ).filter(Boolean);
+
+      const tenantResults = await Promise.all(
+        tenantNames.map(async (tenantName): Promise<{ appClients: Record<string, AppClient[]>; providers: Record<string, SocialProvider[]> }> => {
+          try {
+            const clients = await api.listAppClientsByTenant(teamId, tenantName);
+            const clientsList = Array.isArray(clients) ? clients : [];
+            const key = `tenant:${teamId}:${tenantName}`;
+            const appClients: Record<string, AppClient[]> = { [key]: clientsList };
+
+            const providers: Record<string, SocialProvider[]> = {};
+            for (const client of clientsList) {
+              try {
+                const provList = await api.listProvidersByTenant(teamId, tenantName, client.id);
+                providers[`tenant:${teamId}:${tenantName}:${client.id}`] = Array.isArray(provList) ? provList : [];
+              } catch {
+                providers[`tenant:${teamId}:${tenantName}:${client.id}`] = [];
+              }
+            }
+            return { appClients, providers };
+          } catch {
+            return { appClients: { [`tenant:${teamId}:${tenantName}`]: [] }, providers: {} };
+          }
+        })
+      );
+
+      appClientsByConfig = Object.assign({}, ...tenantResults.map((r) => r.appClients));
+      providersByConfigClient = Object.assign({}, ...tenantResults.map((r) => r.providers));
+    }
 
     set({
       projects: allProjects,
       authConfigs,
-      lastTeamId: teamId,
-    });
-
-    // 2. Collect unique auth_config_ids from projects and auth configs
-    const authConfigIds = new Set<string>();
-    for (const c of authConfigs) authConfigIds.add(c.id);
-    for (const p of allProjects) {
-      const cfg = p.config as Record<string, unknown> | undefined;
-      const id = (cfg?.auth_config_id || cfg?.user_pool_id) as string | undefined;
-      if (id) authConfigIds.add(id);
-    }
-
-    // 3. Fetch app clients for each auth config
-    const appClientsByConfig: Record<string, AppClient[]> = {};
-    await Promise.all(
-      Array.from(authConfigIds).map(async (authConfigId) => {
-        try {
-          const clients = await api.listAppClients(authConfigId);
-          appClientsByConfig[authConfigId] = Array.isArray(clients) ? clients : [];
-        } catch {
-          appClientsByConfig[authConfigId] = [];
-        }
-      })
-    );
-
-    // 4. Fetch providers for each app client
-    const providersByConfigClient: Record<string, SocialProvider[]> = {};
-    const providersErrorByKey: Record<string, string> = {};
-    await Promise.all(
-      Object.entries(appClientsByConfig).flatMap(([authConfigId, clients]) =>
-        clients.map(async (client) => {
-          const key = `${authConfigId}-${client.id}`;
-          try {
-            const providers = await api.listProviders(authConfigId, client.id);
-            providersByConfigClient[key] = Array.isArray(providers) ? providers : [];
-          } catch (e) {
-            const message = e instanceof Error ? e.message : 'Failed to load providers';
-            providersErrorByKey[key] = message;
-            providersByConfigClient[key] = [];
-          }
-        })
-      )
-    );
-
-    set({
       appClientsByConfig,
       providersByConfigClient,
       providersErrorByKey,
+      lastTeamId: teamId,
       isBootstrapping: false,
       error: null,
     });
@@ -179,66 +191,76 @@ export const useDashboardCacheStore = create<DashboardCacheState & DashboardCach
   getProjects: () => get().projects,
   getAuthConfigs: () => get().authConfigs,
   getAuthConfig: (id) => get().authConfigs.find((c) => c.id === id),
-  getAppClients: (authConfigId) => get().appClientsByConfig[authConfigId] ?? [],
-  getAppClient: (authConfigId, clientId) =>
-    (get().appClientsByConfig[authConfigId] ?? []).find((c) => c.id === clientId),
-  getAppClientWithAuthConfig: (clientId) => {
-    for (const [authConfigId, clients] of Object.entries(get().appClientsByConfig)) {
+  getAppClients: (tenantKey) => get().appClientsByConfig[tenantKey] ?? [],
+  getAppClient: (tenantKey, clientId) =>
+    (get().appClientsByConfig[tenantKey] ?? []).find((c) => c.id === clientId),
+  getAppClientWithTenant: (clientId) => {
+    for (const [tenantKey, clients] of Object.entries(get().appClientsByConfig)) {
       const appClient = clients.find((c) => c.id === clientId);
-      if (appClient) return { authConfigId, appClient };
+      if (appClient) return { tenantKey, appClient };
     }
     return undefined;
   },
-  getProviders: (authConfigId, clientId) =>
-    get().providersByConfigClient[`${authConfigId}-${clientId}`] ?? [],
+  getProviders: (tenantKey, clientId) =>
+    get().providersByConfigClient[`${tenantKey}:${clientId}`] ?? get().providersByConfigClient[`${tenantKey}-${clientId}`] ?? [],
 
-  updateAppClientInCache: (authConfigId, clientId, patch) => {
-    const clients = get().appClientsByConfig[authConfigId] ?? [];
+  updateAppClientInCache: (tenantKey, clientId, patch) => {
+    const clients = get().appClientsByConfig[tenantKey] ?? [];
     const idx = clients.findIndex((c) => c.id === clientId);
     if (idx < 0) return;
     const updated = { ...clients[idx], ...patch };
     set({
       appClientsByConfig: {
         ...get().appClientsByConfig,
-        [authConfigId]: [...clients.slice(0, idx), updated, ...clients.slice(idx + 1)],
+        [tenantKey]: [...clients.slice(0, idx), updated, ...clients.slice(idx + 1)],
       },
     });
   },
 
-  setAppClientsForConfig: (authConfigId, clients) => {
-    set({
-      appClientsByConfig: {
-        ...get().appClientsByConfig,
-        [authConfigId]: Array.isArray(clients) ? clients : [],
-      },
-    });
+  getAppClientsForTenant: (teamId, tenantName) =>
+    get().appClientsByConfig[`tenant:${teamId}:${tenantName}`] ?? [],
+
+  getProvidersForTenant: (teamId, tenantName, clientId) =>
+    get().providersByConfigClient[`tenant:${teamId}:${tenantName}:${clientId}`] ?? [],
+
+  getProvidersErrorForTenant: (teamId, tenantName, clientId) =>
+    get().providersErrorByKey[`tenant:${teamId}:${tenantName}:${clientId}`] ?? null,
+
+  clearProvidersForRetryForTenant: (teamId, tenantName, clientId) => {
+    const key = `tenant:${teamId}:${tenantName}:${clientId}`;
+    const nextProviders = { ...get().providersByConfigClient };
+    const nextErrors = { ...get().providersErrorByKey };
+    delete nextProviders[key];
+    delete nextErrors[key];
+    set({ providersByConfigClient: nextProviders, providersErrorByKey: nextErrors });
   },
 
-  fetchAppClientsForConfig: async (authConfigId) => {
-    if (authConfigId in get().appClientsByConfig) return;
+  fetchAppClientsForTenant: async (teamId, tenantName) => {
+    const key = `tenant:${teamId}:${tenantName}`;
+    if (key in get().appClientsByConfig) return;
     try {
-      const clients = await api.listAppClients(authConfigId);
+      const clients = await api.listAppClientsByTenant(teamId, tenantName);
       set({
         appClientsByConfig: {
           ...get().appClientsByConfig,
-          [authConfigId]: Array.isArray(clients) ? clients : [],
+          [key]: Array.isArray(clients) ? clients : [],
         },
       });
     } catch {
       set({
         appClientsByConfig: {
           ...get().appClientsByConfig,
-          [authConfigId]: [],
+          [key]: [],
         },
       });
     }
   },
 
-  fetchProvidersForClient: async (authConfigId, clientId) => {
-    const key = `${authConfigId}-${clientId}`;
+  fetchProvidersForTenant: async (teamId, tenantName, clientId) => {
+    const key = `tenant:${teamId}:${tenantName}:${clientId}`;
     if (key in get().providersByConfigClient) return;
     try {
-      const providers = await api.listProviders(authConfigId, clientId);
+      const providers = await api.listProvidersByTenant(teamId, tenantName, clientId);
       set({
         providersByConfigClient: {
           ...get().providersByConfigClient,
@@ -252,7 +274,6 @@ export const useDashboardCacheStore = create<DashboardCacheState & DashboardCach
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to load providers';
-      console.error('[fetchProvidersForClient]', { authConfigId, clientId, error: message });
       set({
         providersByConfigClient: {
           ...get().providersByConfigClient,
@@ -264,17 +285,5 @@ export const useDashboardCacheStore = create<DashboardCacheState & DashboardCach
         },
       });
     }
-  },
-
-  getProvidersError: (authConfigId, clientId) =>
-    get().providersErrorByKey[`${authConfigId}-${clientId}`] ?? null,
-
-  clearProvidersForRetry: (authConfigId, clientId) => {
-    const key = `${authConfigId}-${clientId}`;
-    const nextProviders = { ...get().providersByConfigClient };
-    const nextErrors = { ...get().providersErrorByKey };
-    delete nextProviders[key];
-    delete nextErrors[key];
-    set({ providersByConfigClient: nextProviders, providersErrorByKey: nextErrors });
   },
 }));

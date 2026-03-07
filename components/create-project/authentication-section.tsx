@@ -247,6 +247,7 @@ const PROVIDER_SETUP_GUIDES: Record<SocialProvider, string[]> = {
 };
 
 // Edit Mode Management UI Component
+// Uses attachedTenants (from listProjectTenants) + selectedTenant — a project can have many tenants.
 function EditModeManagementUI({ 
   config, 
   updateConfig, 
@@ -255,6 +256,9 @@ function EditModeManagementUI({
   initialAuthConfigId,
   teamId,
   tenantOptions = [],
+  attachedTenants = [],
+  selectedTenant,
+  setSelectedTenant,
 }: { 
   config: ProjectConfig; 
   updateConfig: (updates: Partial<ProjectConfig>) => void; 
@@ -263,19 +267,25 @@ function EditModeManagementUI({
   initialAuthConfigId?: string;
   teamId?: string;
   tenantOptions?: string[];
+  attachedTenants?: Array<{ tenant_name: string; display_name: string }>;
+  selectedTenant: string;
+  setSelectedTenant: (t: string) => void;
 }) {
   const { toast } = useToast();
   const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
-  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
+  const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
   const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
-  const getProviders = useDashboardCacheStore((s) => s.getProviders);
-  const getProvidersError = useDashboardCacheStore((s) => s.getProvidersError);
-  const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
-  const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
-  const clearProvidersForRetry = useDashboardCacheStore((s) => s.clearProvidersForRetry);
+  const getProvidersForTenant = useDashboardCacheStore((s) => s.getProvidersForTenant);
+  const getProvidersErrorForTenant = useDashboardCacheStore((s) => s.getProvidersErrorForTenant);
+  const clearProvidersForRetryForTenant = useDashboardCacheStore((s) => s.clearProvidersForRetryForTenant);
+  const fetchAppClientsForTenant = useDashboardCacheStore((s) => s.fetchAppClientsForTenant);
+  const fetchProvidersForTenant = useDashboardCacheStore((s) => s.fetchProvidersForTenant);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
+  // Subscribe to cache so we re-render when app clients or providers are loaded (selectors are stable so we need the data)
+  const appClientsByConfig = useDashboardCacheStore((s) => s.appClientsByConfig);
+  const providersByConfigClient = useDashboardCacheStore((s) => s.providersByConfigClient);
   // Save config changes immediately to backend (without redeployment)
   const saveConfigImmediately = async (updates: Partial<ProjectConfig>) => {
     if (!project) return; // Only save if we're in edit mode with an existing project
@@ -311,57 +321,58 @@ function EditModeManagementUI({
     }
   };
 
-  // Get initial values from project config in edit mode - memoized to prevent recalculation
+  // Use attached tenants + selected tenant (project can have many tenants). Prefer project.team_id when editing.
   const authConfigs = getAuthConfigs();
-  const authConfigId = useMemo(() => {
-    if (initialAuthConfigId) return initialAuthConfigId;
-    if (config.authConfigId) return config.authConfigId;
-    if (project?.config) {
-      const projectConfig = project.config as Record<string, unknown>;
-      const id = projectConfig.auth_config_id as string | undefined;
-      if (id) return id;
-    }
-    if (authConfigs.length === 1) return authConfigs[0].id;
-    return undefined;
-  }, [initialAuthConfigId, config.authConfigId, project?.config, authConfigs]);
+  const tenantTeamId = (project as { team_id?: string })?.team_id ?? teamId;
+  const projectTenantName = selectedTenant;
+  const isTenantMode = !!(tenantTeamId && projectTenantName);
+  const tenantKey = isTenantMode && tenantTeamId && projectTenantName
+    ? `tenant:${tenantTeamId}:${projectTenantName}`
+    : undefined;
+  const [localSelectedTenant, setLocalSelectedTenant] = useState<string | undefined>(projectTenantName);
+  const effectiveTenant = projectTenantName || localSelectedTenant;
+  const effectiveTenantKey = tenantTeamId && effectiveTenant ? `tenant:${tenantTeamId}:${effectiveTenant}` : undefined;
 
-  const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(authConfigId);
-  const currentAuthConfigId = authConfigId || selectedAuthConfigId;
-  const appClients = useMemo(
-    () => (currentAuthConfigId ? getAppClients(currentAuthConfigId) : []),
-    [currentAuthConfigId, getAppClients]
-  );
-  const loadingAppClients = isBootstrapping && !!currentAuthConfigId;
+  const appClients = useMemo(() => {
+    if (tenantTeamId && effectiveTenant) {
+      return getAppClientsForTenant(tenantTeamId, effectiveTenant);
+    }
+    return [];
+  }, [tenantTeamId, effectiveTenant, getAppClientsForTenant, appClientsByConfig]);
+  const loadingAppClients = isBootstrapping && !!tenantTeamId;
 
   const providers = useMemo(() => {
     const result: Record<string, SocialProviderResponse[]> = {};
-    if (!currentAuthConfigId) return result;
-    for (const client of appClients) {
-      const list = getProviders(currentAuthConfigId, client.id);
-      if (list.length) result[client.id] = list as SocialProviderResponse[];
-    }
-    return result;
-  }, [currentAuthConfigId, appClients, getProviders]);
-
-  useEffect(() => {
-    if (authConfigId && authConfigId !== selectedAuthConfigId) {
-      setSelectedAuthConfigId(authConfigId);
-    }
-  }, [authConfigId, selectedAuthConfigId]);
-
-  useEffect(() => {
-    if (!isBootstrapping && currentAuthConfigId) {
-      fetchAppClientsForConfig(currentAuthConfigId);
-    }
-  }, [currentAuthConfigId, isBootstrapping, fetchAppClientsForConfig]);
-
-  useEffect(() => {
-    if (!isBootstrapping && currentAuthConfigId) {
+    if (tenantTeamId && effectiveTenant) {
       for (const client of appClients) {
-        fetchProvidersForClient(currentAuthConfigId, client.id);
+        const list = getProvidersForTenant(tenantTeamId, effectiveTenant, client.id);
+        if (list.length) result[client.id] = list as SocialProviderResponse[];
       }
     }
-  }, [currentAuthConfigId, appClients, isBootstrapping, fetchProvidersForClient]);
+    return result;
+  }, [tenantTeamId, effectiveTenant, appClients, getProvidersForTenant, providersByConfigClient]);
+
+  useEffect(() => {
+    if (projectTenantName && projectTenantName !== localSelectedTenant) {
+      setLocalSelectedTenant(projectTenantName);
+    }
+  }, [projectTenantName, localSelectedTenant]);
+
+  useEffect(() => {
+    if (isBootstrapping) return;
+    if (tenantTeamId && effectiveTenant) {
+      fetchAppClientsForTenant(tenantTeamId, effectiveTenant);
+    }
+  }, [effectiveTenant, isBootstrapping, tenantTeamId, fetchAppClientsForTenant]);
+
+  useEffect(() => {
+    if (isBootstrapping) return;
+    if (tenantTeamId && effectiveTenant) {
+      for (const client of appClients) {
+        fetchProvidersForTenant(tenantTeamId, effectiveTenant, client.id);
+      }
+    }
+  }, [effectiveTenant, appClients, isBootstrapping, tenantTeamId, fetchProvidersForTenant]);
 
   const [appClientDetails, setAppClientDetails] = useState<Record<string, AppClientResponse>>({});
   const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
@@ -471,7 +482,7 @@ function EditModeManagementUI({
         if (!external) continue;
         const oauthClientId = details?.clientId ?? details?.client_id ?? client.clientId ?? client.id;
         const scopes = (details?.scopes ?? client.scopes ?? []) as string[];
-        const providerList = currentAuthConfigId ? getProviders(currentAuthConfigId, client.id) : [];
+        const providerList = tenantTeamId && effectiveTenant ? getProvidersForTenant(tenantTeamId, effectiveTenant, client.id) : [];
         const list = providerList.length > 0 ? providerList : [{ type: '' }];
         const allBaseUrl = buildAppLoginAuthorizeUrl(oauthClientId, external, scopes, undefined);
         const allUrlWithPkce = await addPkceToAuthorizeUrl(allBaseUrl);
@@ -488,7 +499,7 @@ function EditModeManagementUI({
       if (!cancelled) setAppLoginUrlWithPkce((prev) => ({ ...prev, ...next }));
     })();
     return () => { cancelled = true; };
-  }, [appClients, appClientDetails, currentAuthConfigId, getProviders, providers]);
+  }, [appClients, appClientDetails, tenantTeamId, effectiveTenant, getProvidersForTenant, providers]);
 
   const validateHttpsUrlForEdit = (url: string): { valid: boolean; error?: string } => {
     try {
@@ -521,10 +532,10 @@ function EditModeManagementUI({
       alert(validation.error || 'Invalid URL');
       return;
     }
-    if (!currentAuthConfigId || !teamId) return;
+    if (!tenantTeamId || !effectiveTenant) return;
     setSavingCallbackUrlsForClient(clientId);
     try {
-      await api.updateAppClient(currentAuthConfigId, clientId, {
+      await api.updateAppClientByTenant(tenantTeamId, effectiveTenant, clientId, {
         authorizedCallbackUrls: [...current, url],
       });
       setNewCallbackUrlByClient(prev => ({ ...prev, [clientId]: '' }));
@@ -540,10 +551,10 @@ function EditModeManagementUI({
   const removeCallbackUrlForClient = async (clientId: string, urlToRemove: string) => {
     const current = getClientCallbackUrls(clientId);
     const next = current.filter(u => u !== urlToRemove);
-    if (!currentAuthConfigId || !teamId) return;
+    if (!tenantTeamId || !effectiveTenant) return;
     setSavingCallbackUrlsForClient(clientId);
     try {
-      await api.updateAppClient(currentAuthConfigId, clientId, {
+      await api.updateAppClientByTenant(tenantTeamId, effectiveTenant, clientId, {
         authorizedCallbackUrls: next,
       });
       await invalidateAndRefetch(teamId);
@@ -555,20 +566,20 @@ function EditModeManagementUI({
     }
   };
 
-  // Sync config from auth config when we have a single one
+  // Sync config from tenant when we have one
   useEffect(() => {
-    if (!currentAuthConfigId) return;
-    const ac = getAuthConfig(currentAuthConfigId);
+    if (!effectiveTenant || !tenantTeamId) return;
+    const ac = getAuthConfig(effectiveTenant);
     if (ac) {
       updateConfig({ 
-        authConfigId: currentAuthConfigId, 
+        authConfigId: effectiveTenant, 
         useAuthConfig: true,
         userGroupName: ac.name,
         enableSocialAuth: true,
         bringOwnProvider: ac.bringMyOwnOAuth ?? false,
       });
     }
-  }, [currentAuthConfigId, getAuthConfig, updateConfig]);
+  }, [effectiveTenant, tenantTeamId, getAuthConfig, updateConfig]);
 
   // Helper functions
   const secondsToDaysAndMinutes = (seconds: number) => {
@@ -584,11 +595,11 @@ function EditModeManagementUI({
 
   // Sync app client details from cache for display (expiry, etc.)
   useEffect(() => {
-    if (!currentAuthConfigId) return;
+    if (!effectiveTenantKey) return;
     const next: Record<string, AppClientResponse> = {};
     const nextExpiry: Record<string, { accessTokenExpiry: number; refreshTokenExpiry: number; idTokenExpiry: number }> = {};
     for (const client of appClients) {
-      const detail = getAppClient(currentAuthConfigId, client.id);
+      const detail = getAppClient(effectiveTenantKey, client.id);
       if (detail) {
         const c = detail as AppClientResponse;
         next[client.id] = c;
@@ -601,7 +612,7 @@ function EditModeManagementUI({
     }
     setAppClientDetails(next);
     setExpiryValues(prev => ({ ...prev, ...nextExpiry }));
-  }, [currentAuthConfigId, appClients, getAppClient]);
+  }, [effectiveTenantKey, appClients, getAppClient]);
 
   // Initialize and sync edit forms from app client details (populate when API data arrives)
   useEffect(() => {
@@ -631,11 +642,11 @@ function EditModeManagementUI({
     });
   }, [appClients, appClientDetails]);
 
-  const revealClientSecret = async (authConfigId: string, clientId: string) => {
+  const revealClientSecret = async (_tenantKey: string, clientId: string) => {
+    if (!tenantTeamId || !effectiveTenant) return;
     setLoadingSecret(clientId);
     try {
-      // Fetch the app client - the API should now return the secret
-      const client = await api.getAppClient(authConfigId, clientId);
+      const client = await api.getAppClientByTenant(tenantTeamId, effectiveTenant, clientId);
       const secret = client.clientSecret;
       
       if (secret) {
@@ -700,7 +711,7 @@ function EditModeManagementUI({
   };
 
   const handleCreateAppClient = async () => {
-    if (!selectedAuthConfigId || !newAppClientName.trim() || !newAppClientTenant.trim()) return;
+    if (!tenantTeamId || !effectiveTenant || !newAppClientName.trim() || !newAppClientTenant.trim()) return;
     
     // Generate default callback URL from project name
     const projectName = config.projectName || project?.project_id || 'project';
@@ -718,7 +729,7 @@ function EditModeManagementUI({
       : [defaultCallbackUrl, ...callbackUrls];
     
     try {
-      const newClient = await api.createAppClient(selectedAuthConfigId, {
+      const newClient = await api.createAppClientForTenant(tenantTeamId, effectiveTenant, {
         name: newAppClientName,
         tenant: newAppClientTenant.trim(),
         scopes: ['email', 'offline_access', 'openid', 'profile'],
@@ -748,14 +759,14 @@ function EditModeManagementUI({
   };
 
   const handleUpdateAppClientExpiries = async (clientId: string) => {
-    if (!selectedAuthConfigId) return;
+    if (!tenantTeamId || !effectiveTenant) return;
     
     const expiries = expiryValues[clientId];
     if (!expiries) return;
     
     try {
       // Values are already in seconds, send directly to API
-      await api.updateAppClient(selectedAuthConfigId, clientId, {
+      await api.updateAppClientByTenant(tenantTeamId, effectiveTenant, clientId, {
         accessTokenExpiry: expiries.accessTokenExpiry,
         refreshTokenExpiry: expiries.refreshTokenExpiry,
         idTokenExpiry: expiries.idTokenExpiry,
@@ -769,14 +780,14 @@ function EditModeManagementUI({
   };
 
   const handleDeleteAppClient = async (clientId: string) => {
-    if (!selectedAuthConfigId) return;
+    if (!tenantTeamId || !effectiveTenant) return;
     if (!confirm('Are you sure you want to delete this AppClient? This action cannot be undone.')) return;
     
     try {
       const wasDefault = config.defaultAppClient === clientId;
-      await api.deleteAppClient(selectedAuthConfigId, clientId);
+      await api.deleteAppClientByTenant(tenantTeamId, effectiveTenant, clientId);
       await invalidateAndRefetch(teamId);
-      const remainingClients = currentAuthConfigId ? getAppClients(currentAuthConfigId) : [];
+      const remainingClients = getAppClientsForTenant(tenantTeamId, effectiveTenant);
       if (wasDefault && remainingClients.length > 0) {
         const newDefault = remainingClients[0].id;
         updateConfig({ defaultAppClient: newDefault });
@@ -796,7 +807,7 @@ function EditModeManagementUI({
   };
 
   const handleAddProvider = async (clientId: string) => {
-    if (!selectedAuthConfigId) return;
+    if (!tenantTeamId || !effectiveTenant) return;
     const provider = newProvider[clientId] ?? getDefaultNewProvider('google');
     if (!provider.clientId || !provider.clientSecret) {
       alert('Please provide Client ID and Client Secret');
@@ -808,7 +819,7 @@ function EditModeManagementUI({
       return;
     }
     try {
-      await api.addProvider(selectedAuthConfigId, clientId, {
+      await api.addProviderByTenant(tenantTeamId, effectiveTenant, clientId, {
         type: provider.type,
         clientId: provider.clientId,
         clientSecret: provider.clientSecret,
@@ -835,11 +846,11 @@ function EditModeManagementUI({
   };
 
   const handleDeleteProvider = async (clientId: string, providerId: string) => {
-    if (!selectedAuthConfigId) return;
+    if (!tenantTeamId || !effectiveTenant) return;
     if (!confirm('Are you sure you want to delete this provider?')) return;
     
     try {
-      await api.removeProvider(selectedAuthConfigId, clientId, providerId);
+      await api.removeProviderByTenant(tenantTeamId, effectiveTenant, clientId, providerId);
       await invalidateAndRefetch(teamId);
     } catch (error) {
       console.error('Error deleting provider:', error);
@@ -849,7 +860,7 @@ function EditModeManagementUI({
 
   const saveAppClientEdit = async (clientId: string) => {
     const form = editAppClientForms[clientId];
-    if (!currentAuthConfigId || !form) return;
+    if (!tenantTeamId || !effectiveTenant || !form) return;
     if (!form.name.trim()) {
       alert('Name is required');
       return;
@@ -874,7 +885,7 @@ function EditModeManagementUI({
               useGradient: form.useGradient,
             }
           : undefined;
-      await api.updateAppClient(currentAuthConfigId, clientId, {
+      await api.updateAppClientByTenant(tenantTeamId, effectiveTenant, clientId, {
         name: form.name.trim(),
         tenant: form.tenant.trim(),
         authorizedCallbackUrls: form.authorizedCallbackUrls,
@@ -919,7 +930,7 @@ function EditModeManagementUI({
     setLoadingProviderSecret(true);
     let secret = '';
     try {
-      const res = await api.getProviderSecret(currentAuthConfigId!, clientId, provider.id);
+      const res = await api.getProviderSecretByTenant(tenantTeamId!, effectiveTenant!, clientId, provider.id);
       secret = res.clientSecret ?? '';
     } catch {
       // Leave empty if we can't fetch
@@ -946,7 +957,7 @@ function EditModeManagementUI({
   };
 
   const saveProviderEdit = async () => {
-    if (!currentAuthConfigId || !editingProviderKey || !editProviderForm) return;
+    if (!tenantTeamId || !effectiveTenant || !editingProviderKey || !editProviderForm) return;
     const [clientId, providerId] = editingProviderKey.split(':');
     const secretToSend = newProviderSecretOverride.trim() || editProviderForm.clientSecret.trim();
     if (!editProviderForm.clientId.trim() || !secretToSend) {
@@ -963,7 +974,7 @@ function EditModeManagementUI({
     }
     setSavingProviderEdit(true);
     try {
-      await api.updateProvider(currentAuthConfigId, clientId, providerId, {
+      await api.updateProviderByTenant(tenantTeamId, effectiveTenant, clientId, providerId, {
         type: editProviderForm.type,
         clientId: editProviderForm.clientId.trim(),
         clientSecret: secretToSend,
@@ -1081,8 +1092,7 @@ function EditModeManagementUI({
     }
   };
 
-  const currentAuthConfigIdForLoading = authConfigId || selectedAuthConfigId;
-  const isLoadingInitialData = isBootstrapping && !!currentAuthConfigIdForLoading && appClients.length === 0;
+  const isLoadingInitialData = isBootstrapping && !!tenantTeamId && appClients.length === 0;
 
   return (
     <div className="space-y-6">
@@ -1102,7 +1112,7 @@ function EditModeManagementUI({
       )}
 
       {/* AppClient Management */}
-      {selectedAuthConfigId && (
+      {effectiveTenant && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-medium">AppClients</Label>
@@ -1258,9 +1268,10 @@ function EditModeManagementUI({
               {appClients.map((client) => {
                 const clientDetails = appClientDetails[client.id];
                 const clientProviders = providers[client.id] || [];
-                const providersError = currentAuthConfigId
-                  ? getProvidersError(currentAuthConfigId, client.id)
-                  : null;
+                const providersError =
+                  isTenantMode && tenantTeamId && projectTenantName
+                    ? getProvidersErrorForTenant(tenantTeamId, effectiveTenant, client.id)
+                      : null;
                 const isLoadingProviders = false;
                 const isShowingAddProvider = showAddProvider[client.id];
                 const form = editAppClientForms[client.id] ?? buildFormFromClient(client, clientDetails);
@@ -2085,9 +2096,9 @@ function EditModeManagementUI({
                             size="sm"
                             className="h-6 text-xs"
                             onClick={() => {
-                              if (currentAuthConfigId) {
-                                clearProvidersForRetry(currentAuthConfigId, client.id);
-                                fetchProvidersForClient(currentAuthConfigId, client.id);
+                              if (isTenantMode && tenantTeamId && projectTenantName) {
+                                clearProvidersForRetryForTenant(tenantTeamId, effectiveTenant, client.id);
+                                fetchProvidersForTenant(tenantTeamId, projectTenantName, client.id);
                               }
                             }}
                           >
@@ -2373,8 +2384,8 @@ function EditModeManagementUI({
 export function AuthenticationSection({ config, updateConfig, isEditMode = false, project, onProjectUpdate, teamId }: AuthenticationSectionProps) {
   const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
-  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
-  const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
+  const getProvidersForTenant = useDashboardCacheStore((s) => s.getProvidersForTenant);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
   const existingAuthConfigs = getAuthConfigs();
   const loadingAuthConfigs = isBootstrapping;
@@ -2408,7 +2419,15 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   useEffect(() => {
     if (!project) return;
     api.listProjectTenants(project.project_id, project.api_version)
-      .then((r) => setAttachedTenants(r.tenants ?? []))
+      .then((r) => {
+        const tenants = r.tenants ?? [];
+        setAttachedTenants(tenants);
+        // Sync selectedTenant: if current selection not in list, pick first tenant
+        setSelectedTenant((prev) => {
+          const inList = tenants.some((t) => (typeof t === 'string' ? t : t.tenant_name) === prev);
+          return inList ? prev : (tenants[0] ? (typeof tenants[0] === 'string' ? tenants[0] : tenants[0].tenant_name) : 'api');
+        });
+      })
       .catch(() => setAttachedTenants([]));
   }, [project?.project_id, project?.api_version]);
 
@@ -2554,27 +2573,8 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
 
     // Update the authConfig with the new bringOwnProvider value
     const updateAuthConfigBringOwnOAuth = async () => {
-      try {
-        // Backend requires 'name' field, so we need to include it
-        // Try to get name from existingAuthConfigs list, or fetch it, or use userGroupName as fallback
-        let name = config.userGroupName;
-        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
-        if (authConfig) {
-          name = authConfig.name;
-        } else if (!name) {
-          // Fetch the auth config to get its name
-          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
-          name = fullAuthConfig.name;
-        }
-        await api.updateAuthConfig(config.authConfigId!, {
-          name: name || 'Unnamed Auth Config',
-          bringMyOwnOAuth: config.bringOwnProvider,
-        });
-        console.log('[AuthSection] ✅ Updated authConfig bringMyOwnOAuth:', config.bringOwnProvider);
-        previousBringOwnProviderRef.current = config.bringOwnProvider;
-      } catch (error) {
-        console.error('[AuthSection] ❌ Error updating authConfig bringMyOwnOAuth:', error);
-      }
+      // Tenant-only: bringMyOwnOAuth lives in project config; no auth config to update
+      previousBringOwnProviderRef.current = config.bringOwnProvider;
     };
 
     updateAuthConfigBringOwnOAuth();
@@ -2592,23 +2592,8 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     if (previousApiKeyInMethodsRef.current === apiKeyEnabled) return;
 
     const updateAuthConfigApiKey = async () => {
-      try {
-        let name = config.userGroupName;
-        const authConfig = existingAuthConfigs.find((ac: AuthConfig) => ac.id === config.authConfigId);
-        if (authConfig) {
-          name = authConfig.name;
-        } else if (!name) {
-          const fullAuthConfig = await api.getAuthConfig(config.authConfigId!);
-          name = fullAuthConfig.name;
-        }
-        await api.updateAuthConfig(config.authConfigId!, {
-          name: name || 'Unnamed Auth Config',
-          enableApiKeyAuth: apiKeyEnabled,
-        });
-        previousApiKeyInMethodsRef.current = apiKeyEnabled;
-      } catch (error) {
-        console.error('[AuthSection] Error updating authConfig enableApiKeyAuth:', error);
-      }
+      // Tenant-only: requests_auth lives in project config; no auth config to update
+      previousApiKeyInMethodsRef.current = apiKeyEnabled;
     };
 
     updateAuthConfigApiKey();
@@ -2616,7 +2601,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
 
   // Track selected authConfigId - only set if we're in edit mode with an existing config
   const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string | undefined>(
-    isEditMode && project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : undefined
+    isEditMode && project?.config ? (project.config as Record<string, unknown>).tenant as string | undefined : undefined
   );
   
   // Only sync from config.authConfigId in edit mode on initial mount
@@ -2667,17 +2652,12 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
       updateConfig({ userGroupName: nameToSet, authConfigId: determinedAuthConfigId });
       return;
     }
-    // Fallback: fetch auth config by id when not in cache (e.g. list not yet loaded)
+    // Fallback: get auth config (tenant) from cache when not yet set
     if (!config.userGroupName || config.userGroupName === '') {
-      let cancelled = false;
-      api.getAuthConfig(determinedAuthConfigId)
-        .then((ac) => {
-          if (!cancelled && ac?.name) {
-            updateConfig({ userGroupName: ac.name, authConfigId: determinedAuthConfigId });
-          }
-        })
-        .catch(() => { /* ignore */ });
-      return () => { cancelled = true; };
+      const ac = getAuthConfig(determinedAuthConfigId);
+      if (ac?.name) {
+        updateConfig({ userGroupName: ac.name, authConfigId: determinedAuthConfigId });
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditMode, project, determinedAuthConfigId, config.userGroupName, existingAuthConfigs]);
@@ -2731,7 +2711,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     } else {
       updateConfig({ authConfigId: selectedAuthConfigId, useAuthConfig: true });
     }
-    const clients = getAppClients(selectedAuthConfigId);
+    const clients = teamId ? getAppClientsForTenant(teamId, selectedAuthConfigId) : [];
     if (clients.length > 0) {
       const defaultClient = clients.find(c => c.id === config.defaultAppClient) || clients[0];
       updateConfig({
@@ -2743,7 +2723,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
     }
     const first = clients[0];
     if (first) {
-      const provList = getProviders(selectedAuthConfigId, first.id);
+      const provList = teamId ? getProvidersForTenant(teamId, selectedAuthConfigId, first.id) : [];
       if (provList.length > 0) {
         const provider = provList[0] as SocialProviderResponse;
         setThirdPartyProvider(provider);
@@ -3301,8 +3281,11 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   project={project}
                   onProjectUpdate={onProjectUpdate}
                   initialAuthConfigId={config.authConfigId ?? (project?.config ? (project.config as Record<string, unknown>).auth_config_id as string | undefined : undefined)}
-                  teamId={teamId}
+                  teamId={(project as { team_id?: string })?.team_id ?? teamId}
                   tenantOptions={tenantOptions}
+                  attachedTenants={attachedTenants}
+                  selectedTenant={selectedTenant}
+                  setSelectedTenant={setSelectedTenant}
                 />
               </div>
             ) : (
@@ -3313,8 +3296,11 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                     updateConfig={updateConfig}
                     project={project}
                     onProjectUpdate={onProjectUpdate}
-                    teamId={teamId}
+                    teamId={(project as { team_id?: string })?.team_id ?? teamId}
                     tenantOptions={tenantOptions}
+                    attachedTenants={attachedTenants}
+                    selectedTenant={selectedTenant}
+                    setSelectedTenant={setSelectedTenant}
                   />
                 ) : (
                   <>

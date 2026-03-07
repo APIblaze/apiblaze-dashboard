@@ -20,12 +20,14 @@ import {
 } from '@/components/ui/dialog';
 
 interface AuthConfigDetailProps {
+  /** In tenant-only model, this is the tenant name. */
   authConfigId: string;
-  teamId?: string;
+  teamId: string;
   onBack: () => void;
 }
 
 export function AuthConfigDetail({ authConfigId, teamId, onBack }: AuthConfigDetailProps) {
+  const tenantName = authConfigId;
   const router = useRouter();
   const { toast } = useToast();
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
@@ -40,18 +42,9 @@ export function AuthConfigDetail({ authConfigId, teamId, onBack }: AuthConfigDet
 
     try {
       setDeleting(true);
-      await api.deleteAuthConfig(authConfig.id);
-      await invalidateAndRefetch();
       toast({
-        title: 'Success',
-        description: 'Auth config deleted successfully',
-      });
-      router.push('/dashboard/auth-configs');
-    } catch (error) {
-      console.error('Error deleting auth config:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to delete auth config',
+        title: 'Not implemented',
+        description: 'Tenant deletion will detach the tenant from all projects. Use project settings to manage tenant attachments.',
         variant: 'destructive',
       });
     } finally {
@@ -122,7 +115,7 @@ export function AuthConfigDetail({ authConfigId, teamId, onBack }: AuthConfigDet
 
         {/* App Clients */}
         <div className="mt-6">
-          <AppClientList authConfigId={authConfigId} teamId={teamId} onRefresh={() => invalidateAndRefetch()} />
+          <AppClientList teamId={teamId} tenantName={tenantName} onRefresh={() => invalidateAndRefetch()} />
         </div>
       </div>
 

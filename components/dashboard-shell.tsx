@@ -29,8 +29,8 @@ interface DashboardShellProps {
   userId?: string | null;
   /** When in project scope: active tab and handler for project config submenu */
   projectSubmenu?: { activeTab: ProjectConfigTab; onTabChange: (tab: ProjectConfigTab) => void };
-  /** When on auth-configs page: drill-down context to show Auth Config > App Client > Provider in nav */
-  authConfigsSubmenu?: { authConfigId?: string | null; clientId?: string | null; providerId?: string | null };
+  /** When on tenants page: drill-down context (tenant → app client → provider). Use tenantName for tenant-based flow. */
+  authConfigsSubmenu?: { authConfigId?: string | null; tenantName?: string | null; clientId?: string | null; providerId?: string | null };
   /** When false (zero state, no projects): hide nav menu and submenu */
   hasProjects?: boolean;
 }
@@ -79,6 +79,7 @@ export function DashboardShell({
                 teamId={teamId}
                 userId={userId}
                 authConfigId={authConfigsSubmenu?.authConfigId ?? undefined}
+                tenantName={authConfigsSubmenu?.tenantName ?? undefined}
                 clientId={authConfigsSubmenu?.clientId ?? undefined}
                 providerId={authConfigsSubmenu?.providerId ?? undefined}
                 showProjectsSection={!isTenants}

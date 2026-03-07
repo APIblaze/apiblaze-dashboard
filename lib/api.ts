@@ -3,7 +3,7 @@
  * Handles communication with internalapi.apiblaze.com
  */
 
-import type { AuthConfig, AppClient, SocialProvider } from '@/types/auth-config';
+import type { AuthConfig, AppClient, SocialProvider, CreateProviderRequest } from '@/types/auth-config';
 
 // Use Next.js API routes to proxy requests (keeps API key server-side)
 const API_BASE_URL = '/api';
@@ -175,7 +175,7 @@ class ApiClient {
       client_secret: string;
       scopes: string;
     };
-    auth_config_id?: string;
+    tenant?: string;
     app_client_id?: string;
     default_app_client_id?: string;
     environments?: Record<string, { target: string }>;
@@ -220,8 +220,11 @@ class ApiClient {
     if (data.oauth_config) {
       backendData.oauth_config = data.oauth_config;
     }
-    if (data.auth_config_id) {
-      backendData.auth_config_id = data.auth_config_id;
+    if (data.team_id) {
+      backendData.team_id = data.team_id;
+    }
+    if (data.tenant) {
+      backendData.tenant = data.tenant;
     }
     if (data.app_client_id) {
       backendData.app_client_id = data.app_client_id;
@@ -266,7 +269,7 @@ class ApiClient {
 
   async getTeamTenants(teamId: string, detail?: boolean): Promise<
     | { tenants: string[] }
-    | { tenants: Array<{ tenant_name: string; display_name: string; auth_config_id: string | null; app_clients_count: number; proxies: Array<{ project_id: string; api_version: string }> }> }
+    | { tenants: Array<{ tenant_name: string; display_name: string; app_clients_count: number; proxies: Array<{ project_id: string; api_version: string }> }> }
   > {
     const q = detail ? '?detail=1' : '';
     return this.request(`/teams/${encodeURIComponent(teamId)}/tenants${q}`);
@@ -286,7 +289,7 @@ class ApiClient {
   async attachTenantToProject(
     projectId: string,
     version: string,
-    data: { tenant_name: string; display_name?: string; auth_config_id?: string }
+    data: { tenant_name: string; display_name?: string }
   ) {
     return this.request<{ success: boolean; tenant_name: string; display_name: string; url: string }>(
       `/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(version)}/tenants`,
@@ -304,166 +307,120 @@ class ApiClient {
     );
   }
 
-  // AuthConfigs
-  async listAuthConfigs() {
-    return this.request<AuthConfig[]>('/auth-configs');
-  }
-
-  async getAuthConfig(authConfigId: string): Promise<AuthConfig> {
-    return this.request<AuthConfig>(`/auth-configs/${authConfigId}`);
-  }
-
-  async createAuthConfig(data: { name: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean }) {
-    return this.request('/auth-configs', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateAuthConfig(authConfigId: string, data: { name?: string; default_app_client_id?: string; enableSocialAuth?: boolean; enableApiKeyAuth?: boolean; bringMyOwnOAuth?: boolean }) {
-    return this.request(`/auth-configs/${authConfigId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteAuthConfig(authConfigId: string) {
-    return this.request(`/auth-configs/${authConfigId}`, {
-      method: 'DELETE',
-    });
-  }
-
-  // AppClients
-  async listAppClients(authConfigId: string) {
-    return this.request<AppClient[]>(`/auth-configs/${authConfigId}/app-clients`);
-  }
-
-  async getAppClient(authConfigId: string, clientId: string): Promise<AppClientResponse> {
-    return this.request<AppClientResponse>(`/auth-configs/${authConfigId}/app-clients/${clientId}`);
-  }
-
-  /** Look up app client by client_id when authConfigId is unknown (e.g. verify link). */
-  async lookupAppClient(clientId: string): Promise<{ authConfigId: string; client: AppClient }> {
-    return this.request<{ authConfigId: string; client: AppClient }>(
-      `/auth-configs/lookup-client/${encodeURIComponent(clientId)}`
+  /** List app clients for a tenant (proxy -> tenant -> app clients). */
+  async listAppClientsByTenant(teamId: string, tenantName: string): Promise<AppClient[]> {
+    return this.request<AppClient[]>(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients`
     );
   }
 
-  /** Reveal (decrypt) app client secret for dashboard. Use only when user clicks Reveal. */
-  async getAppClientSecret(authConfigId: string, clientId: string): Promise<{ clientSecret: string }> {
-    return this.request<{ clientSecret: string }>(`/auth-configs/${authConfigId}/app-clients/${clientId}/secret`);
+  async getAppClientByTenant(teamId: string, tenantName: string, clientId: string): Promise<AppClientResponse> {
+    return this.request<AppClientResponse>(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}`
+    );
   }
 
-  async createAppClient(authConfigId: string, data: {
-    name: string;
-    projectName: string;
-    apiVersion: string;
-    tenant: string;
-    refreshTokenExpiry?: number;
-    idTokenExpiry?: number;
-    accessTokenExpiry?: number;
-    authorizedCallbackUrls?: string[];
-    signoutUris?: string[];
-    scopes?: string[];
-    providerType?: string;
-    branding?: import('@/types/auth-config').AppClientBranding;
-  }) {
-    return this.request(`/auth-configs/${authConfigId}/app-clients`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+  async createAppClientForTenant(
+    teamId: string,
+    tenantName: string,
+    data: { name: string; projectName: string; apiVersion: string; authorizedCallbackUrls?: string[]; [key: string]: unknown }
+  ): Promise<AppClientResponse & { clientSecret?: string }> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients`,
+      { method: 'POST', body: JSON.stringify(data) }
+    );
   }
 
-  async updateAppClient(authConfigId: string, clientId: string, data: {
-    name?: string;
-    tenant?: string;
-    refreshTokenExpiry?: number;
-    idTokenExpiry?: number;
-    accessTokenExpiry?: number;
-    authorizedCallbackUrls?: string[];
-    signoutUris?: string[];
-    scopes?: string[];
-    verified?: boolean;
-    branding?: import('@/types/auth-config').AppClientBranding;
-  }) {
-    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
+  async updateAppClientByTenant(
+    teamId: string,
+    tenantName: string,
+    clientId: string,
+    data: Record<string, unknown>
+  ): Promise<AppClientResponse> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}`,
+      { method: 'PATCH', body: JSON.stringify(data) }
+    );
   }
 
-  async deleteAppClient(authConfigId: string, clientId: string) {
-    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}`, {
-      method: 'DELETE',
-    });
+  async deleteAppClientByTenant(teamId: string, tenantName: string, clientId: string): Promise<void> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}`,
+      { method: 'DELETE' }
+    );
   }
 
-  // Providers
-  async listProviders(authConfigId: string, clientId: string): Promise<SocialProviderResponse[]> {
-    return this.request<SocialProviderResponse[]>(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`);
+  async getAppClientSecretByTenant(
+    teamId: string,
+    tenantName: string,
+    clientId: string
+  ): Promise<{ clientSecret: string }> {
+    return this.request<{ clientSecret: string }>(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/secret`
+    );
   }
 
-  async addProvider(authConfigId: string, clientId: string, data: {
-    type: string;
-    clientId: string;
-    clientSecret: string;
-    scopes: string[];
-    domain?: string;
-    tokenType?: 'apiblaze' | 'thirdParty';
-    targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
-    includeApiblazeAccessTokenHeader?: boolean;
-    includeApiblazeIdTokenHeader?: boolean;
-  }) {
-    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+  /** List providers for an app client under a tenant */
+  async listProvidersByTenant(teamId: string, tenantName: string, clientId: string): Promise<SocialProviderResponse[]> {
+    return this.request<SocialProviderResponse[]>(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/providers`
+    );
   }
 
-  async updateProvider(authConfigId: string, clientId: string, providerId: string, data: {
-    type: string;
-    clientId: string;
-    clientSecret: string;
-    scopes: string[];
-    domain?: string;
-    tokenType?: 'apiblaze' | 'thirdParty';
-    targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
-    includeApiblazeAccessTokenHeader?: boolean;
-    includeApiblazeIdTokenHeader?: boolean;
-  }) {
-    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
+  async addProviderByTenant(
+    teamId: string,
+    tenantName: string,
+    clientId: string,
+    data: CreateProviderRequest
+  ): Promise<SocialProviderResponse> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/providers`,
+      { method: 'POST', body: JSON.stringify(data) }
+    );
   }
 
-  async removeProvider(authConfigId: string, clientId: string, providerId: string) {
-    return this.request(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}`, {
-      method: 'DELETE',
-    });
+  async updateProviderByTenant(
+    teamId: string,
+    tenantName: string,
+    clientId: string,
+    providerId: string,
+    data: CreateProviderRequest
+  ): Promise<SocialProviderResponse> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/providers/${encodeURIComponent(providerId)}`,
+      { method: 'PATCH', body: JSON.stringify(data) }
+    );
   }
 
-  /** Reveal (decrypt) provider client secret for dashboard. Use only when user clicks Reveal. */
-  async getProviderSecret(authConfigId: string, clientId: string, providerId: string): Promise<{ clientSecret: string }> {
-    return this.request<{ clientSecret: string }>(`/auth-configs/${authConfigId}/app-clients/${clientId}/providers/${providerId}/secret`);
+  async removeProviderByTenant(teamId: string, tenantName: string, clientId: string, providerId: string): Promise<void> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/providers/${encodeURIComponent(providerId)}`,
+      { method: 'DELETE' }
+    );
+  }
+
+  async getProviderSecretByTenant(
+    teamId: string,
+    tenantName: string,
+    clientId: string,
+    providerId: string
+  ): Promise<{ clientSecret: string }> {
+    return this.request<{ clientSecret: string }>(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/providers/${encodeURIComponent(providerId)}/secret`
+    );
   }
 
   /**
-   * Create AuthConfig, AppClient, and Provider with default GitHub credentials
-   * This keeps the GitHub client secret server-side only
+   * Create tenant (api), AppClient, and default GitHub provider. Returns team_id, tenant_name, appClientId.
    */
   async createAuthConfigWithDefaultGitHub(data: {
-    authConfigName: string;
+    teamId: string;
     appClientName: string;
     projectName: string;
     apiVersion: string;
-    defaultTenant?: string;
     scopes?: string[];
-    enableSocialAuth?: boolean;
-    enableApiKeyAuth?: boolean;
-    bringMyOwnOAuth?: boolean;
   }) {
-    return this.request<{ authConfigId: string; appClientId: string }>('/auth-configs/create-with-default-github', {
+    return this.request<{ team_id: string; tenant_name: string; appClientId: string }>('/create-with-default-github', {
       method: 'POST',
       body: JSON.stringify(data),
     });

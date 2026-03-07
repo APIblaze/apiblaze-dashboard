@@ -27,14 +27,18 @@ import {
 } from '@/components/ui/dialog';
 
 interface AppClientDetailProps {
-  authConfigId: string;
-  clientId: string;
+  /** Auth-config scope (legacy). Omit when using tenantName + teamId. */
+  authConfigId?: string;
+  /** Tenant scope. When set with teamId, use tenant-scoped API. */
   teamId?: string;
+  tenantName?: string;
+  clientId: string;
   onBack: () => void;
   verifyFromUrl?: boolean;
 }
 
-export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verifyFromUrl }: AppClientDetailProps) {
+export function AppClientDetail({ authConfigId, teamId, tenantName, clientId, onBack, verifyFromUrl }: AppClientDetailProps) {
+  const isTenantMode = !!(teamId && tenantName);
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -42,9 +46,13 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
   const updateAppClientInCache = useDashboardCacheStore((s) => s.updateAppClientInCache);
-  const authConfig = getAuthConfig(authConfigId) ?? null;
-  const appClient = getAppClient(authConfigId, clientId) as AppClient | undefined ?? null;
-  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
+  const tenantKey = teamId && tenantName ? `tenant:${teamId}:${tenantName}` : undefined;
+  const authConfig = tenantName ? getAuthConfig(tenantName) ?? null : null;
+  const cachedAppClient = tenantKey ? (getAppClient(tenantKey, clientId) as AppClient | undefined ?? null) : null;
+  const [tenantAppClient, setTenantAppClient] = useState<AppClient | null>(null);
+  const [tenantLoading, setTenantLoading] = useState(isTenantMode);
+  const appClient = isTenantMode ? tenantAppClient : cachedAppClient;
+  const loading = useDashboardCacheStore((s) => s.isBootstrapping) || (isTenantMode && tenantLoading);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -57,26 +65,54 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const autoVerifyAttempted = useRef(false);
 
-  // Fetch full app client when viewing detail so we have scopes (list endpoint may omit them)
+  // Tenant mode: fetch app client by tenant
   useEffect(() => {
-    if (!authConfigId || !clientId || !appClient) return;
+    if (!isTenantMode || !teamId || !tenantName || !clientId) return;
+    let cancelled = false;
+    (async () => {
+      setTenantLoading(true);
+      try {
+        const full = await api.getAppClientByTenant(teamId, tenantName, clientId);
+        if (!cancelled) {
+          const normalized: AppClient = {
+            ...full,
+            id: full.id ?? full.clientId ?? clientId,
+            clientId: full.clientId ?? full.client_id ?? full.id ?? clientId,
+            authorizedCallbackUrls: full.authorizedCallbackUrls ?? full.authorized_callback_urls ?? [],
+            signoutUris: full.signoutUris ?? full.signout_uris ?? [],
+            scopes: full.scopes ?? [],
+          };
+          setTenantAppClient(normalized);
+        }
+      } catch {
+        if (!cancelled) setTenantAppClient(null);
+      } finally {
+        if (!cancelled) setTenantLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isTenantMode, teamId, tenantName, clientId]);
+
+  // Fetch full app client when viewing detail (non-tenant fallback removed - tenant-only)
+  useEffect(() => {
+    if (!isTenantMode || !teamId || !tenantName || !clientId) return;
     (async () => {
       try {
-        const full = await api.getAppClient(authConfigId, clientId);
+        const full = await api.getAppClientByTenant(teamId, tenantName, clientId);
         const patch: Partial<AppClient> = {};
         if (Array.isArray(full.scopes)) patch.scopes = full.scopes;
         if (full.authorized_callback_urls !== undefined) patch.authorizedCallbackUrls = full.authorized_callback_urls;
         else if (full.authorizedCallbackUrls !== undefined) patch.authorizedCallbackUrls = full.authorizedCallbackUrls;
         if (full.signout_uris !== undefined) patch.signoutUris = full.signout_uris;
         else if (full.signoutUris !== undefined) patch.signoutUris = full.signoutUris;
-        if (Object.keys(patch).length > 0) {
-          updateAppClientInCache(authConfigId, appClient.id, patch);
+        if (Object.keys(patch).length > 0 && tenantKey) {
+          updateAppClientInCache(tenantKey, clientId, patch);
         }
       } catch {
         // Ignore; keep using cached app client
       }
     })();
-  }, [authConfigId, clientId, appClient, updateAppClientInCache]);
+  }, [teamId, tenantName, clientId, cachedAppClient, tenantKey, updateAppClientInCache]);
 
   // Auto-verify when landing from unverified error page link
   useEffect(() => {
@@ -84,18 +120,22 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
     autoVerifyAttempted.current = true;
     (async () => {
       try {
-        await api.updateAppClient(authConfigId, appClient.id, { verified: true });
-        updateAppClientInCache(authConfigId, appClient.id, { verified: true });
+        if (isTenantMode && teamId && tenantName) {
+          await api.updateAppClientByTenant(teamId, tenantName, appClient.id, { verified: true });
+          setTenantAppClient((prev) => (prev ? { ...prev, verified: true } : null));
+        } else if (teamId && tenantName && tenantKey) {
+          await api.updateAppClientByTenant(teamId, tenantName, appClient.id, { verified: true });
+          updateAppClientInCache(tenantKey, appClient.id, { verified: true });
+        }
         setJustVerified(true);
         toast({
           title: 'App verified',
           description: 'This app client has been verified. Users can now sign in.',
         });
-        // Remove verify param from URL
         const params = new URLSearchParams(searchParams.toString());
         params.delete('verify');
         const qs = params.toString();
-        router.replace(qs ? `/dashboard/auth-configs?${qs}` : '/dashboard/auth-configs', { scroll: false });
+        router.replace(qs ? `/dashboard/tenants?tenant=${encodeURIComponent(tenantName!)}&client=${encodeURIComponent(clientId)}&${qs}` : `/dashboard/tenants?tenant=${encodeURIComponent(tenantName!)}&client=${encodeURIComponent(clientId)}`, { scroll: false });
       } catch (error) {
         autoVerifyAttempted.current = false;
         toast({
@@ -105,7 +145,7 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
         });
       }
     })();
-  }, [verifyFromUrl, appClient, loading, authConfigId, updateAppClientInCache, toast, router, searchParams]);
+  }, [verifyFromUrl, appClient, loading, isTenantMode, teamId, tenantName, clientId, tenantKey, updateAppClientInCache, toast, router, searchParams]);
 
   // Generate PKCE example URLs for "Your App login URLs" (All + one per provider)
   useEffect(() => {
@@ -118,8 +158,13 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
     (async () => {
       let providers: { type?: string }[] = [];
       try {
-        const list = await api.listProviders(authConfigId, appClient.id);
-        providers = Array.isArray(list) && list.length > 0 ? list : [{ type: '' }];
+        if (isTenantMode && teamId && tenantName) {
+          const list = await api.listProvidersByTenant(teamId, tenantName, appClient.id);
+          providers = Array.isArray(list) && list.length > 0 ? list : [{ type: '' }];
+        } else if (teamId && tenantName) {
+          const list = await api.listProvidersByTenant(teamId, tenantName, appClient.id);
+          providers = Array.isArray(list) && list.length > 0 ? list : [{ type: '' }];
+        }
       } catch {
         providers = [{ type: '' }];
       }
@@ -141,7 +186,7 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
       }
     })();
     return () => { cancelled = true; };
-  }, [appClient, authConfigId]);
+  }, [appClient, isTenantMode, teamId, tenantName]);
 
   const handleCopy = async (text: string, key?: string) => {
     try {
@@ -172,8 +217,13 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
   const handleRevealSecret = async () => {
     try {
       setLoadingReveal(true);
-      const { clientSecret } = await api.getAppClientSecret(authConfigId, clientId);
-      setRevealedSecret(clientSecret);
+      if (isTenantMode && teamId && tenantName) {
+        const { clientSecret } = await api.getAppClientSecretByTenant(teamId, tenantName, clientId);
+        setRevealedSecret(clientSecret);
+      } else if (teamId && tenantName) {
+        const { clientSecret } = await api.getAppClientSecretByTenant(teamId, tenantName, clientId);
+        setRevealedSecret(clientSecret);
+      }
       toast({
         title: 'Secret revealed',
         description: 'Copy and store it securely. It will not be shown again until you click Reveal.',
@@ -195,13 +245,18 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
 
     try {
       setDeleting(true);
-      await api.deleteAppClient(authConfigId, appClient.id);
-      await invalidateAndRefetch();
+      if (isTenantMode && teamId && tenantName) {
+        await api.deleteAppClientByTenant(teamId, tenantName, appClient.id);
+        router.push(`/dashboard/tenants?tenant=${encodeURIComponent(tenantName)}`);
+      } else if (teamId && tenantName) {
+        await api.deleteAppClientByTenant(teamId, tenantName, appClient.id);
+        await invalidateAndRefetch();
+        router.push(`/dashboard/tenants?tenant=${encodeURIComponent(tenantName!)}`);
+      }
       toast({
         title: 'Success',
         description: 'App client deleted successfully',
       });
-      router.push(`/dashboard/auth-configs?authConfig=${authConfigId}`);
     } catch (error) {
       console.error('Error deleting app client:', error);
       toast({
@@ -217,7 +272,23 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
 
   const handleSuccess = async () => {
     setEditDialogOpen(false);
-    await invalidateAndRefetch();
+    if (isTenantMode && teamId && tenantName) {
+      try {
+        const full = await api.getAppClientByTenant(teamId, tenantName, clientId);
+        setTenantAppClient({
+          ...full,
+          id: full.id ?? full.clientId ?? clientId,
+          clientId: full.clientId ?? full.client_id ?? full.id ?? clientId,
+          authorizedCallbackUrls: full.authorizedCallbackUrls ?? full.authorized_callback_urls ?? [],
+          signoutUris: full.signoutUris ?? full.signout_uris ?? [],
+          scopes: full.scopes ?? [],
+        });
+      } catch {
+        // ignore
+      }
+    } else {
+      await invalidateAndRefetch();
+    }
   };
 
   if (loading) {
@@ -282,8 +353,13 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
                 variant="default"
                 onClick={async () => {
                   try {
-                    await api.updateAppClient(authConfigId, appClient.id, { verified: true });
-                    updateAppClientInCache(authConfigId, appClient.id, { verified: true });
+                    if (isTenantMode && teamId && tenantName) {
+                      await api.updateAppClientByTenant(teamId, tenantName, appClient.id, { verified: true });
+                      setTenantAppClient((prev) => (prev ? { ...prev, verified: true } : null));
+                    } else if (teamId && tenantName && tenantKey) {
+                      await api.updateAppClientByTenant(teamId, tenantName, appClient.id, { verified: true });
+                      updateAppClientInCache(tenantKey, appClient.id, { verified: true });
+                    }
                     toast({
                       title: 'Success',
                       description: 'App client verified successfully',
@@ -549,18 +625,28 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
 
         {/* Providers Section */}
         <div>
-          <ProviderList authConfigId={authConfigId} clientId={clientId} onRefresh={() => invalidateAndRefetch()} />
+          <ProviderList
+            authConfigId={authConfigId}
+            teamId={teamId}
+            tenantName={tenantName}
+            clientId={clientId}
+            onRefresh={() => (isTenantMode ? handleSuccess() : invalidateAndRefetch())}
+          />
         </div>
 
-        {/* Users Section (per app client) */}
+        {/* Users Section (per app client) - only in auth-config mode */}
+        {false && (
         <div>
-          <UsersList authConfigId={authConfigId} clientId={clientId} onRefresh={() => invalidateAndRefetch()} />
+          <UsersList authConfigId={tenantName ?? ''} clientId={clientId} onRefresh={() => invalidateAndRefetch()} />
         </div>
+        )}
 
-        {/* Groups Section (per app client) */}
+        {/* Groups Section (per app client) - only in auth-config mode */}
+        {false && (
         <div>
-          <GroupsList authConfigId={authConfigId} clientId={clientId} onRefresh={() => invalidateAndRefetch()} />
+          <GroupsList authConfigId={tenantName ?? ''} clientId={clientId} onRefresh={() => invalidateAndRefetch()} />
         </div>
+        )}
       </div>
 
       {/* Edit Dialog */}
@@ -568,9 +654,9 @@ export function AppClientDetail({ authConfigId, clientId, teamId, onBack, verify
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
         onSuccess={handleSuccess}
-        authConfigId={authConfigId}
+        teamId={teamId ?? ''}
+        tenantName={tenantName ?? ''}
         appClient={appClient}
-        teamId={teamId}
       />
 
       {/* Delete Confirmation Dialog */}

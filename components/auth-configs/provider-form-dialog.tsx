@@ -24,7 +24,9 @@ interface ProviderFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
-  authConfigId: string;
+  authConfigId?: string;
+  teamId?: string;
+  tenantName?: string;
   clientId: string;
   provider?: SocialProvider | null;
 }
@@ -62,7 +64,8 @@ export function ProviderFormDialog({
   open,
   onOpenChange,
   onSuccess,
-  authConfigId,
+  teamId,
+  tenantName,
   clientId,
   provider,
 }: ProviderFormDialogProps) {
@@ -152,13 +155,15 @@ export function ProviderFormDialog({
       };
       
       if (provider) {
-        await api.updateProvider(authConfigId, clientId, provider.id, data);
+        const providerId = provider.id ?? '';
+        if (!providerId) throw new Error('Provider ID is required');
+        await api.updateProviderByTenant(teamId ?? '', tenantName ?? '', clientId ?? '', providerId, data);
         toast({
           title: 'Success',
           description: 'Provider updated successfully',
         });
       } else {
-        await api.addProvider(authConfigId, clientId, data);
+        await api.addProviderByTenant(teamId ?? '', tenantName ?? '', clientId ?? '', data);
         toast({
           title: 'Success',
           description: 'Provider created successfully',

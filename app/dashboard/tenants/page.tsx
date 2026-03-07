@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { DashboardShell } from '@/components/dashboard-shell';
-import { AuthConfigDetail } from '@/components/auth-configs/auth-config-detail';
+import { TenantDetail } from '@/components/auth-configs/tenant-detail';
 import { AppClientDetail } from '@/components/auth-configs/app-client-detail';
 import { ProviderDetail } from '@/components/auth-configs/provider-detail';
 import { useToast } from '@/hooks/use-toast';
@@ -24,7 +24,6 @@ import { useToast } from '@/hooks/use-toast';
 type TenantDetail = {
   tenant_name: string;
   display_name: string;
-  auth_config_id: string | null;
   app_clients_count: number;
   proxies: Array<{ project_id: string; api_version: string }>;
 };
@@ -40,7 +39,7 @@ function TenantsContent() {
   const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
 
-  const authConfigId = searchParams.get('authConfig');
+  const tenantNameParam = searchParams.get('tenant') ?? searchParams.get('authConfig');
   const clientId = searchParams.get('client');
   const providerId = searchParams.get('provider');
 
@@ -62,7 +61,7 @@ function TenantsContent() {
   }, [status, router]);
 
   useEffect(() => {
-    if (!teamId || authConfigId) return;
+    if (!teamId || tenantNameParam) return;
     (async () => {
       try {
         setLoading(true);
@@ -78,18 +77,10 @@ function TenantsContent() {
         setLoading(false);
       }
     })();
-  }, [teamId, authConfigId]);
+  }, [teamId, tenantNameParam]);
 
   const handleManage = (tenant: TenantDetail) => {
-    if (tenant.auth_config_id) {
-      router.push(`/dashboard/tenants?authConfig=${encodeURIComponent(tenant.auth_config_id)}`);
-    } else {
-      toast({
-        title: 'No auth config',
-        description: 'This tenant has no auth config yet. Attach it to a project and configure auth from the project\'s Authentication tab.',
-        variant: 'destructive',
-      });
-    }
+    router.push(`/dashboard/tenants?tenant=${encodeURIComponent(tenant.tenant_name)}`);
   };
 
   const handleDeleteClick = (tenant: TenantDetail) => {
@@ -111,11 +102,11 @@ function TenantsContent() {
   };
 
   const handleBack = () => {
-    if (providerId && clientId && authConfigId) {
-      router.push(`/dashboard/tenants?authConfig=${authConfigId}&client=${clientId}`);
-    } else if (clientId && authConfigId) {
-      router.push(`/dashboard/tenants?authConfig=${authConfigId}`);
-    } else if (authConfigId) {
+    if (providerId && clientId && tenantNameParam) {
+      router.push(`/dashboard/tenants?tenant=${encodeURIComponent(tenantNameParam)}&client=${encodeURIComponent(clientId)}`);
+    } else if (clientId && tenantNameParam) {
+      router.push(`/dashboard/tenants?tenant=${encodeURIComponent(tenantNameParam)}`);
+    } else if (tenantNameParam) {
       router.push('/dashboard/tenants');
     } else {
       router.push('/dashboard');
@@ -126,8 +117,8 @@ function TenantsContent() {
     return null;
   }
 
-  // Drill-down: auth config / app client / provider detail
-  if (providerId && clientId && authConfigId) {
+  // Drill-down: tenant → app client → provider detail (tenant-based)
+  if (providerId && clientId && tenantNameParam) {
     return (
       <DashboardShell
         selectorValue={{ type: 'team' }}
@@ -135,12 +126,13 @@ function TenantsContent() {
         githubHandle={(session?.user as { githubHandle?: string })?.githubHandle}
         teamId={teamId}
         userId={user?.id}
-        authConfigsSubmenu={{ authConfigId, clientId, providerId }}
+        authConfigsSubmenu={{ tenantName: tenantNameParam, clientId, providerId }}
       >
         <main className="w-full px-4 py-8">
           <div className="container mx-auto max-w-6xl">
             <ProviderDetail
-              authConfigId={authConfigId}
+              teamId={teamId ?? ''}
+              tenantName={tenantNameParam}
               clientId={clientId}
               providerId={providerId}
               onBack={handleBack}
@@ -150,7 +142,7 @@ function TenantsContent() {
       </DashboardShell>
     );
   }
-  if (clientId && authConfigId) {
+  if (clientId && tenantNameParam) {
     return (
       <DashboardShell
         selectorValue={{ type: 'team' }}
@@ -158,14 +150,14 @@ function TenantsContent() {
         githubHandle={(session?.user as { githubHandle?: string })?.githubHandle}
         teamId={teamId}
         userId={user?.id}
-        authConfigsSubmenu={{ authConfigId, clientId }}
+        authConfigsSubmenu={{ tenantName: tenantNameParam, clientId }}
       >
         <main className="w-full px-4 py-8">
           <div className="container mx-auto max-w-6xl">
             <AppClientDetail
-              authConfigId={authConfigId}
-              clientId={clientId}
               teamId={teamId ?? undefined}
+              tenantName={tenantNameParam}
+              clientId={clientId}
               onBack={handleBack}
               verifyFromUrl={searchParams.get('verify') === '1'}
             />
@@ -174,7 +166,8 @@ function TenantsContent() {
       </DashboardShell>
     );
   }
-  if (authConfigId) {
+  if (tenantNameParam) {
+    const displayName = tenants.find((t) => t.tenant_name === tenantNameParam)?.display_name ?? tenantNameParam;
     return (
       <DashboardShell
         selectorValue={{ type: 'team' }}
@@ -182,13 +175,14 @@ function TenantsContent() {
         githubHandle={(session?.user as { githubHandle?: string })?.githubHandle}
         teamId={teamId}
         userId={user?.id}
-        authConfigsSubmenu={{ authConfigId }}
+        authConfigsSubmenu={{ tenantName: tenantNameParam }}
       >
         <main className="w-full px-4 py-8">
           <div className="container mx-auto max-w-6xl">
-            <AuthConfigDetail
-              authConfigId={authConfigId}
-              teamId={teamId ?? undefined}
+            <TenantDetail
+              teamId={teamId ?? ''}
+              tenantName={tenantNameParam}
+              displayName={displayName}
               onBack={handleBack}
             />
           </div>
@@ -212,7 +206,7 @@ function TenantsContent() {
             <div>
               <h2 className="text-2xl font-bold">Tenants</h2>
               <p className="text-muted-foreground mt-1">
-                Manage your auth configs, app clients, and authentication providers
+                Manage app clients and authentication per tenant
               </p>
             </div>
 
@@ -282,7 +276,7 @@ function TenantsContent() {
           <DialogHeader>
             <DialogTitle>Delete tenant</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete &quot;{tenantToDelete?.display_name}&quot;? This will remove the tenant from all projects. The tenant&apos;s auth config and app clients will also be removed.
+              Are you sure you want to delete &quot;{tenantToDelete?.display_name}&quot;? This will remove the tenant from all projects. The tenant&apos;s app clients and providers will also be removed.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
