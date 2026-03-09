@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { AlertCircle, Plus, X, Users, Key, Copy, Check, Search, ChevronDown, ChevronRight, Star, ExternalLink, Loader2, Pencil, HelpCircle, Info, AlertTriangle } from 'lucide-react';
+import { AlertCircle, Plus, X, Users, Key, Copy, Check, Search, ChevronDown, ChevronRight, Star, ExternalLink, Loader2, Pencil, HelpCircle, Info, AlertTriangle, Github, Zap } from 'lucide-react';
 import { ProjectConfig, SocialProvider } from './types';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { AuthConfigModal } from '@/components/auth-config/auth-config-modal';
@@ -99,6 +99,55 @@ const PROVIDER_TYPE_LABELS: Record<SocialProvider, string> = {
   other: 'Other',
 };
 
+/** Provider icons for beautiful chips - brand colors and simplified logos */
+function ProviderIcon({ providerId, className = 'h-5 w-5' }: { providerId: string; className?: string }) {
+  switch (providerId) {
+    case 'apiblaze':
+      return (
+        <div className={`${className} relative flex items-center justify-center rounded-lg bg-slate-800 text-amber-400 p-1`}>
+          <Zap className="h-[0.85em] w-[0.85em] fill-current" strokeWidth={2} />
+          <span className="absolute -bottom-0.5 -right-0.5 flex h-[0.55em] w-[0.55em] items-center justify-center rounded-full bg-[#24292f] dark:bg-white">
+            <Github className="h-[0.65em] w-[0.65em] text-white dark:text-[#24292f]" strokeWidth={2.5} />
+          </span>
+        </div>
+      );
+    case 'google':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+      );
+    case 'github':
+      return <Github className={`${className} text-[#24292f] dark:text-white`} />;
+    case 'microsoft':
+      return (
+        <svg className={className} viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M1 1h10v10H1z" fill="#f25022"/>
+          <path d="M1 12h10v10H1z" fill="#00a4ef"/>
+          <path d="M12 1h10v10H12z" fill="#7fba00"/>
+          <path d="M12 12h10v10H12z" fill="#ffb900"/>
+        </svg>
+      );
+    case 'facebook':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="#1877F2" xmlns="http://www.w3.org/2000/svg">
+          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+        </svg>
+      );
+    case 'auth0':
+      return (
+        <div className={`${className} flex items-center justify-center rounded bg-[#eb5424] text-white`}>
+          <Key className="h-[0.7em] w-[0.7em]" strokeWidth={2.5} />
+        </div>
+      );
+    default:
+      return <Key className={`${className} text-muted-foreground`} />;
+  }
+}
+
 function AddTenantModal({
   open,
   onOpenChange,
@@ -108,27 +157,27 @@ function AddTenantModal({
   onAdd,
   tenantName,
   setTenantName,
-  tenantDescription,
-  setTenantDescription,
+  displayName,
+  setDisplayName,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectName: string;
   apiVersion: string;
   loading: boolean;
-  onAdd: (displayName: string, description: string) => Promise<void>;
+  onAdd: (displayName: string, tenantName: string) => Promise<void>;
   tenantName: string;
   setTenantName: (v: string) => void;
-  tenantDescription: string;
-  setTenantDescription: (v: string) => void;
+  displayName: string;
+  setDisplayName: (v: string) => void;
 }) {
   const slug = tenantName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 32) || '';
   const urlPreview = slug ? `${projectName}-${slug}.apiblaze.com/${apiVersion}` : '';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenantName.trim()) return;
-    await onAdd(tenantName.trim(), tenantDescription.trim());
+    if (!displayName.trim() || !tenantName.trim()) return;
+    await onAdd(displayName.trim(), slug || tenantName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 32) || 'tenant');
   };
 
   return (
@@ -140,25 +189,26 @@ function AddTenantModal({
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <Label htmlFor="add-tenant-name">Tenant name</Label>
+            <Label htmlFor="add-tenant-display-name">Display name</Label>
+            <Input
+              id="add-tenant-display-name"
+              placeholder="e.g. Nino Pizzas"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className="mt-1"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Human-readable name shown in the dropdown</p>
+          </div>
+          <div>
+            <Label htmlFor="add-tenant-name">Tenant name (slug)</Label>
             <Input
               id="add-tenant-name"
-              placeholder="e.g. Nino (letters and numbers only)"
+              placeholder="e.g. nino (letters and numbers only)"
               value={tenantName}
               onChange={(e) => setTenantName(e.target.value)}
               className="mt-1"
             />
-            <p className="text-xs text-muted-foreground mt-1">Slug: {slug || '(from name)'}. Only lowercase letters and numbers; no hyphens.</p>
-          </div>
-          <div>
-            <Label htmlFor="add-tenant-desc">Tenant description (optional)</Label>
-            <Input
-              id="add-tenant-desc"
-              placeholder="e.g. Nino pizzas"
-              value={tenantDescription}
-              onChange={(e) => setTenantDescription(e.target.value)}
-              className="mt-1"
-            />
+            <p className="text-xs text-muted-foreground mt-1">Slug: {slug || '(from name)'}. Used in URL. Only lowercase letters and numbers; no hyphens.</p>
           </div>
           {slug && (
             <div>
@@ -170,7 +220,7 @@ function AddTenantModal({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!tenantName.trim() || loading}>
+            <Button type="submit" disabled={!displayName.trim() || !tenantName.trim() || loading}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Create tenant
             </Button>
@@ -255,7 +305,7 @@ function EditModeManagementUI({
   onProjectUpdate,
   initialAuthConfigId,
   teamId,
-  tenantOptions = [],
+  tenantOptions = [] as Array<{ tenant_name: string; display_name?: string }>,
   attachedTenants = [],
   selectedTenant,
   setSelectedTenant,
@@ -266,7 +316,7 @@ function EditModeManagementUI({
   onProjectUpdate?: (updatedProject: Project) => void;
   initialAuthConfigId?: string;
   teamId?: string;
-  tenantOptions?: string[];
+  tenantOptions?: Array<{ tenant_name: string; display_name?: string }>;
   attachedTenants?: Array<{ tenant_name: string; display_name: string }>;
   selectedTenant: string;
   setSelectedTenant: (t: string) => void;
@@ -1148,14 +1198,14 @@ function EditModeManagementUI({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">Who is this login page for?</Label>
+                  <Label className="text-xs font-medium">Which tenant is this login page for?</Label>
                   <p className="text-xs text-muted-foreground">
-                    The data of users who login under this tenant will be separate from the data of other users.
+                    Each of your tenants gets their own API URL (https://{config.projectName || project?.project_id || 'project'}-{'{tenant}'}.apiblaze.com), login page and separate data.
                   </p>
                   {tenantOptions.length > 0 ? (
                     <div className="space-y-2">
                       <Select
-                        value={tenantOptions.includes(newAppClientTenant) ? newAppClientTenant : '__new__'}
+                        value={tenantOptions.some((t) => t.tenant_name === newAppClientTenant) ? newAppClientTenant : '__new__'}
                         onValueChange={(v) => setNewAppClientTenant(v === '__new__' ? '' : v)}
                       >
                         <SelectTrigger className="w-full max-w-[200px] h-9 bg-white">
@@ -1163,12 +1213,14 @@ function EditModeManagementUI({
                         </SelectTrigger>
                         <SelectContent>
                           {tenantOptions.map((t) => (
-                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                            <SelectItem key={t.tenant_name} value={t.tenant_name}>
+                              {t.display_name ?? t.tenant_name} ({t.tenant_name})
+                            </SelectItem>
                           ))}
                           <SelectItem value="__new__">+ Create new tenant</SelectItem>
                         </SelectContent>
                       </Select>
-                      {!tenantOptions.includes(newAppClientTenant) && (
+                      {!tenantOptions.some((t) => t.tenant_name === newAppClientTenant) && (
                         <Input
                           placeholder="Enter new tenant name"
                           value={newAppClientTenant}
@@ -1449,14 +1501,14 @@ function EditModeManagementUI({
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label className="text-xs font-medium">Who is this login page for?</Label>
+                            <Label className="text-xs font-medium">Which tenant is this login page for?</Label>
                             <p className="text-xs text-muted-foreground">
-                              The data of users who login under this tenant will be separate from the data of other users.
+                              Each of your tenants gets their own API URL (https://{config.projectName || project?.project_id || 'project'}-{'{tenant}'}.apiblaze.com), login page and separate data.
                             </p>
                             {tenantOptions.length > 0 ? (
                               <div className="space-y-2">
                                 <Select
-                                  value={tenantOptions.includes(form.tenant) ? form.tenant : '__new__'}
+                                  value={tenantOptions.some((t) => t.tenant_name === form.tenant) ? form.tenant : '__new__'}
                                   onValueChange={(v) => updateAppClientForm(client.id, { tenant: v === '__new__' ? '' : v })}
                                 >
                                   <SelectTrigger className="w-full max-w-[200px] h-9 bg-white">
@@ -1464,12 +1516,14 @@ function EditModeManagementUI({
                                   </SelectTrigger>
                                   <SelectContent>
                                     {tenantOptions.map((t) => (
-                                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                                      <SelectItem key={t.tenant_name} value={t.tenant_name}>
+                                        {t.display_name ?? t.tenant_name} ({t.tenant_name})
+                                      </SelectItem>
                                     ))}
                                     <SelectItem value="__new__">+ Create new tenant</SelectItem>
                                   </SelectContent>
                                 </Select>
-                                {!tenantOptions.includes(form.tenant) && (
+                                {!tenantOptions.some((t) => t.tenant_name === form.tenant) && (
                                   <Input
                                     placeholder="Enter new tenant name"
                                     value={form.tenant}
@@ -2390,29 +2444,46 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
   const existingAuthConfigs = getAuthConfigs();
   const loadingAuthConfigs = isBootstrapping;
 
-  const [tenantOptions, setTenantOptions] = useState<string[]>([]);
+  const [tenantOptions, setTenantOptions] = useState<Array<{ tenant_name: string; display_name?: string }>>([]);
   const [newScope, setNewScope] = useState('');
+  const [advancedSetupOpen, setAdvancedSetupOpen] = useState(false);
 
   useEffect(() => {
-    if (teamId && (config.useAuthConfig || config.bringOwnProvider || isEditMode)) {
-      api.getTeamTenants(teamId).then((res) => {
+    if (teamId) {
+      api.getTeamTenants(teamId, true).then((res) => {
         const t = res.tenants;
-        const names = Array.isArray(t) && t.length > 0
-          ? (typeof t[0] === 'string' ? t as string[] : (t as { tenant_name: string }[]).map((x) => x.tenant_name))
+        const list = Array.isArray(t) && t.length > 0
+          ? (typeof t[0] === 'string'
+              ? (t as string[]).map((tn) => ({ tenant_name: tn, display_name: tn }))
+              : (t as { tenant_name: string; display_name?: string }[]).map((x) => ({
+                  tenant_name: x.tenant_name,
+                  display_name: x.display_name ?? x.tenant_name,
+                })))
           : [];
-        setTenantOptions(names);
+        setTenantOptions(list);
       }).catch(() => setTenantOptions([]));
     } else {
       setTenantOptions([]);
     }
-  }, [teamId, config.useAuthConfig, config.bringOwnProvider, isEditMode]);
+  }, [teamId]);
+
+  // Default tenant to "api" when it exists in team (create mode)
+  useEffect(() => {
+    if (isEditMode || !tenantOptions.some((t) => t.tenant_name === 'api')) return;
+    const current = config.defaultTenant ?? '';
+    if (current === '' || current === 'MyDefaultTenant') {
+      updateConfig({ defaultTenant: 'api' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantOptions, isEditMode]);
+
   // Attached tenants for this project (edit mode)
   const [attachedTenants, setAttachedTenants] = useState<Array<{ tenant_name: string; display_name: string }>>([]);
   const [selectedTenant, setSelectedTenant] = useState<string>('api');
   const [showAddTenantModal, setShowAddTenantModal] = useState(false);
   const [addTenantLoading, setAddTenantLoading] = useState(false);
   const [addTenantName, setAddTenantName] = useState('');
-  const [addTenantDescription, setAddTenantDescription] = useState('');
+  const [addTenantDisplayName, setAddTenantDisplayName] = useState('');
   const [dangerZoneOpen, setDangerZoneOpen] = useState(false);
   const [detachLoading, setDetachLoading] = useState(false);
 
@@ -2930,20 +3001,19 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                 projectName={config.projectName || project.project_id}
                 apiVersion={config.apiVersion || project.api_version}
                 loading={addTenantLoading}
-                onAdd={async (displayName, _description) => {
+                onAdd={async (displayName, tenantSlug) => {
                   setAddTenantLoading(true);
                   try {
-                    const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 32) || 'tenant';
                     await api.attachTenantToProject(project.project_id, project.api_version, {
-                      tenant_name: slug,
-                      display_name: displayName || slug,
+                      tenant_name: tenantSlug,
+                      display_name: displayName || tenantSlug,
                     });
                     const next = await api.listProjectTenants(project.project_id, project.api_version);
                     setAttachedTenants(next.tenants ?? []);
-                    setSelectedTenant(slug);
+                    setSelectedTenant(tenantSlug);
                     setShowAddTenantModal(false);
                     setAddTenantName('');
-                    setAddTenantDescription('');
+                    setAddTenantDisplayName('');
                     if (onProjectUpdate) {
                       onProjectUpdate({ ...project });
                     }
@@ -2955,8 +3025,8 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                 }}
                 tenantName={addTenantName}
                 setTenantName={setAddTenantName}
-                tenantDescription={addTenantDescription}
-                setTenantDescription={setAddTenantDescription}
+                displayName={addTenantDisplayName}
+                setDisplayName={setAddTenantDisplayName}
               />
               {selectedTenant !== 'api' && (
                 <div className="border border-destructive/50 rounded-lg">
@@ -3244,34 +3314,15 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
           )}
         </div>
 
-        {/* Login for API Portal and App Clients */}
+        {/* Create a login page */}
         <div className="flex flex-col gap-4 p-4 border rounded-lg">
           <div>
-            <Label className="text-sm font-medium">Login for API Portal and App Clients</Label>
+            <Label className="text-sm font-medium">Create a login page</Label>
             <p className="text-xs text-muted-foreground mt-0.5">
-              How the API portal and your client Apps that use the API offer a login form and obtain oAuth tokens
+              This login page will allow end users to obtain oAuth tokens to access your API and your API portal.
             </p>
           </div>
           <div className="space-y-4">
-            {/* Bring My Own OAuth Provider - first inside expanded section */}
-            <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
-              <div className="space-y-1">
-                <Label htmlFor="bringOwnProvider" className="text-sm font-medium">
-                  Host my own login page for this API (oAuth)
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  Use your own Google, Auth0, or other OAuth provider
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  or leave it off to use default APIBlaze GitHub to login on your API portal and obtain JWT tokens
-                </p>
-              </div>
-              <Switch
-                id="bringOwnProvider"
-                checked={config.bringOwnProvider}
-                onCheckedChange={(checked) => updateConfig({ bringOwnProvider: checked })}
-              />
-            </div>
 
             {isEditMode ? (
               <div className="space-y-4">
@@ -3304,30 +3355,159 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                   />
                 ) : (
                   <>
-                    {/* Provider Configuration - Two Column Layout */}
-                    {config.bringOwnProvider && (
+                    {/* Provider selection - 6 beautiful chips */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {[
+                        { id: 'apiblaze', label: 'API Blaze (via Github)', subtitle: 'No oAuth client required', bringOwn: false, provider: 'github' as SocialProvider },
+                        { id: 'google', label: 'Google', subtitle: 'Bring your OAuth app', bringOwn: true, provider: 'google' as SocialProvider },
+                        { id: 'github', label: 'GitHub', subtitle: 'Bring your OAuth app', bringOwn: true, provider: 'github' as SocialProvider },
+                        { id: 'facebook', label: 'Facebook', subtitle: 'Bring your OAuth app', bringOwn: true, provider: 'facebook' as SocialProvider },
+                        { id: 'microsoft', label: 'Microsoft', subtitle: 'Bring your OAuth app', bringOwn: true, provider: 'microsoft' as SocialProvider },
+                        { id: 'auth0', label: 'Auth0', subtitle: 'Bring your OAuth app', bringOwn: true, provider: 'auth0' as SocialProvider },
+                      ].map((opt) => {
+                        const isSelected = !opt.bringOwn ? !config.bringOwnProvider : (config.bringOwnProvider && config.socialProvider === opt.provider);
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => {
+                              if (opt.bringOwn) {
+                                updateConfig({ bringOwnProvider: true, socialProvider: opt.provider, identityProviderDomain: PROVIDER_DOMAINS[opt.provider], scopes: [...DEFAULT_SCOPES[opt.provider]] });
+                              } else {
+                                updateConfig({ bringOwnProvider: false, socialProvider: 'github' });
+                              }
+                            }}
+                            className={`flex items-center gap-3 p-4 rounded-xl border-2 text-left transition-all duration-200 ${
+                              isSelected
+                                ? 'border-primary bg-primary/10 shadow-md ring-2 ring-primary/30'
+                                : 'border-muted-foreground/20 hover:border-muted-foreground/40 hover:bg-muted/30'
+                            }`}
+                          >
+                            <ProviderIcon providerId={opt.id} className="h-8 w-8 flex-shrink-0" />
+                            <div className="flex flex-col items-start min-w-0">
+                              <span className="text-sm font-semibold truncate w-full">{opt.label}</span>
+                              {opt.subtitle && <span className="text-xs text-muted-foreground">{opt.subtitle}</span>}
+                            </div>
+                            {isSelected && <Check className="h-4 w-4 text-primary flex-shrink-0 ml-auto" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Which tenant is this login page for? */}
+                    <div className="p-4 border rounded-lg bg-muted/30">
+                      <Label htmlFor="defaultTenant" className="text-sm font-medium">
+                        Which tenant is this login page for?
+                      </Label>
+                      <p className="text-xs text-muted-foreground mb-2 mt-1">
+                        Each of your tenants gets their own API URL (https://{config.projectName || project?.project_id || 'project'}-{'{tenant}'}.apiblaze.com), login page and separate data.
+                      </p>
+                      {tenantOptions.length > 0 ? (
+                        <div className="space-y-2 mt-2">
+                          <Select
+                            value={tenantOptions.some((t) => t.tenant_name === (config.defaultTenant ?? '')) ? (config.defaultTenant ?? '') : '__new__'}
+                            onValueChange={(v) => updateConfig({ defaultTenant: v === '__new__' ? '' : v })}
+                          >
+                            <SelectTrigger id="defaultTenant" className="w-fit min-w-[200px]">
+                              <SelectValue placeholder="Choose tenant" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {tenantOptions.map((t) => (
+                                <SelectItem key={t.tenant_name} value={t.tenant_name}>
+                                  {t.display_name ?? t.tenant_name} ({t.tenant_name})
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="__new__">+ Create new tenant</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {!tenantOptions.some((t) => t.tenant_name === (config.defaultTenant ?? '')) && (
+                            <div className="space-y-2">
+                              
+                              <div>
+                                <Label htmlFor="newTenantName" className="text-xs">Tenant name</Label>
+                                <Input
+                                  id="newTenantName"
+                                  placeholder="e.g. nino (letters and numbers only)"
+                                  value={config.defaultTenant ?? ''}
+                                  onChange={(e) => updateConfig({ defaultTenant: e.target.value })}
+                                  className="mt-1 w-fit min-w-[200px] max-w-[280px]"
+                                />
+                                <p className="text-xs text-muted-foreground mt-0.5">Used in URL: {config.projectName || project?.project_id || 'project'}-{config.defaultTenant || '{tenant}'}.apiblaze.com</p>
+                              </div>
+                              <div>
+                                <Label htmlFor="newTenantDisplayName" className="text-xs">Display name</Label>
+                                <Input
+                                  id="newTenantDisplayName"
+                                  placeholder="e.g. Nino Pizzas"
+                                  value={config.defaultTenantDisplayName ?? ''}
+                                  onChange={(e) => updateConfig({ defaultTenantDisplayName: e.target.value })}
+                                  className="mt-1 w-fit min-w-[200px] max-w-[280px]"
+                                />
+                                
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <Input
+                          id="defaultTenant"
+                          placeholder="Tenant name"
+                          value={config.defaultTenant || 'api'}
+                          onChange={(e) => updateConfig({ defaultTenant: e.target.value || 'api' })}
+                          className="mt-2 w-fit min-w-[200px] max-w-[280px]"
+                        />
+                      )}
+                    </div>
+
+                    {/* OAuth Client ID, Client Secret, Advanced setup - two-column layout when bring your own */}
+                    {config.bringOwnProvider ? (
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Left column: OAuth fields + Advanced setup */}
                         <div className="space-y-4">
-                          <div>
-                            <Label htmlFor="socialProvider" className="text-sm">OAuth Provider</Label>
-                            <Select
-                              value={config.socialProvider}
-                              onValueChange={(value) => handleProviderChange(value as SocialProvider)}
-                            >
-                              <SelectTrigger className="mt-1">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="google">Google</SelectItem>
-                                <SelectItem value="microsoft">Microsoft</SelectItem>
-                                <SelectItem value="github">GitHub</SelectItem>
-                                <SelectItem value="facebook">Facebook</SelectItem>
-                                <SelectItem value="auth0">Auth0</SelectItem>
-                                <SelectItem value="other">Other</SelectItem>
-                              </SelectContent>
-                            </Select>
+                          <div className="space-y-4">
+                            <div>
+                              <Label htmlFor="identityProviderClientId" className="text-sm">OAuth Client ID</Label>
+                              <Input
+                                id="identityProviderClientId"
+                                placeholder="your-client-id"
+                                value={config.identityProviderClientId}
+                                onChange={(e) => updateConfig({ identityProviderClientId: e.target.value })}
+                                className="mt-1"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="identityProviderClientSecret" className="text-sm">Client Secret</Label>
+                              <Input
+                                id="identityProviderClientSecret"
+                                type="password"
+                                placeholder="your-client-secret"
+                                value={config.identityProviderClientSecret}
+                                onChange={(e) => updateConfig({ identityProviderClientSecret: e.target.value })}
+                                className="mt-1"
+                              />
+                              {(config.identityProviderClientSecret?.trim().length ?? 0) > 0 && (config.identityProviderClientSecret?.trim().length ?? 0) < CLIENT_SECRET_MIN_LENGTH && (
+                                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                                  <AlertCircle className="h-3 w-3 flex-shrink-0" />
+                                  Client secret must be at least {CLIENT_SECRET_MIN_LENGTH} characters. The API will reject shorter values.
+                                </p>
+                              )}
+                            </div>
                           </div>
-                          <div>
+                          {/* Advanced setup - collapsible (left column) */}
+                    <div className="border rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => setAdvancedSetupOpen((o) => !o)}
+                        className="flex items-center gap-2 w-full p-4 text-left hover:bg-muted/30 rounded-lg"
+                      >
+                        {advancedSetupOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        <span className="text-sm font-medium">Advanced setup</span>
+                      </button>
+                      {advancedSetupOpen && (
+                        <div className="p-4 pt-0 space-y-4 border-t">
+                          {config.bringOwnProvider && (
+                            <>
+                          <div className="mt-2">
                             <Label htmlFor="identityProviderDomain" className="text-sm">Identity Provider Domain</Label>
                             <Input
                               id="identityProviderDomain"
@@ -3336,33 +3516,6 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                               onChange={(e) => updateConfig({ identityProviderDomain: e.target.value })}
                               className="mt-1"
                             />
-                          </div>
-                          <div>
-                            <Label htmlFor="identityProviderClientId" className="text-sm">Client ID</Label>
-                            <Input
-                              id="identityProviderClientId"
-                              placeholder="your-client-id"
-                              value={config.identityProviderClientId}
-                              onChange={(e) => updateConfig({ identityProviderClientId: e.target.value })}
-                              className="mt-1"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="identityProviderClientSecret" className="text-sm">Client Secret</Label>
-                            <Input
-                              id="identityProviderClientSecret"
-                              type="password"
-                              placeholder="your-client-secret"
-                              value={config.identityProviderClientSecret}
-                              onChange={(e) => updateConfig({ identityProviderClientSecret: e.target.value })}
-                              className="mt-1"
-                            />
-                            {(config.identityProviderClientSecret?.trim().length ?? 0) > 0 && (config.identityProviderClientSecret?.trim().length ?? 0) < CLIENT_SECRET_MIN_LENGTH && (
-                              <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                                <AlertCircle className="h-3 w-3 flex-shrink-0" />
-                                Client secret must be at least {CLIENT_SECRET_MIN_LENGTH} characters. The API will reject shorter values.
-                              </p>
-                            )}
                           </div>
                           <div>
                             <Label htmlFor="tokenType" className="text-sm">Client side token type</Label>
@@ -3463,12 +3616,54 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                               <Button type="button" size="sm" onClick={addScope}><Plus className="h-4 w-4" /></Button>
                             </div>
                           </div>
+                          <div className="space-y-2">
+                            <Label className="text-sm">Authorized Callback URLs</Label>
+                            <div className="flex gap-2 mb-2 mt-2">
+                              <Input value={newAuthorizedCallbackUrl} onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)} placeholder="https://example.com/callback" className="text-xs" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const url = newAuthorizedCallbackUrl.trim(); if (url && !authorizedCallbackUrls.includes(url)) { try { const urlObj = new URL(url); if (urlObj.protocol !== 'https:') { alert('URL must use HTTPS protocol'); return; } updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]); setNewAuthorizedCallbackUrl(''); } catch { alert('Invalid URL format'); } } } }} />
+                              <Button type="button" size="sm" onClick={() => { const url = newAuthorizedCallbackUrl.trim(); if (!url) return; if (authorizedCallbackUrls.includes(url)) { alert('This URL is already in the list'); return; } try { const urlObj = new URL(url); if (urlObj.protocol !== 'https:') { alert('URL must use HTTPS protocol'); return; } updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]); setNewAuthorizedCallbackUrl(''); } catch { alert('Invalid URL format'); } }}><Plus className="h-3 w-3" /></Button>
+                            </div>
+                            <div className="flex flex-wrap gap-2 mb-4">
+                              {authorizedCallbackUrls.map((url) => (
+                                <div key={url} className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs">
+                                  {authorizedCallbackUrls.indexOf(url) === 0 && <Badge variant="secondary" className="mr-1 text-xs"><Star className="h-2 w-2 mr-1" />Default</Badge>}
+                                  <span>{url}</span>
+                                  <Button type="button" variant="ghost" size="sm" className="h-4 w-4 p-0" onClick={() => updateAuthorizedCallbackUrls(authorizedCallbackUrls.filter((u) => u !== url))}><X className="h-2 w-2" /></Button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                            </>
+                          )}
+                          <div className="mt-6">
+                            <Label htmlFor="whoCanRegisterToLogin" className="text-sm font-medium">
+                              Who can register to login and use the API
+                            </Label>
+                            <Select
+                              value={config.whoCanRegisterToLogin ?? 'anyone'}
+                              onValueChange={(value) => {
+                                const v = value as 'anyone' | 'authorized_only';
+                                updateConfig({ whoCanRegisterToLogin: v });
+                              }}
+                            >
+                              <SelectTrigger id="whoCanRegisterToLogin" className="mt-2 w-fit min-w-[280px]">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="anyone">Anyone</SelectItem>
+                                <SelectItem value="authorized_only">Only users authorized in the API Portal or via the admin API</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
-                        <div className="space-y-4">
-                          <Card className="border-orange-200 bg-orange-50/50">
+                      )}
+                    </div>
+                        </div>
+                        {/* Right column: Important + Provider Setup Guide */}
+                        <div className="space-y-4 lg:sticky lg:top-4">
+                          <Card className="border-orange-200 bg-orange-50/50 dark:border-orange-900 dark:bg-orange-950/30">
                             <CardHeader className="pb-3">
                               <div className="flex items-start gap-2">
-                                <AlertCircle className="h-4 w-4 text-orange-600 mt-0.5" />
+                                <AlertCircle className="h-4 w-4 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
                                 <div>
                                   <CardTitle className="text-sm">Important</CardTitle>
                                   <CardDescription className="text-xs mt-1">Don&apos;t forget to add this authorized callback URL to your OAuth provider:</CardDescription>
@@ -3476,12 +3671,15 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                               </div>
                             </CardHeader>
                             <CardContent>
-                              <code className="text-xs bg-white px-2 py-1 rounded border block">https://callback.apiblaze.com</code>
+                              <code className="text-xs bg-white dark:bg-slate-900 px-2 py-1 rounded border block">https://callback.apiblaze.com</code>
                             </CardContent>
                           </Card>
                           <Card>
                             <CardHeader>
-                              <CardTitle className="text-sm">{config.socialProvider.charAt(0).toUpperCase() + config.socialProvider.slice(1)} Setup Guide</CardTitle>
+                              <CardTitle className="text-sm flex items-center gap-2">
+                                <ProviderIcon providerId={config.socialProvider} className="h-4 w-4" />
+                                {PROVIDER_TYPE_LABELS[config.socialProvider]} Setup Guide
+                              </CardTitle>
                             </CardHeader>
                             <CardContent>
                               <ol className="text-xs space-y-2 list-decimal list-inside text-muted-foreground">
@@ -3493,77 +3691,50 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                           </Card>
                         </div>
                       </div>
-                    )}
-                    {config.bringOwnProvider && (
-                    <div className="space-y-2">
-                      <Label className="text-sm">Authorized Callback URLs</Label>
-                      <div className="flex gap-2 mb-2 mt-2">
-                        <Input value={newAuthorizedCallbackUrl} onChange={(e) => setNewAuthorizedCallbackUrl(e.target.value)} placeholder="https://example.com/callback" className="text-xs" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const url = newAuthorizedCallbackUrl.trim(); if (url && !authorizedCallbackUrls.includes(url)) { try { const urlObj = new URL(url); if (urlObj.protocol !== 'https:') { alert('URL must use HTTPS protocol'); return; } updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]); setNewAuthorizedCallbackUrl(''); } catch { alert('Invalid URL format'); } } } }} />
-                        <Button type="button" size="sm" onClick={() => { const url = newAuthorizedCallbackUrl.trim(); if (!url) return; if (authorizedCallbackUrls.includes(url)) { alert('This URL is already in the list'); return; } try { const urlObj = new URL(url); if (urlObj.protocol !== 'https:') { alert('URL must use HTTPS protocol'); return; } updateAuthorizedCallbackUrls([...authorizedCallbackUrls, url]); setNewAuthorizedCallbackUrl(''); } catch { alert('Invalid URL format'); } }}><Plus className="h-3 w-3" /></Button>
-                      </div>
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        {authorizedCallbackUrls.map((url, index) => (
-                          <div key={url} className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs">
-                            {index === 0 && <Badge variant="secondary" className="mr-1 text-xs"><Star className="h-2 w-2 mr-1" />Default</Badge>}
-                            <span>{url}</span>
-                            <Button type="button" variant="ghost" size="sm" className="h-4 w-4 p-0" onClick={() => updateAuthorizedCallbackUrls(authorizedCallbackUrls.filter((u) => u !== url))}><X className="h-2 w-2" /></Button>
+                    ) : (
+                      /* API Blaze (via Github) selected: no callback URL or setup guide; just Advanced setup */
+                      <div className="border rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => setAdvancedSetupOpen((o) => !o)}
+                          className="flex items-center gap-2 w-full p-4 text-left hover:bg-muted/30 rounded-lg"
+                        >
+                          {advancedSetupOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          <span className="text-sm font-medium">Advanced setup</span>
+                        </button>
+                        {advancedSetupOpen && (
+                          <div className="p-4 pt-0 space-y-4 border-t">
+                            <div className="mt-4">
+                              <Label htmlFor="whoCanRegisterToLogin" className="text-sm font-medium">
+                                Who can register to login and use the API
+                              </Label>
+                              <Select
+                                value={config.whoCanRegisterToLogin ?? 'anyone'}
+                                onValueChange={(value) => {
+                                  const v = value as 'anyone' | 'authorized_only';
+                                  updateConfig({ whoCanRegisterToLogin: v });
+                                }}
+                              >
+                                <SelectTrigger id="whoCanRegisterToLogin" className="mt-2 w-fit min-w-[280px]">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="anyone">Anyone</SelectItem>
+                                  <SelectItem value="authorized_only">Only users authorized in the API Portal or via the admin API</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
                           </div>
-                        ))}
+                        )}
                       </div>
-                    </div>
                     )}
                   </>
                 )}
               </div>
             )}
 
-            {/* Who is this login page for? - shown when creating (edit mode has it in app client box) */}
-            {!isEditMode && config.requestsAuthMode === 'authenticate' && (config.useAuthConfig || config.bringOwnProvider) && (
-              <div className="p-4 border rounded-lg bg-muted/30">
-                <Label htmlFor="defaultTenant" className="text-sm font-medium">
-                  Who is this login page for?
-                </Label>
-                <p className="text-xs text-muted-foreground mb-2 mt-1">
-                  The data of users who login under this tenant will be separate from the data of other users.
-                </p>
-                {tenantOptions.length > 0 ? (
-                  <div className="space-y-2 mt-2">
-                    <Select
-                      value={tenantOptions.includes(config.defaultTenant ?? '') ? (config.defaultTenant ?? '') : '__new__'}
-                      onValueChange={(v) => updateConfig({ defaultTenant: v === '__new__' ? '' : v })}
-                    >
-                      <SelectTrigger id="defaultTenant" className="w-fit min-w-[200px]">
-                        <SelectValue placeholder="Choose tenant" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {tenantOptions.map((t) => (
-                          <SelectItem key={t} value={t}>{t}</SelectItem>
-                        ))}
-                        <SelectItem value="__new__">+ Create new tenant</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {!tenantOptions.includes(config.defaultTenant ?? '') && (
-                      <Input
-                        placeholder="Enter new tenant name"
-                        value={config.defaultTenant ?? ''}
-                        onChange={(e) => updateConfig({ defaultTenant: e.target.value })}
-                        className="w-fit min-w-[200px] max-w-[280px]"
-                      />
-                    )}
-                  </div>
-                ) : (
-                  <Input
-                    id="defaultTenant"
-                    placeholder="Tenant name"
-                    value={config.defaultTenant || 'MyDefaultTenant'}
-                    onChange={(e) => updateConfig({ defaultTenant: e.target.value || 'MyDefaultTenant' })}
-                    className="mt-2 w-fit min-w-[200px] max-w-[280px]"
-                  />
-                )}
-              </div>
-            )}
-
-            {/* Who can register to login and use the API */}
+            {/* Who can register to login and use the API - edit mode only (create mode has it in Advanced) */}
+            {isEditMode && (
             <div className="p-4 border rounded-lg bg-muted/30">
               <Label htmlFor="whoCanRegisterToLogin" className="text-sm font-medium">
                 Who can register to login and use the API
@@ -3587,6 +3758,7 @@ export function AuthenticationSection({ config, updateConfig, isEditMode = false
                 </SelectContent>
               </Select>
             </div>
+            )}
           </div>
         </div>
       </div>

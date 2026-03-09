@@ -75,6 +75,8 @@ export interface ProjectConfig {
   whoCanRegisterToLogin?: 'anyone' | 'authorized_only';
   /** Default tenant for app logins when creating the initial app client (bootstrap flow). */
   defaultTenant?: string;
+  /** Display name for the default tenant when creating a new tenant. */
+  defaultTenantDisplayName?: string;
   // Multiple providers for create mode (when bringOwnProvider is true)
   providers?: Array<{
     type: SocialProvider;
