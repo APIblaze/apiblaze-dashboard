@@ -28,7 +28,9 @@ import type { SocialProvider } from '@/types/auth-config';
 import { ProviderFormDialog } from './provider-form-dialog';
 
 interface ProviderListProps {
-  authConfigId: string;
+  authConfigId?: string;
+  teamId?: string;
+  tenantName?: string;
   clientId: string;
   onRefresh?: () => void;
 }
@@ -42,24 +44,38 @@ const PROVIDER_TYPE_LABELS: Record<SocialProvider['type'], string> = {
   other: 'Other',
 };
 
-export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderListProps) {
+export function ProviderList({ authConfigId, teamId, tenantName, clientId, onRefresh }: ProviderListProps) {
+  const isTenantMode = !!(teamId && tenantName);
   const router = useRouter();
   const { toast } = useToast();
   const getProviders = useDashboardCacheStore((s) => s.getProviders);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
-  const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
   const providersByConfigClient = useDashboardCacheStore((s) => s.providersByConfigClient);
-  const providers = getProviders(authConfigId, clientId);
+  const [tenantProviders, setTenantProviders] = useState<SocialProvider[]>([]);
+  const [tenantLoading, setTenantLoading] = useState(isTenantMode);
+  const providers = isTenantMode ? tenantProviders : [];
   const bootstrapLoading = useDashboardCacheStore((s) => s.isBootstrapping);
-  const providersKey = `${authConfigId}-${clientId}`;
-  const providersLoaded = providersKey in providersByConfigClient;
-  const loading = bootstrapLoading || !providersLoaded;
+  const providersLoaded = isTenantMode;
+  const loading = bootstrapLoading || (!isTenantMode && !providersLoaded) || (isTenantMode && tenantLoading);
 
   useEffect(() => {
-    if (!bootstrapLoading && authConfigId && clientId) {
-      fetchProvidersForClient(authConfigId, clientId);
+    if (isTenantMode && teamId && tenantName) {
+      let cancelled = false;
+      (async () => {
+        setTenantLoading(true);
+        try {
+          const list = await api.listProvidersByTenant(teamId, tenantName, clientId);
+          if (!cancelled) setTenantProviders(Array.isArray(list) ? list : []);
+        } catch {
+          if (!cancelled) setTenantProviders([]);
+        } finally {
+          if (!cancelled) setTenantLoading(false);
+        }
+      })();
+      return () => { cancelled = true; };
     }
-  }, [authConfigId, clientId, bootstrapLoading, fetchProvidersForClient]);
+  }, [isTenantMode, teamId, tenantName, clientId]);
+
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -86,8 +102,14 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
 
     try {
       setDeleting(true);
-      await api.removeProvider(authConfigId, clientId, selectedProvider.id);
-      await invalidateAndRefetch();
+      if (isTenantMode && teamId && tenantName) {
+        await api.removeProviderByTenant(teamId, tenantName, clientId, selectedProvider.id);
+        setTenantProviders((prev) => prev.filter((p) => p.id !== selectedProvider.id));
+      } else if (isTenantMode && teamId && tenantName) {
+        await api.removeProviderByTenant(teamId, tenantName, clientId, selectedProvider.id);
+        setTenantProviders((prev) => prev.filter((p) => p.id !== selectedProvider.id));
+        await invalidateAndRefetch();
+      }
       toast({
         title: 'Success',
         description: 'Provider deleted successfully',
@@ -108,14 +130,27 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
   };
 
   const handleViewDetails = (provider: SocialProvider) => {
-    router.push(`/dashboard/auth-configs?authConfig=${authConfigId}&client=${clientId}&provider=${provider.id}`);
+    if (isTenantMode && tenantName) {
+      router.push(`/dashboard/tenants?tenant=${encodeURIComponent(tenantName)}&client=${encodeURIComponent(clientId)}&provider=${encodeURIComponent(provider.id)}`);
+    } else if (isTenantMode && teamId && tenantName) {
+      router.push(`/dashboard/tenants?tenant=${encodeURIComponent(tenantName)}&client=${encodeURIComponent(clientId)}&provider=${provider.id}`);
+    }
   };
 
   const handleSuccess = async () => {
     setCreateDialogOpen(false);
     setEditDialogOpen(false);
     setSelectedProvider(null);
-    await invalidateAndRefetch();
+    if (isTenantMode && teamId && tenantName) {
+      try {
+        const list = await api.listProvidersByTenant(teamId, tenantName, clientId);
+        setTenantProviders(Array.isArray(list) ? list : []);
+      } catch {
+        setTenantProviders([]);
+      }
+    } else {
+      await invalidateAndRefetch();
+    }
     onRefresh?.();
   };
 
@@ -260,7 +295,8 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         onSuccess={handleSuccess}
-        authConfigId={authConfigId}
+        teamId={teamId ?? ''}
+        tenantName={tenantName ?? ''}
         clientId={clientId}
       />
 
@@ -269,7 +305,8 @@ export function ProviderList({ authConfigId, clientId, onRefresh }: ProviderList
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
         onSuccess={handleSuccess}
-        authConfigId={authConfigId}
+        teamId={teamId ?? ''}
+        tenantName={tenantName ?? ''}
         clientId={clientId}
         provider={selectedProvider}
       />

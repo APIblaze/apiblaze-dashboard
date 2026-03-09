@@ -419,12 +419,140 @@ export class APIBlazeClient {
 
   async getTeamTenants(
     userClaims: UserAssertionClaims,
-    teamId: string
-  ): Promise<{ tenants: string[] }> {
-    return this.request<{ tenants: string[] }>(`/teams/${encodeURIComponent(teamId)}/tenants`, {
+    teamId: string,
+    detail?: boolean
+  ): Promise<{ tenants: string[] } | { tenants: Array<{ tenant_name: string; display_name: string; app_clients_count: number; proxies: Array<{ project_id: string; api_version: string }> }> }> {
+    const q = detail ? '?detail=1' : '';
+    return this.request(`/teams/${encodeURIComponent(teamId)}/tenants${q}`, {
       method: 'GET',
       userClaims,
     });
+  }
+
+  async createTeamTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    data: { display_name: string; tenant_name?: string }
+  ) {
+    return this.request<{ tenant_name: string; display_name: string }>(`/teams/${encodeURIComponent(teamId)}/tenants`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+      userClaims,
+    });
+  }
+
+  async listAppClientsByTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients`,
+      { method: 'GET', userClaims }
+    );
+  }
+
+  async getAppClientByTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string,
+    clientId: string
+  ): Promise<Record<string, unknown>> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}`,
+      { method: 'GET', userClaims }
+    );
+  }
+
+  async getAppClientSecretByTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string,
+    clientId: string
+  ): Promise<{ clientSecret: string }> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/secret`,
+      { method: 'GET', userClaims }
+    );
+  }
+
+  async createAppClientForTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string,
+    data: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients`,
+      { method: 'POST', body: JSON.stringify(data), userClaims }
+    );
+  }
+
+  async updateAppClientByTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string,
+    clientId: string,
+    data: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}`,
+      { method: 'PATCH', body: JSON.stringify(data), userClaims }
+    );
+  }
+
+  async deleteAppClientByTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string,
+    clientId: string
+  ): Promise<void> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}`,
+      { method: 'DELETE', userClaims }
+    );
+  }
+
+  async listProjectTenants(
+    userClaims: UserAssertionClaims,
+    projectId: string,
+    version: string
+  ): Promise<{ tenants: Array<{ tenant_name: string; display_name: string }> }> {
+    return this.request(`/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(version)}/tenants`, {
+      method: 'GET',
+      userClaims,
+    });
+  }
+
+  async attachTenantToProject(
+    userClaims: UserAssertionClaims,
+    projectId: string,
+    version: string,
+    data: { tenant_name: string; display_name?: string; auth_config_id?: string }
+  ) {
+    return this.request<{ success: boolean; tenant_name: string; display_name: string; url: string }>(
+      `/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(version)}/tenants`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+        userClaims,
+      }
+    );
+  }
+
+  async detachTenantFromProject(
+    userClaims: UserAssertionClaims,
+    projectId: string,
+    version: string,
+    tenantName: string
+  ): Promise<void> {
+    return this.request(
+      `/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(version)}/tenants/${encodeURIComponent(tenantName)}`,
+      {
+        method: 'DELETE',
+        userClaims,
+      }
+    );
   }
 
   async updateAppClient(
@@ -544,6 +672,71 @@ export class APIBlazeClient {
       method: 'GET',
       userClaims,
     });
+  }
+
+  async listProvidersByTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string,
+    clientId: string
+  ) {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/providers`,
+      { method: 'GET', userClaims }
+    );
+  }
+
+  async addProviderByTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string,
+    clientId: string,
+    data: Record<string, unknown>
+  ) {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/providers`,
+      { method: 'POST', body: JSON.stringify(data), userClaims }
+    );
+  }
+
+  async updateProviderByTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string,
+    clientId: string,
+    providerId: string,
+    data: Record<string, unknown>
+  ) {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/providers/${encodeURIComponent(providerId)}`,
+      { method: 'PATCH', body: JSON.stringify(data), userClaims }
+    );
+  }
+
+  async removeProviderByTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string,
+    clientId: string,
+    providerId: string
+  ) {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/providers/${encodeURIComponent(providerId)}`,
+      { method: 'DELETE', userClaims }
+    );
+  }
+
+  async getProviderSecretByTenant(
+    userClaims: UserAssertionClaims,
+    teamId: string,
+    tenantName: string,
+    clientId: string,
+    providerId: string
+  ): Promise<{ clientSecret: string }> {
+    return this.request(
+      `/teams/${encodeURIComponent(teamId)}/tenants/${encodeURIComponent(tenantName)}/app-clients/${encodeURIComponent(clientId)}/providers/${encodeURIComponent(providerId)}/secret`,
+      { method: 'GET', userClaims }
+    );
   }
 }
 

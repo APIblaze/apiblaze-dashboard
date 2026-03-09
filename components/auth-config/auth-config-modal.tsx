@@ -76,11 +76,11 @@ export function AuthConfigModal({
 }: AuthConfigModalProps) {
   const { toast } = useToast();
   const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
-  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
+  const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
   const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
   const getProviders = useDashboardCacheStore((s) => s.getProviders);
-  const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
-  const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
+  const fetchAppClientsForTenant = useDashboardCacheStore((s) => s.fetchAppClientsForTenant);
+  const fetchProvidersForTenant = useDashboardCacheStore((s) => s.fetchProvidersForTenant);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
 
@@ -112,13 +112,12 @@ export function AuthConfigModal({
   const [newSignoutUri, setNewSignoutUri] = useState('');
   const [newScope, setNewScope] = useState('');
 
+  const tenantKey = teamId && selectedAuthConfigId ? `tenant:${teamId}:${selectedAuthConfigId}` : undefined;
   const authConfigs = open ? getAuthConfigs() : [];
-  const appClients = selectedAuthConfigId ? getAppClients(selectedAuthConfigId) : [];
-  const providers = selectedAuthConfigId && selectedAppClientId
-    ? getProviders(selectedAuthConfigId, selectedAppClientId)
-    : [];
-  const currentAppClient = selectedAuthConfigId && selectedAppClientId
-    ? (getAppClient(selectedAuthConfigId, selectedAppClientId) as AppClient | undefined) ?? null
+  const appClients = teamId && selectedAuthConfigId ? getAppClientsForTenant(teamId, selectedAuthConfigId) : [];
+  const providers = tenantKey && selectedAppClientId ? getProviders(tenantKey, selectedAppClientId) : [];
+  const currentAppClient = tenantKey && selectedAppClientId
+    ? (getAppClient(tenantKey, selectedAppClientId) as AppClient | undefined) ?? null
     : null;
   const isLoading = isBootstrapping;
 
@@ -131,7 +130,13 @@ export function AuthConfigModal({
 
   useEffect(() => {
     if (open && teamId) {
-      api.getTeamTenants(teamId).then(({ tenants }) => setTenantOptions(tenants)).catch(() => setTenantOptions([]));
+      api.getTeamTenants(teamId).then((res) => {
+        const t = res.tenants;
+        const names = Array.isArray(t) && t.length > 0
+          ? (typeof t[0] === 'string' ? (t as string[]) : (t as { tenant_name: string }[]).map((x) => x.tenant_name))
+          : [];
+        setTenantOptions(names);
+      }).catch(() => setTenantOptions([]));
     } else {
       setTenantOptions([]);
     }
@@ -142,22 +147,31 @@ export function AuthConfigModal({
   }, [selectedAuthConfigId]);
 
   useEffect(() => {
-    if (open && !isBootstrapping && selectedAuthConfigId) {
-      fetchAppClientsForConfig(selectedAuthConfigId);
+    if (open && !isBootstrapping && teamId && selectedAuthConfigId) {
+      fetchAppClientsForTenant(teamId, selectedAuthConfigId);
     }
-  }, [open, selectedAuthConfigId, isBootstrapping, fetchAppClientsForConfig]);
+  }, [open, selectedAuthConfigId, teamId, isBootstrapping, fetchAppClientsForTenant]);
 
   useEffect(() => {
-    if (open && !isBootstrapping && selectedAuthConfigId && selectedAppClientId) {
-      fetchProvidersForClient(selectedAuthConfigId, selectedAppClientId);
+    if (open && !isBootstrapping && teamId && selectedAuthConfigId && selectedAppClientId) {
+      fetchProvidersForTenant(teamId, selectedAuthConfigId, selectedAppClientId);
     }
-  }, [open, selectedAuthConfigId, selectedAppClientId, isBootstrapping, fetchProvidersForClient]);
+  }, [open, selectedAuthConfigId, selectedAppClientId, teamId, isBootstrapping, fetchProvidersForTenant]);
 
   const handleCreateAuthConfig = async () => {
     if (!newAuthConfigName.trim()) {
       toast({
         title: 'Validation Error',
-        description: 'AuthConfig name is required',
+        description: 'Tenant name is required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!teamId) {
+      toast({
+        title: 'Configuration Error',
+        description: 'You must be signed in to create a tenant.',
         variant: 'destructive',
       });
       return;
@@ -165,19 +179,19 @@ export function AuthConfigModal({
 
     setIsCreatingAuthConfig(true);
     try {
-      const data = await api.createAuthConfig({ name: newAuthConfigName.trim() });
+      const data = await api.createTeamTenant(teamId, { display_name: newAuthConfigName.trim(), tenant_name: newAuthConfigName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-') });
       await invalidateAndRefetch();
-      setSelectedAuthConfigId((data as AuthConfig).id);
+      setSelectedAuthConfigId((data as { tenant_name: string }).tenant_name);
       setNewAuthConfigName('');
       toast({
         title: 'Success',
-        description: 'AuthConfig created successfully',
+        description: 'Tenant created successfully',
       });
     } catch (error) {
-      console.error('Error creating auth config:', error);
+      console.error('Error creating tenant:', error);
       toast({
         title: 'Error',
-        description: 'Failed to create auth config',
+        description: error instanceof Error ? error.message : 'Failed to create tenant',
         variant: 'destructive',
       });
     } finally {
@@ -224,13 +238,19 @@ export function AuthConfigModal({
     }
 
     setIsCreatingAppClient(true);
+    if (!teamId) {
+      toast({ title: 'Configuration Error', description: 'You must be signed in to create an app client.', variant: 'destructive' });
+      setIsCreatingAppClient(false);
+      return;
+    }
+
     try {
-      const data = await api.createAppClient(selectedAuthConfigId, {
+      const data = await api.createAppClientForTenant(teamId, selectedAuthConfigId, {
         name: newAppClientName.trim(),
-        tenant: resolvedTenant,
-        scopes: ['read:user', 'user:email'],
         projectName: projectName.trim(),
         apiVersion: apiVersion.trim(),
+        tenant: resolvedTenant,
+        scopes: ['read:user', 'user:email'],
       });
       const appClient = data as AppClient;
       setNewAppClientId(appClient.clientId);
@@ -285,7 +305,12 @@ export function AuthConfigModal({
 
     setIsAddingProvider(true);
     try {
-      await api.addProvider(selectedAuthConfigId, selectedAppClientId, {
+      if (!teamId) {
+        toast({ title: 'Configuration Error', description: 'You must be signed in to add a provider.', variant: 'destructive' });
+        setIsAddingProvider(false);
+        return;
+      }
+      await api.addProviderByTenant(teamId, selectedAuthConfigId, selectedAppClientId, {
         type: newProvider.type,
         clientId: newProvider.clientId,
         clientSecret: newProvider.clientSecret,
@@ -332,7 +357,7 @@ export function AuthConfigModal({
 
     const updatedUris = [...(currentAppClient.authorizedCallbackUrls || []), newRedirectUri.trim()];
     try {
-      await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
+      await api.updateAppClientByTenant(teamId!, selectedAuthConfigId, selectedAppClientId, {
         authorizedCallbackUrls: updatedUris,
       });
       await invalidateAndRefetch();
@@ -357,7 +382,7 @@ export function AuthConfigModal({
 
     const updatedUris = [...(currentAppClient.signoutUris || []), newSignoutUri.trim()];
     try {
-      await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
+      await api.updateAppClientByTenant(teamId!, selectedAuthConfigId, selectedAppClientId, {
         signoutUris: updatedUris,
       });
       await invalidateAndRefetch();
@@ -383,7 +408,7 @@ export function AuthConfigModal({
 
     const updatedScopes = [...(currentAppClient.scopes || []), newScope.trim()];
     try {
-      await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
+      await api.updateAppClientByTenant(teamId!, selectedAuthConfigId, selectedAppClientId, {
         scopes: updatedScopes,
       });
       await invalidateAndRefetch();
@@ -407,7 +432,7 @@ export function AuthConfigModal({
 
     const updatedUris = currentAppClient.authorizedCallbackUrls?.filter(u => u !== uri) || [];
     try {
-      await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
+      await api.updateAppClientByTenant(teamId!, selectedAuthConfigId, selectedAppClientId, {
         authorizedCallbackUrls: updatedUris,
       });
       await invalidateAndRefetch();
@@ -426,7 +451,7 @@ export function AuthConfigModal({
 
     const updatedUris = currentAppClient.signoutUris?.filter(u => u !== uri) || [];
     try {
-      await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
+      await api.updateAppClientByTenant(teamId!, selectedAuthConfigId, selectedAppClientId, {
         signoutUris: updatedUris,
       });
       await invalidateAndRefetch();
@@ -446,7 +471,7 @@ export function AuthConfigModal({
 
     const updatedScopes = currentAppClient.scopes?.filter(s => s !== scope) || [];
     try {
-      await api.updateAppClient(selectedAuthConfigId, selectedAppClientId, {
+      await api.updateAppClientByTenant(teamId!, selectedAuthConfigId, selectedAppClientId, {
         scopes: updatedScopes,
       });
       await invalidateAndRefetch();
@@ -464,7 +489,8 @@ export function AuthConfigModal({
     if (!selectedAuthConfigId || !selectedAppClientId) return;
 
     try {
-      await api.removeProvider(selectedAuthConfigId, selectedAppClientId, providerId);
+      if (!teamId) return;
+      await api.removeProviderByTenant(teamId, selectedAuthConfigId, selectedAppClientId, providerId);
       await invalidateAndRefetch();
       toast({
         title: 'Success',

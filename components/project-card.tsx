@@ -31,33 +31,36 @@ interface ProjectCardProps {
 function useProjectAuth(project: Project) {
   const getAuthConfigs = useDashboardCacheStore((s) => s.getAuthConfigs);
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
-  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
-  const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
+  const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
+  const fetchAppClientsForTenant = useDashboardCacheStore((s) => s.fetchAppClientsForTenant);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
 
-  const authConfigIdFromConfig = useMemo(() => {
+  const { teamId: projectTeamId, tenant: projectTenant } = useMemo(() => {
     const projectConfig = project.config as Record<string, unknown> | undefined;
-    return (projectConfig?.auth_config_id || projectConfig?.user_pool_id) as string | undefined;
+    return {
+      teamId: projectConfig?.team_id as string | undefined,
+      tenant: projectConfig?.tenant as string | undefined,
+    };
   }, [project.config]);
 
   useEffect(() => {
-    if (!isBootstrapping && authConfigIdFromConfig) {
-      fetchAppClientsForConfig(authConfigIdFromConfig);
+    if (!isBootstrapping && projectTeamId && projectTenant) {
+      fetchAppClientsForTenant(projectTeamId, projectTenant);
     }
-  }, [authConfigIdFromConfig, isBootstrapping, fetchAppClientsForConfig]);
+  }, [projectTeamId, projectTenant, isBootstrapping, fetchAppClientsForTenant]);
 
   return useMemo(() => {
     const projectConfig = project.config as Record<string, unknown> | undefined;
-    let authConfigId = (projectConfig?.auth_config_id || projectConfig?.user_pool_id) as
-      | string
-      | undefined;
+    const teamId = projectConfig?.team_id as string | undefined;
+    const tenant = projectConfig?.tenant as string | undefined;
+    let authConfigId = tenant;
     const defaultAppClientId = (projectConfig?.default_app_client_id ||
       projectConfig?.defaultAppClient) as string | undefined;
 
-    if (!authConfigId && defaultAppClientId) {
+    if (!authConfigId && defaultAppClientId && teamId) {
       const configs = getAuthConfigs();
       for (const c of configs) {
-        const clients = getAppClients(c.id);
+        const clients = getAppClientsForTenant(teamId, c.id);
         if (clients.some((client) => client.id === defaultAppClientId)) {
           authConfigId = c.id;
           break;
@@ -65,8 +68,9 @@ function useProjectAuth(project: Project) {
       }
     }
 
+    const tenantKey = teamId && authConfigId ? `tenant:${teamId}:${authConfigId}` : undefined;
     const authConfig = authConfigId ? getAuthConfig(authConfigId) : undefined;
-    const appClients = authConfigId ? getAppClients(authConfigId) : [];
+    const appClients = teamId && authConfigId ? getAppClientsForTenant(teamId, authConfigId) : [];
     const bringMyOwnOAuth = !!authConfig?.bringMyOwnOAuth;
 
     return {
@@ -76,13 +80,13 @@ function useProjectAuth(project: Project) {
       bringMyOwnOAuth,
       loadingAppClients: isBootstrapping && !!authConfigId,
     };
-  }, [project.config, getAuthConfigs, getAuthConfig, getAppClients, isBootstrapping]);
+  }, [project.config, getAuthConfigs, getAuthConfig, getAppClientsForTenant, isBootstrapping]);
 }
 
 export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardProps) {
   const { authConfigId, appClients, defaultAppClientId, bringMyOwnOAuth, loadingAppClients } = useProjectAuth(project);
   const getProviders = useDashboardCacheStore((s) => s.getProviders);
-  const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
+  const fetchProvidersForTenant = useDashboardCacheStore((s) => s.fetchProvidersForTenant);
   const providersByConfigClient = useDashboardCacheStore((s) => s.providersByConfigClient);
   const [appLoginUrls, setAppLoginUrls] = useState<{ type: string; url: string }[]>([]);
 
@@ -108,9 +112,15 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
 
     let cancelled = false;
     (async () => {
-      await fetchProvidersForClient(authConfigId, candidate.id);
+      const projectConfig = project.config as Record<string, unknown> | undefined;
+      const teamId = projectConfig?.team_id as string | undefined;
+      const tenant = projectConfig?.tenant as string | undefined;
+      if (teamId && tenant) {
+        await fetchProvidersForTenant(teamId, tenant, candidate.id);
+      }
       if (cancelled) return;
-      const providers = getProviders(authConfigId, candidate.id);
+      const tenantKey = teamId && tenant ? `tenant:${teamId}:${tenant}` : undefined;
+      const providers = tenantKey ? getProviders(tenantKey, candidate.id) : [];
       const list = providers.length > 0 ? providers : [{ type: '' }];
       const allBase = buildAppLoginAuthorizeUrl(clientId(candidate), redirect, scopes(candidate), undefined);
       const allUrlWithPkce = await addPkceToAuthorizeUrl(allBase);
@@ -130,7 +140,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
       }
     })();
     return () => { cancelled = true; };
-  }, [authConfigId, appClients, defaultAppClientId, getProviders, fetchProvidersForClient, providersByConfigClient]);
+  }, [authConfigId, appClients, defaultAppClientId, getProviders, fetchProvidersForTenant, project.config]);
 
   const handleOpenPortal = (appClient?: AppClient) => {
     let portalUrl = project.api_version
@@ -168,7 +178,7 @@ export function ProjectCard({ project, onUpdateConfig, onDelete }: ProjectCardPr
               </Badge>
             </div>
             <CardDescription className="font-mono text-xs">
-              {project.project_id}.apiblaze.com
+              {project.project_id}-api.apiblaze.com
             </CardDescription>
           </div>
 

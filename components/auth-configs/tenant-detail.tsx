@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Plus, Key, Trash2, MoreVertical, ExternalLink, Star, Pencil } from 'lucide-react';
+import { Loader2, ArrowLeft, Plus, Key, Trash2, Pencil, MoreVertical, ExternalLink } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,39 +23,47 @@ import {
 } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
-import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import type { AppClient } from '@/types/auth-config';
 import { AppClientFormDialog } from './app-client-form-dialog';
 
-interface AppClientListProps {
+interface TenantDetailProps {
   teamId: string;
   tenantName: string;
-  onRefresh?: () => void;
+  displayName: string;
+  onBack: () => void;
 }
 
-export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListProps) {
+export function TenantDetail({ teamId, tenantName, displayName, onBack }: TenantDetailProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
-  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
-  const fetchAppClientsForTenant = useDashboardCacheStore((s) => s.fetchAppClientsForTenant);
-  const appClientsByConfig = useDashboardCacheStore((s) => s.appClientsByConfig);
-  const tenantKey = `tenant:${teamId}:${tenantName}`;
-  const appClients = getAppClientsForTenant(teamId, tenantName);
-  const bootstrapLoading = useDashboardCacheStore((s) => s.isBootstrapping);
-  const clientsLoaded = tenantKey in appClientsByConfig;
-  const loading = bootstrapLoading || !clientsLoaded;
-
-  useEffect(() => {
-    if (!bootstrapLoading && teamId && tenantName) {
-      fetchAppClientsForTenant(teamId, tenantName);
-    }
-  }, [teamId, tenantName, bootstrapLoading, fetchAppClientsForTenant]);
+  const [appClients, setAppClients] = useState<AppClient[]>([]);
+  const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedClient, setSelectedClient] = useState<AppClient | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const fetchClients = async () => {
+    try {
+      setLoading(true);
+      const list = await api.listAppClientsByTenant(teamId, tenantName);
+      setAppClients(list);
+    } catch {
+      setAppClients([]);
+      toast({
+        title: 'Error',
+        description: 'Failed to load app clients',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchClients();
+  }, [teamId, tenantName]);
 
   const handleCreate = () => {
     setSelectedClient(null);
@@ -74,7 +82,6 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
 
   const handleDeleteConfirm = async () => {
     if (!selectedClient) return;
-
     try {
       setDeleting(true);
       await api.deleteAppClientByTenant(teamId, tenantName, selectedClient.id);
@@ -84,10 +91,8 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
       });
       setDeleteDialogOpen(false);
       setSelectedClient(null);
-      await invalidateAndRefetch();
-      onRefresh?.();
+      await fetchClients();
     } catch (error) {
-      console.error('Error deleting app client:', error);
       toast({
         title: 'Error',
         description: error instanceof Error ? error.message : 'Failed to delete app client',
@@ -106,12 +111,8 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
     setCreateDialogOpen(false);
     setEditDialogOpen(false);
     setSelectedClient(null);
-    await invalidateAndRefetch();
-    onRefresh?.();
+    await fetchClients();
   };
-
-  // Removed handleSetDefault - default app client is now stored in project config, not in auth config table
-  // const handleSetDefault = async (client: AppClient) => { ... }
 
   if (loading) {
     return (
@@ -124,13 +125,14 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
   return (
     <>
       <div className="space-y-6">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold">App Clients</h3>
-            <p className="text-muted-foreground text-sm mt-1">
-              Manage OAuth app clients for this auth config
-            </p>
+            <Button variant="ghost" size="sm" onClick={onBack} className="mb-2 -ml-2">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back
+            </Button>
+            <h2 className="text-2xl font-bold">{displayName}</h2>
+            <p className="text-muted-foreground mt-1 font-mono text-sm">{tenantName}</p>
           </div>
           <Button onClick={handleCreate}>
             <Plus className="mr-2 h-4 w-4" />
@@ -138,14 +140,13 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
           </Button>
         </div>
 
-        {/* App Clients Grid */}
         {appClients.length === 0 ? (
           <Card className="border-2 border-dashed">
             <CardContent className="flex flex-col items-center justify-center py-12">
               <Key className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No app clients yet</h3>
               <p className="text-muted-foreground text-center mb-4">
-                Create an app client to configure OAuth authentication
+                Create an app client to configure OAuth authentication for this tenant
               </p>
               <Button onClick={handleCreate}>
                 <Plus className="mr-2 h-4 w-4" />
@@ -155,55 +156,47 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {appClients.map((client) => {
-              const isDefault = false;
-              return (
-                <Card key={client.id} className="hover:shadow-lg transition-shadow">
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <CardTitle className="text-lg">{client.name}</CardTitle>
-                          <div className="flex items-center gap-1.5">
-                            {isDefault && (
-                              <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600 text-xs">
-                                <Star className="h-3 w-3 mr-1" />
-                                Default
-                              </Badge>
-                            )}
-                            {client.verified === false && (
-                              <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-xs">
-                                Unverified
-                              </Badge>
-                            )}
-                            {client.verified === true && (
-                              <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
-                                Verified
-                              </Badge>
-                            )}
-                          </div>
+            {appClients.map((client) => (
+              <Card key={client.id} className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <CardTitle className="text-lg">{client.name}</CardTitle>
+                        <div className="flex items-center gap-1.5">
+                          {client.verified === false && (
+                            <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-xs">
+                              Unverified
+                            </Badge>
+                          )}
+                          {client.verified === true && (
+                            <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
+                              Verified
+                            </Badge>
+                          )}
                         </div>
-                        <CardDescription className="font-mono text-xs break-all">
-                          {client.clientId}
-                        </CardDescription>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleEdit(client)}
-                          title="Edit app client"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleViewDetails(client)}>
+                      <CardDescription className="font-mono text-xs break-all">
+                        {client.clientId ?? client.id}
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEdit(client)}
+                        title="Edit app client"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleViewDetails(client)}>
                             <ExternalLink className="mr-2 h-4 w-4" />
                             View Details
                           </DropdownMenuItem>
@@ -220,10 +213,10 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
                             Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
+                      </DropdownMenu>
                     </div>
-                  </CardHeader>
+                  </div>
+                </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Providers:</span>
@@ -249,13 +242,11 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
                   </Button>
                 </CardFooter>
               </Card>
-            );
-            })}
+            ))}
           </div>
         )}
       </div>
 
-      {/* Create Dialog */}
       <AppClientFormDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
@@ -264,7 +255,6 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
         tenantName={tenantName}
       />
 
-      {/* Edit Dialog */}
       <AppClientFormDialog
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
@@ -274,7 +264,6 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
         appClient={selectedClient ?? undefined}
       />
 
-      {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -285,18 +274,10 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-              disabled={deleting}
-            >
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDeleteConfirm}
-              disabled={deleting}
-            >
+            <Button variant="destructive" onClick={handleDeleteConfirm} disabled={deleting}>
               {deleting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -312,17 +293,3 @@ export function AppClientList({ teamId, tenantName, onRefresh }: AppClientListPr
     </>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -58,22 +58,15 @@ export function AuthConfigFormDialog({
 
     try {
       setSubmitting(true);
-      
-      if (authConfig) {
-        await api.updateAuthConfig(authConfig.id, { name: name.trim() });
-        toast({
-          title: 'Success',
-          description: 'Auth config updated successfully',
-        });
-      } else {
-        await api.createAuthConfig({ name: name.trim() });
-        toast({
-          title: 'Success',
-          description: 'Auth config created successfully',
-        });
-      }
-      
-      onSuccess();
+
+      // Tenant-only: auth config create/update removed. Use Tenants page or create-project flow.
+      toast({
+        title: 'Not implemented',
+        description: authConfig
+          ? 'Tenant display name update is not yet available. Use the Tenants page.'
+          : 'Create tenants from the Tenants page or when creating a project.',
+        variant: 'destructive',
+      });
     } catch (error) {
       console.error('Error saving auth config:', error);
       toast({

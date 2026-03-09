@@ -112,7 +112,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
   const [preloadedGitHubRepos, setPreloadedGitHubRepos] = useState<Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>>([]);
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
   const router = useRouter();
-  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
+  const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
 
   // Initialize config from project if in edit mode
@@ -413,8 +413,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     isDeployingRef.current = true; // Prevent config reset during deployment
 
     // Track resources we create so we can rollback if /projects fails
-    let rollbackAuthConfigId: string | undefined;
-    let rollbackAppClient: { authConfigId: string; appClientId: string } | undefined;
+    let rollbackAppClient: { teamId: string; tenantName: string; appClientId: string } | undefined;
+    let deployTeamId: string | undefined;
+    let deployTenant: string | undefined;
     
     // CRITICAL: Log the config state BEFORE deployment starts
     console.log('[CreateProject] 🚀 DEPLOYMENT STARTING - Config state snapshot:', {
@@ -562,20 +563,32 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         });
         
         if (hasExistingAuthConfig) {
-          // Use existing AuthConfig - CRITICAL: Use config.authConfigId (from UI state), NOT currentProject.config.auth_config_id
-          const selectedAuthConfigId = config.authConfigId; // Capture from config state to ensure we use the latest value
-          console.log('[CreateProject] ✅ Using existing AuthConfig from config state:', selectedAuthConfigId);
-          
+          // Use existing tenant - config.authConfigId is tenant name in tenant-only model
+          const selectedTenantName = config.authConfigId!;
+          const sessionTeamId = session?.user?.id ? `team_${(session.user as { id?: string }).id}` : undefined;
+          if (!sessionTeamId) {
+            toast({
+              title: 'Configuration Error',
+              description: 'You must be signed in to use an existing tenant.',
+              variant: 'destructive',
+            });
+            setIsDeploying(false);
+            return;
+          }
+          deployTeamId = sessionTeamId;
+          deployTenant = selectedTenantName;
+          console.log('[CreateProject] ✅ Using existing tenant from config state:', selectedTenantName);
+
           // Use appClientId from config, or defaultAppClient if set
           let selectedAppClientId = config.appClientId || config.defaultAppClient;
-          
-          // If no app client is selected, automatically pick the first one from the auth config (cache)
-          if (!selectedAppClientId && selectedAuthConfigId) {
-            const clientsArray = getAppClients(selectedAuthConfigId);
+
+          // If no app client is selected, automatically pick the first one from the tenant (cache)
+          if (!selectedAppClientId && selectedTenantName) {
+            const clientsArray = getAppClientsForTenant(sessionTeamId, selectedTenantName);
             if (clientsArray.length === 0) {
               toast({
                 title: 'Configuration Error',
-                description: 'The selected auth config has no app clients. Please create an app client first.',
+                description: 'The selected tenant has no app clients. Please create an app client first.',
                 variant: 'destructive',
               });
               setActiveTab('auth');
@@ -586,7 +599,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             defaultAppClientId = clientsArray[0].id;
             updateConfig({ defaultAppClient: defaultAppClientId });
             console.log('[CreateProject] Auto-selected first app client as default:', {
-              authConfigId: selectedAuthConfigId,
+              tenantName: selectedTenantName,
               appClientId: selectedAppClientId,
               totalClients: clientsArray.length,
             });
@@ -600,23 +613,19 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             }
           }
           
-          console.log('[CreateProject] ✅ Using existing AuthConfig (from config state):', {
-            authConfigId: selectedAuthConfigId,
+          console.log('[CreateProject] ✅ Using existing tenant (from config state):', {
+            tenantName: selectedTenantName,
             appClientId: selectedAppClientId,
             defaultAppClientId,
             isDefault: defaultAppClientId === selectedAppClientId,
-            note: 'Using selectedAuthConfigId from config state, NOT from currentProject',
           });
-          authConfigId = selectedAuthConfigId; // Use the captured value from config state
           appClientId = selectedAppClientId;
-          oauthConfig = undefined; // Will be handled via auth_config_id and app_client_id
+          oauthConfig = undefined; // Handled via team_id, tenant, and app_client_id
         } else if (config.bringOwnProvider) {
-          console.log('[CreateProject] Creating AuthConfig with user-provided OAuth provider');
-          // Validate OAuth provider fields
-          // Check if providers array exists and has items, otherwise check legacy fields
+          console.log('[CreateProject] Creating app client under tenant (no auth config)');
           const hasProviders = config.providers && config.providers.length > 0;
           const hasLegacyProvider = config.identityProviderClientId && config.identityProviderClientSecret;
-          
+
           if (!hasProviders && !hasLegacyProvider) {
             toast({
               title: 'Validation Error',
@@ -628,78 +637,57 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             return;
           }
 
-          // Create AuthConfig, AppClient, and Provider automatically
+          const teamId = session?.user?.id ? `team_${(session.user as { id?: string }).id}` : undefined;
+          if (!teamId) {
+            toast({
+              title: 'Configuration Error',
+              description: 'You must be signed in to create an app client.',
+              variant: 'destructive',
+            });
+            setIsDeploying(false);
+            return;
+          }
+
+          const tenantName = 'api';
           try {
-            // 1. Check if AuthConfig with this name already exists, otherwise create it
-            const authConfigName = config.userGroupName || `${config.projectName}-authconfig`;
-            let currentAuthConfigId: string;
-            
-            // Check for existing auth config with the same name
-            const existingAuthConfigs = await api.listAuthConfigs();
-            const existingAuthConfig = Array.isArray(existingAuthConfigs) 
-              ? existingAuthConfigs.find((pool: { name: string; id: string }) => pool.name === authConfigName)
-              : null;
-            
-            if (existingAuthConfig) {
-              // Reuse existing auth config
-              console.log('[CreateProject] Reusing existing AuthConfig:', {
-                id: existingAuthConfig.id,
-                name: existingAuthConfig.name,
-              });
-              currentAuthConfigId = existingAuthConfig.id;
-            } else {
-              // Create new auth config
-              const authConfig = await api.createAuthConfig({ 
-                name: authConfigName,
-                enableSocialAuth: config.enableSocialAuth,
-                enableApiKeyAuth: config.requestsAuthMethods?.includes('api_key'),
-                bringMyOwnOAuth: config.bringOwnProvider,
-              });
-              const newAuthConfigId = (authConfig as { id: string }).id;
-              currentAuthConfigId = newAuthConfigId;
-              rollbackAuthConfigId = newAuthConfigId;
-              console.log('[CreateProject] Created new AuthConfig:', {
-                id: currentAuthConfigId,
-                name: authConfigName,
-                enable_social_auth: config.enableSocialAuth,
-                enable_api_key_auth: config.requestsAuthMethods?.includes('api_key'),
-              });
+            // 1. Ensure tenant 'api' exists
+            const tenantsRes = await api.getTeamTenants(teamId, true);
+            const tenantsList = Array.isArray(tenantsRes.tenants) ? tenantsRes.tenants : [];
+            const hasApiTenant = tenantsList.some(
+              (t: string | { tenant_name?: string }) => (typeof t === 'string' ? t === tenantName : t.tenant_name === tenantName)
+            );
+            if (!hasApiTenant) {
+              await api.createTeamTenant(teamId, { tenant_name: tenantName, display_name: 'Default' });
             }
 
-            // 2. Create AppClient
-            // Generate default callback URL from project name
+            // 2. Create AppClient under tenant
             const projectName = config.projectName || 'project';
             const apiVersion = config.apiVersion || '1.0.0';
-            const defaultCallbackUrl = `https://${projectName}.portal.apiblaze.com/${apiVersion}`;
-            
-            // Ensure default URL is included and is first
+            const defaultCallbackUrl = `https://${projectName}-api.portal.apiblaze.com/${apiVersion}`;
             const callbackUrls = config.authorizedCallbackUrls && config.authorizedCallbackUrls.length > 0
               ? config.authorizedCallbackUrls
               : [defaultCallbackUrl];
-            
-            // Make sure default URL is first if it's not already
             const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
               ? [defaultCallbackUrl, ...callbackUrls.filter(u => u !== defaultCallbackUrl)]
               : [defaultCallbackUrl, ...callbackUrls];
-            
-            const firstProviderType = config.providers?.[0]?.type ?? config.socialProvider;
-            const appClient = await api.createAppClient(currentAuthConfigId, {
-              name: `${config.projectName}-appclient`,
-              tenant: (config.defaultTenant?.trim() || config.projectName || 'default'),
-              scopes: config.scopes,
-              providerType: firstProviderType,
-              authorizedCallbackUrls: finalCallbackUrls,
-              projectName: config.projectName,
-              apiVersion: config.apiVersion || '1.0.0',
-            });
-            const newAppClientId = (appClient as { id: string }).id;
 
-            // If we reused existing auth config, track app client for rollback (auth config cascades if we created it)
-            if (!rollbackAuthConfigId) {
-              rollbackAppClient = { authConfigId: currentAuthConfigId, appClientId: newAppClientId };
+            const appClient = await api.createAppClientForTenant(teamId, tenantName, {
+              name: `${projectName}-appclient`,
+              projectName,
+              apiVersion: config.apiVersion || '1.0.0',
+              tenant: tenantName,
+              scopes: config.scopes,
+              authorizedCallbackUrls: finalCallbackUrls,
+            });
+            const newAppClientId = (appClient as { id?: string }).id ?? (appClient as { clientId?: string }).clientId;
+            if (!newAppClientId) {
+              toast({ title: 'Error', description: 'App client was created but no client ID returned.', variant: 'destructive' });
+              setIsDeploying(false);
+              return;
             }
 
-            // Default scopes per provider type
+            rollbackAppClient = { teamId, tenantName, appClientId: newAppClientId };
+
             const DEFAULT_SCOPES: Record<SocialProvider, string[]> = {
               google: ['email', 'openid', 'profile'],
               github: ['read:user', 'user:email'],
@@ -709,8 +697,6 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               other: ['openid', 'profile'],
             };
 
-            // 3. Add Provider(s) to AppClient
-            // Use providers array if available, otherwise fall back to legacy single provider
             const providersToAdd = config.providers && config.providers.length > 0
               ? config.providers
               : (config.identityProviderClientId && config.identityProviderClientSecret
@@ -728,111 +714,81 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                   : []);
 
             for (const provider of providersToAdd) {
-              const providerScopes = provider.scopes?.length ? provider.scopes : DEFAULT_SCOPES[provider.type];
-              await api.addProvider(currentAuthConfigId, newAppClientId, {
+              const providerScopes = provider.scopes?.length ? provider.scopes : (DEFAULT_SCOPES[provider.type as SocialProvider] ?? DEFAULT_SCOPES.other);
+              await api.addProviderByTenant(teamId, tenantName, newAppClientId, {
                 type: provider.type,
-                clientId: provider.clientId,
-                clientSecret: provider.clientSecret,
+                clientId: provider.clientId ?? '',
+                clientSecret: provider.clientSecret ?? '',
                 scopes: providerScopes,
                 domain: provider.domain || undefined,
                 tokenType: ((provider as { tokenType?: string }).tokenType || config.tokenType || 'apiblaze') as 'apiblaze' | 'thirdParty',
                 targetServerToken: ((provider as { targetServerToken?: string }).targetServerToken || config.targetServerToken || 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none',
-                includeApiblazeAccessTokenHeader: (provider as { includeApiblazeAccessTokenHeader?: boolean }).includeApiblazeAccessTokenHeader ?? (provider as { include_apiblaze_token_header?: boolean }).include_apiblaze_token_header ?? config.includeApiblazeAccessTokenHeader ?? false,
+                includeApiblazeAccessTokenHeader: (provider as { includeApiblazeAccessTokenHeader?: boolean }).includeApiblazeAccessTokenHeader ?? config.includeApiblazeAccessTokenHeader ?? false,
                 includeApiblazeIdTokenHeader: (provider as { includeApiblazeIdTokenHeader?: boolean }).includeApiblazeIdTokenHeader ?? config.includeApiblazeIdTokenHeader ?? false,
               });
             }
 
-            // Use the created AuthConfig and AppClient
-            authConfigId = currentAuthConfigId;
+            deployTeamId = teamId;
+            deployTenant = tenantName;
             appClientId = newAppClientId;
-            oauthConfig = undefined; // Will be handled via auth_config_id and app_client_id
-            
-            // Set as default app client in project config (only one was created)
-            // CRITICAL: Set this BEFORE project creation
             defaultAppClientId = newAppClientId;
-            // Update local config state (for UI, but we use the variable for API call)
+            authConfigId = undefined;
+            oauthConfig = undefined;
             updateConfig({ defaultAppClient: defaultAppClientId });
-            console.log('[CreateProject] Set defaultAppClientId for bringOwnProvider:', {
-              defaultAppClientId,
-              appClientId: newAppClientId,
-              authConfigId,
-            });
-
-            console.log('[CreateProject] Created AuthConfig automatically:', {
-              authConfigId,
-              appClientId,
-              provider: config.socialProvider,
-              setAsDefault: true,
-              defaultAppClientId,
-            });
+            console.log('[CreateProject] Created app client under tenant:', { teamId, tenantName, appClientId: newAppClientId });
           } catch (error) {
-            console.error('Error creating AuthConfig automatically:', error);
+            console.error('Error creating app client under tenant:', error);
             toast({
-              title: 'Error Creating AuthConfig',
-              description: 'Failed to create AuthConfig automatically. Please try again.',
+              title: 'Error Creating App Client',
+              description: 'Failed to create app client under tenant. Please try again.',
               variant: 'destructive',
             });
             setIsDeploying(false);
             return;
           }
         } else {
-          // Default GitHub case - create AuthConfig/AppClient/Provider automatically
-          // This is done server-side to keep GitHub client secret secure
-          // The server-side endpoint will check for existing auth configs by name
-          console.warn('[CreateProject] 🚀 DEFAULT GITHUB CASE - Creating AuthConfig with default GitHub provider (server-side)');
+          // Default GitHub case - create tenant (api) + AppClient + default GitHub provider server-side
+          console.warn('[CreateProject] Default GitHub: creating tenant + app client + default GitHub (server-side)');
           try {
-            const authConfigName = config.userGroupName || `${config.projectName}-authconfig`;
+            const teamId = session?.user?.id ? `team_${(session.user as { id?: string }).id}` : undefined;
+            if (!teamId) {
+              toast({
+                title: 'Configuration Error',
+                description: 'You must be signed in to create an app client.',
+                variant: 'destructive',
+              });
+              setIsDeploying(false);
+              return;
+            }
             const appClientName = `${config.projectName}-appclient`;
-            
-            console.log('[CreateProject] Creating AuthConfig/AppClient/Provider with default GitHub (server-side)...');
             const result = await api.createAuthConfigWithDefaultGitHub({
-              authConfigName,
+              teamId,
               appClientName,
-              // Omit scopes so server uses GitHub defaults (read:user, user:email)
-              enableSocialAuth: config.enableSocialAuth,
-              enableApiKeyAuth: config.requestsAuthMethods?.includes('api_key'),
-              bringMyOwnOAuth: config.bringOwnProvider,
-              projectName: config.projectName,
+              projectName: config.projectName ?? 'project',
               apiVersion: config.apiVersion || '1.0.0',
-              defaultTenant: config.defaultTenant?.trim() || 'api',
             });
 
-            // Track for rollback (server creates auth config + app client + provider)
-            rollbackAuthConfigId = result.authConfigId;
-
-            // Use the created AuthConfig and AppClient
-            authConfigId = result.authConfigId;
+            deployTeamId = result.team_id;
+            deployTenant = result.tenant_name;
             appClientId = result.appClientId;
-            oauthConfig = undefined; // Will be handled via auth_config_id and app_client_id
-            
-            // Note: Provider is created server-side, we don't have its ID
-            
-            // Set as default app client in project config (only one was created)
-            // CRITICAL: Set this BEFORE project creation
             defaultAppClientId = result.appClientId;
-            // Update local config state (for UI, but we use the variable for API call)
+            authConfigId = undefined;
+            oauthConfig = undefined;
+            rollbackAppClient = { teamId: result.team_id, tenantName: result.tenant_name, appClientId: result.appClientId };
             updateConfig({ defaultAppClient: defaultAppClientId });
-            console.log('[CreateProject] Set defaultAppClientId for default GitHub:', {
-              defaultAppClientId,
+            console.log('[CreateProject] Created tenant + app client for default GitHub:', {
+              deployTeamId,
+              deployTenant,
               appClientId: result.appClientId,
-              authConfigId: result.authConfigId,
-            });
-
-            console.log('[CreateProject] Created AuthConfig for default GitHub:', {
-              authConfigId,
-              appClientId,
-              provider: 'github',
-              setAsDefault: true,
-              defaultAppClientId,
             });
           } catch (error) {
-            console.error('Error creating AuthConfig for default GitHub:', error);
+            console.error('Error creating tenant + app client for default GitHub:', error);
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
             toast({
-              title: 'Error Creating AuthConfig',
-              description: errorMessage.includes('not configured') 
-                ? 'Default GitHub OAuth credentials are not configured. Please enable "Bring My Own OAuth Provider" and provide your own GitHub credentials, or contact support to configure default credentials.'
-                : `Failed to create AuthConfig for default GitHub: ${errorMessage}`,
+              title: 'Error Creating App Client',
+              description: errorMessage.includes('not configured')
+                ? 'Default GitHub OAuth credentials are not configured. Use "Bring My Own OAuth Provider" and add your GitHub credentials, or contact support.'
+                : `Failed to create app client for default GitHub: ${errorMessage}`,
               variant: 'destructive',
             });
             setIsDeploying(false);
@@ -846,9 +802,10 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         });
       }
 
-      // Defensive check: if we're using oauth but don't have a AuthConfig, that's an error
-      if (authType === 'oauth' && !authConfigId) {
-        console.error('[CreateProject] ERROR: OAuth auth type requires AuthConfig but none was created!', {
+      // Defensive check: if we're using oauth but have no auth identity, that's an error
+      const hasTenantOAuth = !!(deployTeamId && deployTenant && (appClientId || defaultAppClientId));
+      if (authType === 'oauth' && !authConfigId && !hasTenantOAuth) {
+        console.error('[CreateProject] ERROR: OAuth auth type requires AuthConfig or tenant app client but none was created!', {
           enableSocialAuth: config.enableSocialAuth,
           useAuthConfig: config.useAuthConfig,
           authConfigId: config.authConfigId,
@@ -857,7 +814,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         });
         toast({
           title: 'Configuration Error',
-          description: 'OAuth authentication requires a AuthConfig. Please try again or contact support.',
+          description: 'OAuth authentication requires a AuthConfig or app client. Please try again or contact support.',
           variant: 'destructive',
         });
         setIsDeploying(false);
@@ -913,7 +870,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             }))
           : (appClientIdVal
             ? [
-                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}.portal.apiblaze.com/${apiVersionVal}` },
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}-api.portal.apiblaze.com/${apiVersionVal}` },
                 { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: appClientIdVal },
               ]
             : []);
@@ -945,7 +902,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         github: githubSource,
         auth_type: authType,
         oauth_config: oauthConfig,
-        auth_config_id: authConfigId,
+        ...(deployTeamId && deployTenant
+          ? { team_id: deployTeamId, tenant: deployTenant, default_app_client_id: defaultAppClientId }
+          : {}),
         auth_config: { who_can_register: config.whoCanRegisterToLogin ?? 'anyone' },
         app_client_id: appClientId, // AppClient selected at deployment time (not stored in config)
         default_app_client_id: defaultAppClientId, // Default app client ID stored in project config
@@ -964,11 +923,11 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       });
       
       console.log('[CreateProject] 🎯 FINAL CHECK - auth_config_id in projectData:', {
-        'projectData.auth_config_id (what will be sent)': projectData.auth_config_id,
+        'projectData.auth_config_id (what will be sent)': (projectData as Record<string, unknown>).auth_config_id,
         'config.authConfigId (from config state)': config.authConfigId,
         'authConfigId variable (from deployment logic)': authConfigId,
         'currentProject.config.auth_config_id (OLD)': currentProject ? (currentProject.config as Record<string, unknown>)?.auth_config_id : 'N/A',
-        'MATCH?': projectData.auth_config_id === config.authConfigId ? '✅ YES' : '❌ NO - MISMATCH!',
+        'MATCH?': (projectData as Record<string, unknown>).auth_config_id === config.authConfigId ? '✅ YES' : '❌ NO - MISMATCH!',
         timestamp: new Date().toISOString(),
       });
 
@@ -1003,19 +962,13 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     } catch (error) {
       console.error('Failed to create project:', error);
 
-      // Rollback: if /projects failed, delete any auth-config, app client, or provider we created
+      // Rollback: if /projects failed, delete any app client we created (tenant deletion not implemented)
       let rollbackSucceeded = false;
       let rollbackFailed = false;
-      if (rollbackAuthConfigId || rollbackAppClient) {
+      if (rollbackAppClient) {
         try {
-          if (rollbackAppClient) {
-            console.log('[CreateProject] Rolling back: deleting created app client', rollbackAppClient);
-            await api.deleteAppClient(rollbackAppClient.authConfigId, rollbackAppClient.appClientId);
-          }
-          if (rollbackAuthConfigId) {
-            console.log('[CreateProject] Rolling back: deleting created auth config', rollbackAuthConfigId);
-            await api.deleteAuthConfig(rollbackAuthConfigId);
-          }
+          console.log('[CreateProject] Rolling back: deleting created app client', rollbackAppClient);
+          await api.deleteAppClientByTenant(rollbackAppClient.teamId, rollbackAppClient.tenantName, rollbackAppClient.appClientId);
           rollbackSucceeded = true;
         } catch (rollbackError) {
           console.error('[CreateProject] Rollback failed:', rollbackError);
@@ -1110,7 +1063,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             }))
           : (appClientIdVal
             ? [
-                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}.portal.apiblaze.com/${apiVersionVal}` },
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}-api.portal.apiblaze.com/${apiVersionVal}` },
                 { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: appClientIdVal },
               ]
             : []);

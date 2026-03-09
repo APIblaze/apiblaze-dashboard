@@ -31,29 +31,33 @@ export function ProjectConfigDialog({ open, onOpenChange, project }: ProjectConf
   const getAuthConfig = useDashboardCacheStore((s) => s.getAuthConfig);
   const getAppClient = useDashboardCacheStore((s) => s.getAppClient);
   const getProviders = useDashboardCacheStore((s) => s.getProviders);
-  const fetchAppClientsForConfig = useDashboardCacheStore((s) => s.fetchAppClientsForConfig);
-  const fetchProvidersForClient = useDashboardCacheStore((s) => s.fetchProvidersForClient);
+  const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
+  const fetchAppClientsForTenant = useDashboardCacheStore((s) => s.fetchAppClientsForTenant);
+  const fetchProvidersForTenant = useDashboardCacheStore((s) => s.fetchProvidersForTenant);
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
 
   const config = project?.config as Record<string, unknown> | undefined;
-  const authConfigId = config?.auth_config_id as string | undefined;
+  const teamId = config?.team_id as string | undefined;
+  const tenant = config?.tenant as string | undefined;
+  const authConfigId = tenant ?? (config?.auth_config_id as string | undefined);
   const defaultAppClientId = (config?.default_app_client_id || config?.defaultAppClient) as string | undefined;
   const appClientId = defaultAppClientId || (config?.app_client_id as string | undefined);
 
-  const hasAuthConfigIds = !!(open && project && authConfigId && appClientId);
+  const hasAuthConfigIds = !!(open && project && teamId && tenant && appClientId);
 
   useEffect(() => {
-    if (open && !isBootstrapping && authConfigId) {
-      fetchAppClientsForConfig(authConfigId);
+    if (open && !isBootstrapping && teamId && tenant) {
+      fetchAppClientsForTenant(teamId, tenant);
       if (appClientId) {
-        fetchProvidersForClient(authConfigId, appClientId);
+        fetchProvidersForTenant(teamId, tenant, appClientId);
       }
     }
-  }, [open, authConfigId, appClientId, isBootstrapping, fetchAppClientsForConfig, fetchProvidersForClient]);
+  }, [open, teamId, tenant, appClientId, isBootstrapping, fetchAppClientsForTenant, fetchProvidersForTenant]);
 
-  const authConfig = hasAuthConfigIds ? (getAuthConfig(authConfigId!) ?? null) : null;
-  const appClient = hasAuthConfigIds ? (getAppClient(authConfigId!, appClientId!) as AppClientResponse | undefined ?? null) : null;
-  const providers = hasAuthConfigIds ? (getProviders(authConfigId!, appClientId!) as SocialProviderResponse[]) : [];
+  const tenantKey = teamId && tenant ? `tenant:${teamId}:${tenant}` : undefined;
+  const authConfig = hasAuthConfigIds && authConfigId ? (getAuthConfig(authConfigId) ?? null) : null;
+  const appClient = hasAuthConfigIds && tenantKey && appClientId ? (getAppClient(tenantKey, appClientId) as AppClientResponse | undefined ?? null) : null;
+  const providers = hasAuthConfigIds && tenantKey && appClientId ? (getProviders(tenantKey, appClientId) as SocialProviderResponse[]) : [];
   const loading = isBootstrapping && hasAuthConfigIds;
   const error: string | null = null;
 

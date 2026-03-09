@@ -58,28 +58,19 @@ export function AuthConfigList() {
 
     try {
       setDeleting(true);
-      await api.deleteAuthConfig(selectedConfig.id);
       toast({
-        title: 'Success',
-        description: 'Auth config deleted successfully',
-      });
-      setDeleteDialogOpen(false);
-      setSelectedConfig(null);
-      await invalidateAndRefetch();
-    } catch (error) {
-      console.error('Error deleting auth config:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to delete auth config',
+        title: 'Not implemented',
+        description: 'Tenant deletion is not yet available. Detach the tenant from all projects first.',
         variant: 'destructive',
       });
     } finally {
       setDeleting(false);
+      setDeleteDialogOpen(false);
     }
   };
 
   const handleViewDetails = (config: AuthConfig) => {
-    router.push(`/dashboard/auth-configs?authConfig=${config.id}`);
+    router.push(`/dashboard/tenants?tenant=${encodeURIComponent(config.id)}`);
   };
 
   const handleSuccess = async () => {

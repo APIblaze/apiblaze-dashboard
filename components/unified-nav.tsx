@@ -20,6 +20,7 @@ interface UnifiedNavProps {
   teamId?: string;
   userId?: string | null;
   authConfigId?: string | null;
+  tenantName?: string | null;
   clientId?: string | null;
   providerId?: string | null;
   /** Show Projects section in dropdown (when Projects submenu is highlighted) */
@@ -42,6 +43,7 @@ export function UnifiedNav({
   teamId,
   userId,
   authConfigId,
+  tenantName,
   clientId,
   providerId,
   showProjectsSection = true,
@@ -64,11 +66,13 @@ export function UnifiedNav({
   const isBootstrapping = useDashboardCacheStore((s) => s.isBootstrapping);
 
   const teamLabel = getTeamLabel(teamId, userId, githubHandle);
-  const isAuthConfigs = pathname === '/dashboard/auth-configs';
-  const hasAuthDrillDown = !!(authConfigId || clientId || providerId);
-  const authConfig = authConfigId ? getAuthConfig(authConfigId) : null;
-  const appClient = authConfigId && clientId ? getAppClient(authConfigId, clientId) : null;
-  const providers = authConfigId && clientId ? getProviders(authConfigId, clientId) : [];
+  const effectiveTenant = tenantName ?? authConfigId;
+  const tenantKey = teamId && effectiveTenant ? `tenant:${teamId}:${effectiveTenant}` : undefined;
+  const isAuthConfigs = pathname === '/dashboard/auth-configs' || (pathname === '/dashboard/tenants' && !!(authConfigId || tenantName || clientId || providerId));
+  const hasAuthDrillDown = !!(authConfigId || tenantName || clientId || providerId);
+  const authConfig = effectiveTenant ? getAuthConfig(effectiveTenant) : null;
+  const appClient = (tenantKey && clientId ? getAppClient(tenantKey, clientId) : null) as { name?: string } | undefined ?? null;
+  const providers = tenantKey && clientId ? getProviders(tenantKey, clientId) : [];
   const provider = providerId ? providers.find((p) => p.id === providerId) : null;
 
   const PROVIDER_TYPE_LABELS: Record<string, string> = {
@@ -109,21 +113,30 @@ export function UnifiedNav({
   };
 
   const handleAuthSelect = (id: string | null) => {
-    if (id) router.push(`/dashboard/auth-configs?authConfig=${encodeURIComponent(id)}`);
-    else router.push('/dashboard/auth-configs');
+    if (id) router.push(`/dashboard/tenants?tenant=${encodeURIComponent(id)}`);
+    else router.push('/dashboard/tenants');
+    setOpen(false);
+  };
+
+  const handleTenantSelect = (name: string | null) => {
+    if (name) router.push(`/dashboard/tenants?tenant=${encodeURIComponent(name)}`);
+    else router.push('/dashboard/tenants');
     setOpen(false);
   };
 
   const projectsHeaderLabel = githubHandle ? `All ${githubHandle}'s projects` : 'All projects';
-  const authConfigsHeaderLabel = githubHandle ? `${githubHandle}'s auth configs` : 'auth configs';
+  const authConfigsHeaderLabel = githubHandle ? `${githubHandle}'s tenants` : 'Tenants';
 
   const navToProjectsList = () => {
     onSelectorChange({ type: 'team' });
     router.push('/dashboard');
   };
-  const navToAuthConfigsList = () => router.push('/dashboard/auth-configs');
-  const navToAuthConfig = () => authConfigId && router.push(`/dashboard/auth-configs?authConfig=${encodeURIComponent(authConfigId)}`);
-  const navToAppClient = () => authConfigId && clientId && router.push(`/dashboard/auth-configs?authConfig=${encodeURIComponent(authConfigId)}&client=${encodeURIComponent(clientId)}`);
+  const navToAuthConfigsList = () => router.push('/dashboard/tenants');
+  const navToTenant = () => tenantName && router.push(`/dashboard/tenants?tenant=${encodeURIComponent(tenantName)}`);
+  const navToTenantFromConfig = () => effectiveTenant && router.push(`/dashboard/tenants?tenant=${encodeURIComponent(effectiveTenant)}`);
+  const navToAppClient = () => {
+    if (effectiveTenant && clientId) router.push(`/dashboard/tenants?tenant=${encodeURIComponent(effectiveTenant)}&client=${encodeURIComponent(clientId)}`);
+  };
 
   const triggerBaseClass = 'flex items-center gap-2 rounded-md border bg-background px-3 py-2 min-h-9 text-left';
   const segmentClass = 'text-sm font-medium hover:underline truncate';
@@ -139,7 +152,7 @@ export function UnifiedNav({
           <button type="button" onClick={navToAuthConfigsList} className={cn(segmentClass, 'overflow-visible whitespace-nowrap shrink-0')}>
             {authConfigsHeaderLabel}
           </button>
-          {authConfigId && (
+          {(tenantName || authConfigId) && (
             <>
               <span className="text-muted-foreground/60 select-none">/</span>
               <div className="w-6 h-6 rounded-md bg-gradient-to-b from-purple-400 to-purple-700 flex items-center justify-center shrink-0">
@@ -147,14 +160,14 @@ export function UnifiedNav({
               </div>
               <button
                 type="button"
-                onClick={(clientId || providerId) ? navToAuthConfig : undefined}
+                onClick={(clientId || providerId) ? navToTenantFromConfig : undefined}
                 className={cn(segmentClass, 'overflow-visible whitespace-nowrap shrink-0', !clientId && !providerId && 'cursor-default hover:no-underline')}
               >
-                {authConfig?.name ?? authConfigId}
+                {authConfig?.name ?? effectiveTenant}
               </button>
             </>
           )}
-          {clientId && authConfigId && (
+          {clientId && (tenantName || authConfigId) && (
             <>
               <span className="text-muted-foreground/60 select-none">/</span>
               <div className="w-6 h-6 rounded-md bg-gradient-to-b from-purple-400 to-purple-700 flex items-center justify-center shrink-0">
@@ -377,7 +390,7 @@ export function UnifiedNav({
                       onClick={() => handleAuthSelect(c.id)}
                       className={cn(
                         'w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-accent rounded-sm',
-                        authConfigId === c.id && 'bg-accent'
+                        effectiveTenant === c.id && 'bg-accent'
                       )}
                     >
                       <span className="truncate">{c.name}</span>

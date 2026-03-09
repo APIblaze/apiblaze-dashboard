@@ -6,15 +6,15 @@ const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ teamId: string }> }
+  { params }: { params: Promise<{ projectId: string; version: string }> }
 ) {
   try {
     const userClaims = await getUserClaims();
-    const { teamId } = await params;
+    const { projectId, version } = await params;
 
-    if (!teamId) {
+    if (!projectId || !version) {
       return NextResponse.json(
-        { error: 'Validation error', details: 'teamId is required' },
+        { error: 'Validation error', details: 'projectId and version are required' },
         { status: 400 }
       );
     }
@@ -24,11 +24,10 @@ export async function GET(
       jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
     });
 
-    const detail = request.nextUrl.searchParams.get('detail') === '1';
-    const data = await client.getTeamTenants(userClaims, teamId, detail);
+    const data = await client.listProjectTenants(userClaims, projectId, version);
     return NextResponse.json(data);
   } catch (error: unknown) {
-    console.error('Error fetching team tenants:', error);
+    console.error('Error listing project tenants:', error);
 
     const message = error instanceof Error ? error.message : 'Unknown error';
 
@@ -40,7 +39,7 @@ export async function GET(
     }
 
     return NextResponse.json(
-      { error: 'Failed to fetch tenants', details: message },
+      { error: 'Failed to list tenants', details: message },
       { status: 500 }
     );
   }
@@ -48,30 +47,30 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ teamId: string }> }
+  { params }: { params: Promise<{ projectId: string; version: string }> }
 ) {
   try {
     const userClaims = await getUserClaims();
-    const { teamId } = await params;
+    const { projectId, version } = await params;
 
-    if (!teamId) {
+    if (!projectId || !version) {
       return NextResponse.json(
-        { error: 'Validation error', details: 'teamId is required' },
+        { error: 'Validation error', details: 'projectId and version are required' },
         { status: 400 }
       );
     }
 
-    const body = await request.json() as { display_name: string; tenant_name?: string };
+    const body = await request.json() as { tenant_name: string; display_name?: string; auth_config_id?: string };
 
     const client = createAPIBlazeClient({
       apiKey: INTERNAL_API_KEY,
       jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
     });
 
-    const data = await client.createTeamTenant(userClaims, teamId, body);
+    const data = await client.attachTenantToProject(userClaims, projectId, version, body);
     return NextResponse.json(data, { status: 201 });
   } catch (error: unknown) {
-    console.error('Error creating tenant:', error);
+    console.error('Error attaching tenant:', error);
 
     const message = error instanceof Error ? error.message : 'Unknown error';
 
@@ -83,7 +82,7 @@ export async function POST(
     }
 
     return NextResponse.json(
-      { error: 'Failed to create tenant', details: message },
+      { error: 'Failed to attach tenant', details: message },
       { status: 500 }
     );
   }

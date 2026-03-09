@@ -241,19 +241,7 @@ export function ProjectConfigPanel({
   const isDeployingRef = useRef(false);
   const routesRef = useRef<RouteEntry[]>([]);
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
-  // Stable object reference so RoutesSection doesn't reload the spec on every render.
-  const routesSectionProject = useMemo(
-    () => currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentProject?.project_id, currentProject?.api_version]
-  );
-  const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
-  const updateProjectInCache = useDashboardCacheStore((s) => s.updateProjectInCache);
-  // Track project identity so we only reset config when switching to a different project,
-  // not when the same project's data is updated (e.g. after a save).
-  const currentProjectKeyRef = useRef<string | null>(
-    project ? `${project.project_id}:${project.api_version}` : null
-  );
+  const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
 
   useEffect(() => {
     setCurrentProject(project);
@@ -309,8 +297,9 @@ export function ProjectConfigPanel({
   const handleDeploy = async () => {
     setIsDeploying(true);
     isDeployingRef.current = true;
-    let rollbackAuthConfigId: string | undefined;
-    let rollbackAppClient: { authConfigId: string; appClientId: string } | undefined;
+    let rollbackAppClient: { teamId: string; tenantName: string; appClientId: string } | undefined;
+    let deployTeamId: string | undefined;
+    let deployTenant: string | undefined;
 
     try {
       if (!config.projectName) {
@@ -373,14 +362,22 @@ export function ProjectConfigPanel({
       if (needsAuthConfig) {
         const hasExistingAuthConfig = config.useAuthConfig && config.authConfigId;
         if (hasExistingAuthConfig) {
-          const selectedAuthConfigId = config.authConfigId!;
+          const selectedTenantName = config.authConfigId!;
+          if (!teamId) {
+            toast({ title: 'Configuration Error', description: 'You must be signed in to use an existing tenant.', variant: 'destructive' });
+            setIsDeploying(false);
+            return;
+          }
+          deployTeamId = teamId;
+          deployTenant = selectedTenantName;
+
           let selectedAppClientId = config.appClientId || config.defaultAppClient;
-          if (!selectedAppClientId && selectedAuthConfigId) {
-            const clientsArray = getAppClients(selectedAuthConfigId);
+          if (!selectedAppClientId && selectedTenantName) {
+            const clientsArray = getAppClientsForTenant(teamId, selectedTenantName);
             if (clientsArray.length === 0) {
               toast({
                 title: 'Configuration Error',
-                description: 'The selected auth config has no app clients.',
+                description: 'The selected tenant has no app clients.',
                 variant: 'destructive',
               });
               setActiveTab('authentication');
@@ -393,7 +390,6 @@ export function ProjectConfigPanel({
           } else {
             defaultAppClientId = selectedAppClientId ?? config.defaultAppClient;
           }
-          authConfigId = selectedAuthConfigId;
           appClientId = selectedAppClientId ?? undefined;
           oauthConfig = undefined;
         } else if (config.bringOwnProvider) {
@@ -409,42 +405,34 @@ export function ProjectConfigPanel({
             setIsDeploying(false);
             return;
           }
+          if (!teamId) {
+            toast({ title: 'Configuration Error', description: 'You must be signed in to create an app client.', variant: 'destructive' });
+            setIsDeploying(false);
+            return;
+          }
           try {
-            const authConfigName = config.userGroupName || `${config.projectName}-authconfig`;
-            const existingAuthConfigs = await api.listAuthConfigs();
-            const existingAuthConfig = Array.isArray(existingAuthConfigs)
-              ? existingAuthConfigs.find((p: { name: string; id: string }) => p.name === authConfigName)
-              : null;
-            let currentAuthConfigId: string;
-            if (existingAuthConfig) {
-              currentAuthConfigId = existingAuthConfig.id;
-            } else {
-              const authConfig = await api.createAuthConfig({
-                name: authConfigName,
-                enableSocialAuth: config.enableSocialAuth,
-                enableApiKeyAuth: config.requestsAuthMethods?.includes('api_key'),
-                bringMyOwnOAuth: config.bringOwnProvider,
-              });
-              currentAuthConfigId = (authConfig as { id: string }).id;
-              rollbackAuthConfigId = currentAuthConfigId;
-            }
-            const defaultCallbackUrl = `https://${config.projectName}.portal.apiblaze.com/${config.apiVersion || '1.0.0'}`;
+            const tenantName = 'api';
+            const tenantsRes = await api.getTeamTenants(teamId, true);
+            const tenantsList = Array.isArray((tenantsRes as { tenants?: unknown }).tenants) ? (tenantsRes as { tenants: Array<{ tenant_name?: string } | string> }).tenants : [];
+            const hasApiTenant = tenantsList.some((t: { tenant_name?: string } | string) => (typeof t === 'string' ? t === tenantName : t?.tenant_name === tenantName));
+            if (!hasApiTenant) await api.createTeamTenant(teamId, { tenant_name: tenantName, display_name: 'Default' });
+            const defaultCallbackUrl = `https://${config.projectName}-api.portal.apiblaze.com/${config.apiVersion || '1.0.0'}`;
             const callbackUrls = config.authorizedCallbackUrls?.length ? config.authorizedCallbackUrls : [defaultCallbackUrl];
-            const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
-              ? [defaultCallbackUrl, ...callbackUrls.filter((u) => u !== defaultCallbackUrl)]
-              : [defaultCallbackUrl, ...callbackUrls];
-            const firstProviderType = config.providers?.[0]?.type ?? config.socialProvider;
-            const appClient = await api.createAppClient(currentAuthConfigId, {
+            const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl) ? [defaultCallbackUrl, ...callbackUrls.filter((u) => u !== defaultCallbackUrl)] : [defaultCallbackUrl, ...callbackUrls];
+            const appClient = await api.createAppClientForTenant(teamId, tenantName, {
               name: `${config.projectName}-appclient`,
-              tenant: (config.defaultTenant?.trim() || 'api'),
-              scopes: config.scopes,
-              providerType: firstProviderType,
-              authorizedCallbackUrls: finalCallbackUrls,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
+              tenant: tenantName,
+              scopes: config.scopes,
+              authorizedCallbackUrls: finalCallbackUrls,
             });
-            const newAppClientId = (appClient as { id: string }).id;
-            if (!rollbackAuthConfigId) rollbackAppClient = { authConfigId: currentAuthConfigId, appClientId: newAppClientId };
+            const newAppClientId = (appClient as { id?: string }).id ?? (appClient as { clientId?: string }).clientId;
+            if (!newAppClientId) {
+              toast({ title: 'Error', description: 'App client was created but no client ID returned.', variant: 'destructive' });
+              setIsDeploying(false);
+              return;
+            }
             const DEFAULT_SCOPES: Record<SocialProvider, string[]> = {
               google: ['email', 'openid', 'profile'],
               github: ['read:user', 'user:email'],
@@ -470,46 +458,50 @@ export function ProjectConfigPanel({
                 : [];
             for (const provider of providersToAdd) {
               const providerScopes = provider.scopes?.length ? provider.scopes : DEFAULT_SCOPES[provider.type];
-              await api.addProvider(currentAuthConfigId, newAppClientId, {
+              await api.addProviderByTenant(teamId, tenantName, newAppClientId, {
                 type: provider.type,
-                clientId: provider.clientId,
-                clientSecret: provider.clientSecret,
+                clientId: provider.clientId ?? '',
+                clientSecret: provider.clientSecret ?? '',
                 scopes: providerScopes,
-                domain: provider.domain,
+                domain: provider.domain || undefined,
                 tokenType: ((provider as { tokenType?: string }).tokenType || config.tokenType || 'apiblaze') as 'apiblaze' | 'thirdParty',
                 targetServerToken: ((provider as { targetServerToken?: string }).targetServerToken || config.targetServerToken || 'apiblaze') as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none',
                 includeApiblazeAccessTokenHeader: (provider as { includeApiblazeAccessTokenHeader?: boolean }).includeApiblazeAccessTokenHeader ?? config.includeApiblazeAccessTokenHeader ?? false,
                 includeApiblazeIdTokenHeader: (provider as { includeApiblazeIdTokenHeader?: boolean }).includeApiblazeIdTokenHeader ?? config.includeApiblazeIdTokenHeader ?? false,
               });
             }
-            authConfigId = currentAuthConfigId;
+            deployTeamId = teamId;
+            deployTenant = tenantName;
+            authConfigId = undefined;
             appClientId = newAppClientId;
             oauthConfig = undefined;
             defaultAppClientId = newAppClientId;
+            rollbackAppClient = { teamId, tenantName, appClientId: newAppClientId };
             updateConfig({ defaultAppClient: defaultAppClientId });
           } catch (error) {
-            console.error('Error creating AuthConfig:', error);
-            toast({ title: 'Error Creating AuthConfig', description: 'Failed to create AuthConfig automatically.', variant: 'destructive' });
+            console.error('Error creating app client under tenant:', error);
+            toast({ title: 'Error Creating App Client', description: 'Failed to create app client under tenant.', variant: 'destructive' });
             setIsDeploying(false);
             return;
           }
         } else {
           try {
-            const authConfigName = config.userGroupName || `${config.projectName}-authconfig`;
+            if (!teamId) {
+              toast({ title: 'Configuration Error', description: 'You must be signed in to create an app client.', variant: 'destructive' });
+              setIsDeploying(false);
+              return;
+            }
             const appClientName = `${config.projectName}-appclient`;
             const result = await api.createAuthConfigWithDefaultGitHub({
-              authConfigName,
+              teamId,
               appClientName,
-              // Omit scopes so server uses GitHub defaults (read:user, user:email)
-              enableSocialAuth: config.enableSocialAuth,
-              enableApiKeyAuth: config.requestsAuthMethods?.includes('api_key'),
-              bringMyOwnOAuth: config.bringOwnProvider,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
-              defaultTenant: config.defaultTenant?.trim() || 'api',
             });
-            rollbackAuthConfigId = result.authConfigId;
-            authConfigId = result.authConfigId;
+            deployTeamId = result.team_id;
+            deployTenant = result.tenant_name;
+            rollbackAppClient = { teamId: result.team_id, tenantName: result.tenant_name, appClientId: result.appClientId };
+            authConfigId = undefined;
             appClientId = result.appClientId;
             oauthConfig = undefined;
             defaultAppClientId = result.appClientId;
@@ -528,8 +520,8 @@ export function ProjectConfigPanel({
         }
       }
 
-      if (authType === 'oauth' && !authConfigId) {
-        toast({ title: 'Configuration Error', description: 'OAuth authentication requires a AuthConfig.', variant: 'destructive' });
+      if (authType === 'oauth' && !authConfigId && !(deployTeamId && deployTenant)) {
+        toast({ title: 'Configuration Error', description: 'OAuth authentication requires an app client (tenant flow).', variant: 'destructive' });
         setIsDeploying(false);
         return;
       }
@@ -561,7 +553,7 @@ export function ProjectConfigPanel({
             }))
           : (appClientIdVal
             ? [
-                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}.portal.apiblaze.com/${apiVersionVal}` },
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}-api.portal.apiblaze.com/${apiVersionVal}` },
                 { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: appClientIdVal },
               ]
             : []);
@@ -586,7 +578,9 @@ export function ProjectConfigPanel({
         github: githubSource,
         auth_type: authType,
         oauth_config: oauthConfig as { provider_type: string; client_id: string; client_secret: string; scopes: string } | undefined,
-        auth_config_id: authConfigId,
+        ...(deployTeamId && deployTenant
+          ? { team_id: deployTeamId, tenant: deployTenant, default_app_client_id: defaultAppClientId }
+          : {}),
         auth_config: { who_can_register: config.whoCanRegisterToLogin ?? 'anyone' },
         app_client_id: appClientId,
         default_app_client_id: defaultAppClientId,
@@ -609,10 +603,9 @@ export function ProjectConfigPanel({
       onDeploySuccess?.();
     } catch (error) {
       console.error('Failed to create project:', error);
-      if (rollbackAuthConfigId || rollbackAppClient) {
+      if (rollbackAppClient) {
         try {
-          if (rollbackAppClient) await api.deleteAppClient(rollbackAppClient.authConfigId, rollbackAppClient.appClientId);
-          if (rollbackAuthConfigId) await api.deleteAuthConfig(rollbackAuthConfigId);
+          await api.deleteAppClientByTenant(rollbackAppClient.teamId, rollbackAppClient.tenantName, rollbackAppClient.appClientId);
         } catch (e) {
           console.error('Rollback failed:', e);
         }
@@ -664,7 +657,7 @@ export function ProjectConfigPanel({
             }))
           : (appClientIdVal
             ? [
-                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}.portal.apiblaze.com/${apiVersionVal}` },
+                { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: `https://${projectNameVal || 'project'}-api.portal.apiblaze.com/${apiVersionVal}` },
                 { iss: `https://auth.apiblaze.com/${appClientIdVal}`, aud: appClientIdVal },
               ]
             : []);
@@ -789,7 +782,18 @@ export function ProjectConfigPanel({
                 setCurrentProject(updated);
                 onProjectUpdate?.(updated);
               }}
-              teamId={teamId}
+              teamId={currentProject?.team_id ?? teamId}
+            />
+          )}
+          {activeTab === 'authorization' && (
+            <AuthorizationSection
+              project={currentProject}
+              config={config}
+              updateConfig={updateConfig}
+              onProjectUpdate={(updated) => {
+                setCurrentProject(updated);
+                onProjectUpdate?.(updated);
+              }}
             />
           )}
           {activeTab === 'authorization' && (

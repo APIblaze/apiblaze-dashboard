@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,9 @@ import {
 } from '@/components/ui/dialog';
 
 interface ProviderDetailProps {
-  authConfigId: string;
+  authConfigId?: string;
+  teamId?: string;
+  tenantName?: string;
   clientId: string;
   providerId: string;
   onBack: () => void;
@@ -36,20 +38,39 @@ const PROVIDER_TYPE_LABELS: Record<SocialProvider['type'], string> = {
   other: 'Other',
 };
 
-export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: ProviderDetailProps) {
+export function ProviderDetail({ authConfigId, teamId, tenantName, clientId, providerId, onBack }: ProviderDetailProps) {
+  const isTenantMode = !!(teamId && tenantName);
   const router = useRouter();
   const { toast } = useToast();
-  const getProviders = useDashboardCacheStore((s) => s.getProviders);
+  const getProvidersForTenant = useDashboardCacheStore((s) => s.getProvidersForTenant);
   const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
-  const providers = getProviders(authConfigId, clientId);
-  const provider = providers.find((p) => p.id === providerId) ?? null;
-  const loading = useDashboardCacheStore((s) => s.isBootstrapping);
+  const [tenantProvider, setTenantProvider] = useState<SocialProvider | null>(null);
+  const [tenantLoading, setTenantLoading] = useState(isTenantMode);
+  const cachedProviders = isTenantMode && teamId && tenantName ? getProvidersForTenant(teamId, tenantName, clientId) : [];
+  const provider = isTenantMode ? tenantProvider : (cachedProviders.find((p) => p.id === providerId) ?? null);
+  const loading = useDashboardCacheStore((s) => s.isBootstrapping) || (isTenantMode && tenantLoading);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [loadingReveal, setLoadingReveal] = useState(false);
+
+  useEffect(() => {
+    if (isTenantMode && teamId && tenantName) {
+      let cancelled = false;
+      (async () => {
+        try {
+          const list = await api.listProvidersByTenant(teamId, tenantName, clientId);
+          const found = Array.isArray(list) ? list.find((p: SocialProvider) => p.id === providerId) : null;
+          if (!cancelled) setTenantProvider(found ?? null);
+        } catch {
+          if (!cancelled) setTenantProvider(null);
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+  }, [isTenantMode, teamId, tenantName, clientId, providerId]);
 
   const handleCopy = async (text: string) => {
     try {
@@ -75,13 +96,18 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
 
     try {
       setDeleting(true);
-      await api.removeProvider(authConfigId, clientId, provider.id);
-      await invalidateAndRefetch();
+      if (isTenantMode && teamId && tenantName) {
+        await api.removeProviderByTenant(teamId, tenantName, clientId, provider.id);
+        router.push(`/dashboard/tenants?tenant=${encodeURIComponent(tenantName)}&client=${encodeURIComponent(clientId)}`);
+      } else if (isTenantMode && teamId && tenantName) {
+        await api.removeProviderByTenant(teamId, tenantName, clientId, provider.id);
+        await invalidateAndRefetch();
+        router.push(`/dashboard/tenants?tenant=${encodeURIComponent(tenantName!)}&client=${clientId}`);
+      }
       toast({
         title: 'Success',
         description: 'Provider deleted successfully',
       });
-      router.push(`/dashboard/auth-configs?authConfig=${authConfigId}&client=${clientId}`);
     } catch (error) {
       console.error('Error deleting provider:', error);
       toast({
@@ -97,14 +123,29 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
 
   const handleSuccess = async () => {
     setEditDialogOpen(false);
-    await invalidateAndRefetch();
+    if (isTenantMode && teamId && tenantName) {
+      try {
+        const list = await api.listProvidersByTenant(teamId, tenantName, clientId);
+        const found = Array.isArray(list) ? list.find((p: SocialProvider) => p.id === providerId) : null;
+        setTenantProvider(found ?? null);
+      } catch {
+        setTenantProvider(null);
+      }
+    } else {
+      await invalidateAndRefetch();
+    }
   };
 
   const handleRevealSecret = async () => {
     try {
       setLoadingReveal(true);
-      const { clientSecret } = await api.getProviderSecret(authConfigId, clientId, providerId);
-      setRevealedSecret(clientSecret);
+      if (isTenantMode && teamId && tenantName) {
+        const { clientSecret } = await api.getProviderSecretByTenant(teamId, tenantName, clientId, providerId);
+        setRevealedSecret(clientSecret);
+      } else if (isTenantMode && teamId && tenantName) {
+        const { clientSecret } = await api.getProviderSecretByTenant(teamId, tenantName, clientId, providerId);
+        setRevealedSecret(clientSecret);
+      }
       toast({
         title: 'Secret revealed',
         description: 'Copy and store it securely. It will not be shown again until you click Reveal.',
@@ -304,7 +345,8 @@ export function ProviderDetail({ authConfigId, clientId, providerId, onBack }: P
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
         onSuccess={handleSuccess}
-        authConfigId={authConfigId}
+        teamId={teamId ?? ''}
+        tenantName={tenantName ?? ''}
         clientId={clientId}
         provider={provider}
       />

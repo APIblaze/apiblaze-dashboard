@@ -30,8 +30,8 @@ interface DashboardShellProps {
   userId?: string | null;
   /** When in project scope: active tab and handler for project config submenu */
   projectSubmenu?: { activeTab: ProjectConfigTab; onTabChange: (tab: ProjectConfigTab) => void };
-  /** When on auth-configs page: drill-down context to show Auth Config > App Client > Provider in nav */
-  authConfigsSubmenu?: { authConfigId?: string | null; clientId?: string | null; providerId?: string | null };
+  /** When on tenants page: drill-down context (tenant → app client → provider). Use tenantName for tenant-based flow. */
+  authConfigsSubmenu?: { authConfigId?: string | null; tenantName?: string | null; clientId?: string | null; providerId?: string | null };
   /** When false (zero state, no projects): hide nav menu and submenu */
   hasProjects?: boolean;
 }
@@ -49,11 +49,11 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const isAuthConfigs = pathname === '/dashboard/auth-configs';
+  const isTenants = pathname === '/dashboard/tenants';
   const tab = searchParams.get('tab');
   const isTeamScope = selectorValue.type === 'team';
   const showNavAndSubmenu = hasProjects;
-  const showTeamSubMenu = showNavAndSubmenu && (isTeamScope || isAuthConfigs) && !projectSubmenu;
+  const showTeamSubMenu = showNavAndSubmenu && (isTeamScope || isTenants) && !projectSubmenu;
   const showProjectSubMenu = !!projectSubmenu;
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
@@ -80,10 +80,11 @@ export function DashboardShell({
                 teamId={teamId}
                 userId={userId}
                 authConfigId={authConfigsSubmenu?.authConfigId ?? undefined}
+                tenantName={authConfigsSubmenu?.tenantName ?? undefined}
                 clientId={authConfigsSubmenu?.clientId ?? undefined}
                 providerId={authConfigsSubmenu?.providerId ?? undefined}
-                showProjectsSection={!isAuthConfigs}
-                showAuthConfigsSection={isAuthConfigs}
+                showProjectsSection={!isTenants}
+                showAuthConfigsSection={isTenants}
                 className="min-w-[180px] shrink-0"
               />
             )}
@@ -104,7 +105,7 @@ export function DashboardShell({
               href="/dashboard"
               className={cn(
                 'px-4 py-2 text-sm font-medium rounded-md transition-colors',
-                !isAuthConfigs && !tab
+                !isTenants && !tab
                   ? 'bg-muted text-foreground'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
               )}
@@ -112,21 +113,21 @@ export function DashboardShell({
               Projects
             </Link>
             <Link
-              href="/dashboard/auth-configs"
+              href="/dashboard/tenants"
               className={cn(
                 'px-4 py-2 text-sm font-medium rounded-md transition-colors',
-                isAuthConfigs
+                isTenants
                   ? 'bg-muted text-foreground'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
               )}
             >
-              Auth Configs
+              Tenants
             </Link>
             <Link
               href="/dashboard?tab=settings"
               className={cn(
                 'px-4 py-2 text-sm font-medium rounded-md transition-colors',
-                !isAuthConfigs && tab === 'settings'
+                !isTenants && tab === 'settings'
                   ? 'bg-muted text-foreground'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
               )}
@@ -137,7 +138,7 @@ export function DashboardShell({
               href="/dashboard?tab=developers"
               className={cn(
                 'px-4 py-2 text-sm font-medium rounded-md transition-colors',
-                !isAuthConfigs && tab === 'developers'
+                !isTenants && tab === 'developers'
                   ? 'bg-muted text-foreground'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
               )}
@@ -148,7 +149,7 @@ export function DashboardShell({
               href="/dashboard?tab=profile"
               className={cn(
                 'px-4 py-2 text-sm font-medium rounded-md transition-colors',
-                !isAuthConfigs && tab === 'profile'
+                !isTenants && tab === 'profile'
                   ? 'bg-muted text-foreground'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
               )}
