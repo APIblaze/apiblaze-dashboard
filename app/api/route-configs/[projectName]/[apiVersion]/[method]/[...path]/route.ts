@@ -23,6 +23,7 @@ function mapToPoliciesFormat(entry: {
   post_response_policy_template?: string;
   cache_rules?: string;
   priority?: number;
+  authorization_enabled?: boolean;
 }) {
   function parseTemplate(s: string | undefined, fieldName: string): object[] | undefined {
     if (!s?.trim()) return undefined;
@@ -47,6 +48,7 @@ function mapToPoliciesFormat(entry: {
     authentication_config: { require_authentication: entry.require_authentication ?? true },
     cache_config: parseConfig(entry.cache_rules, 'cache_rules'),
     priority: entry.priority,
+    authorization_enabled: entry.authorization_enabled ?? false,
   };
 }
 

@@ -3,9 +3,11 @@ export interface RouteEntry {
   method: string;
   description: string;
   require_authentication: boolean;
+  authorization_enabled: boolean;
   pre_request_auth_template: string;
   post_response_policy_template: string;
   cache_rules: string;
+  priority?: number;
 }
 
 export interface RouteConfig {
@@ -24,6 +26,7 @@ export function getRoutesWithConfig(routes: RouteEntry[]): RouteEntry[] {
     const hasCacheConfig = cache.length > 0 && cache !== '{}';
     return (
       r.require_authentication === false ||
+      r.authorization_enabled === true ||
       (r.pre_request_auth_template?.trim() ?? '').length > 0 ||
       (r.post_response_policy_template?.trim() ?? '').length > 0 ||
       hasCacheConfig

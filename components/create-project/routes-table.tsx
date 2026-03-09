@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import type { RouteEntry } from './types';
 
@@ -81,7 +82,6 @@ function mergeWithExisting(
     existing.map((e) => [`${e.method}:${e.path}`, e])
   );
 
-  // Overlay existing config onto matching spec routes
   const specKeys = new Set(fromSpec.map(e => `${e.method}:${e.path}`));
   const specMerged = fromSpec.map((specEntry) => {
     const key = `${specEntry.method}:${specEntry.path}`;
@@ -89,7 +89,6 @@ function mergeWithExisting(
     return existingEntry ? { ...specEntry, ...existingEntry } : specEntry;
   });
 
-  // Also include policies-api routes not present in the spec so their templates are always visible
   const extraRoutes = existing.filter(e => !specKeys.has(`${e.method}:${e.path}`));
 
   return [...specMerged, ...extraRoutes];
@@ -105,13 +104,14 @@ interface RoutesTableProps {
   readOnly?: boolean;
   /** Optional ref to keep routes in sync for parent (e.g. when section unmounts on tab switch) */
   routesRef?: React.MutableRefObject<RouteEntry[]>;
-  /** When false, the "Enable Authorization" column is hidden (API-level kill switch is OFF) */
+  /** When false, the "Enable Authorization" toggle is hidden (API-level kill switch is OFF) */
   enforceAuthorization?: boolean;
 }
 
 export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
   function RoutesTable({ spec, existingRoutes, readOnly = false, routesRef: externalRoutesRef, enforceAuthorization = false }, ref) {
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+    const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
     const merged = useMemo(() => {
       const fromSpec = spec ? extractOperationsFromSpec(spec) : [];
@@ -119,10 +119,7 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
       return mergeWithExisting(fromSpec, existing);
     }, [spec, existingRoutes, externalRoutesRef]);
 
-    const pathGroups = useMemo(
-      () => groupByBasePath(merged),
-      [merged]
-    );
+    const pathGroups = useMemo(() => groupByBasePath(merged), [merged]);
 
     const internalRoutesRef = useRef<RouteEntry[]>(merged);
     useEffect(() => {
@@ -133,6 +130,18 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
     useImperativeHandle(ref, () => ({
       getRoutes: () => internalRoutesRef.current ?? [],
     }), []);
+
+    // Auto-select first route and auto-expand its group on load
+    useEffect(() => {
+      if (pathGroups.length > 0 && !selectedKey) {
+        const firstGroup = pathGroups[0];
+        const firstEntry = firstGroup.entries[0];
+        if (firstEntry) {
+          setSelectedKey(`${firstEntry.method}:${firstEntry.path}`);
+          setExpandedPaths(new Set([firstGroup.basePath]));
+        }
+      }
+    }, [pathGroups, selectedKey]);
 
     const togglePath = useCallback((basePath: string) => {
       setExpandedPaths((prev) => {
@@ -151,82 +160,119 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
       if (externalRoutesRef) externalRoutesRef.current = updated;
     }, [externalRoutesRef]);
 
+    const selectedEntry = useMemo(() => {
+      if (!selectedKey) return null;
+      const colonIdx = selectedKey.indexOf(':');
+      const method = selectedKey.substring(0, colonIdx);
+      const path = selectedKey.substring(colonIdx + 1);
+      return merged.find(e => e.method === method && e.path === path) ?? null;
+    }, [selectedKey, merged]);
+
     if (pathGroups.length === 0) {
       return null;
     }
 
     return (
-      <div className="w-full max-w-[80vw] min-w-0 rounded-lg border overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px] text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="text-left py-3 px-4 font-medium w-[180px]">Resource / Method</th>
-                <th className="text-left py-3 px-4 font-medium w-[70px]">Priority</th>
-                <th className="text-left py-3 px-4 font-medium w-[140px]">Description</th>
-                <th className="text-left py-3 px-4 font-medium w-[90px]">Require Authentication</th>
-                {enforceAuthorization && <th className="text-left py-3 px-4 font-medium w-[90px]">Enable Authorization</th>}
-                <th className="text-left py-3 px-4 font-medium min-w-[220px]">Check Policy <span className="font-normal text-muted-foreground text-xs">(blocks request if denied)</span></th>
-                <th className="text-left py-3 px-4 font-medium min-w-[220px]">Write Policy <span className="font-normal text-muted-foreground text-xs">(runs after 2xx response)</span></th>
-                <th className="text-left py-3 px-4 font-medium min-w-[180px]">Cache rules</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pathGroups.map((group) => {
-                const isExpanded = expandedPaths.has(group.basePath);
-                const showPathInRow = group.entries.some((e) => e.path !== group.basePath);
-                return (
-                  <React.Fragment key={group.basePath}>
-                    <tr
-                      className="border-b hover:bg-muted/30 cursor-pointer"
-                      onClick={() => togglePath(group.basePath)}
+      <div className="flex rounded-lg border overflow-hidden" style={{ minHeight: '460px', maxHeight: '72vh' }}>
+        {/* Left panel: route list */}
+        <div className="w-80 shrink-0 border-r overflow-y-auto bg-muted/20">
+          {pathGroups.map((group) => {
+            const isExpanded = expandedPaths.has(group.basePath);
+            const groupHasSelected = group.entries.some(e => `${e.method}:${e.path}` === selectedKey);
+            return (
+              <div key={group.basePath}>
+                <button
+                  type="button"
+                  className={cn(
+                    'w-full flex items-center gap-2 px-3 py-3.5 text-sm font-medium border-b text-left transition-colors',
+                    groupHasSelected
+                      ? 'bg-primary/10 text-primary hover:bg-primary/20'
+                      : 'hover:bg-muted/50'
+                  )}
+                  onClick={() => togglePath(group.basePath)}
+                >
+                  {isExpanded ? (
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="font-mono text-xs truncate flex-1">{group.basePath}</span>
+                  <Badge variant="secondary" className="text-xs shrink-0">
+                    {group.entries.length}
+                  </Badge>
+                </button>
+                {isExpanded && group.entries.map((entry) => {
+                  const key = `${entry.method}:${entry.path}`;
+                  const isSelected = selectedKey === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={cn(
+                        'w-full flex items-center gap-2 px-4 py-3.5 text-left border-b transition-colors',
+                        isSelected
+                          ? 'bg-primary/15 border-l-[3px] border-l-primary hover:bg-primary/25'
+                          : 'hover:bg-muted/40'
+                      )}
+                      onClick={() => setSelectedKey(key)}
                     >
-                      <td className="py-2 px-4">
-                        <div className="flex items-center gap-2">
-                          {isExpanded ? (
-                            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          )}
-                          <span className="font-mono text-sm">{group.basePath}</span>
-                          <Badge variant="secondary" className="text-xs">
-                            {group.entries.length}
-                          </Badge>
-                        </div>
-                      </td>
-                      <td colSpan={enforceAuthorization ? 7 : 6} className="py-2 px-4" />
-                    </tr>
-                    {isExpanded &&
-                      group.entries.map((entry) => (
-                        <RouteRow
-                          key={`${entry.path}:${entry.method}`}
-                          entry={entry}
-                          updateRouteInRef={updateRouteInRef}
-                          readOnly={readOnly}
-                          showPath={showPathInRow}
-                          enforceAuthorization={enforceAuthorization}
-                        />
-                      ))}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
+                      <MethodBadge method={entry.method} />
+                      <span className={cn('font-mono text-xs truncate', isSelected ? 'text-foreground font-medium' : 'text-muted-foreground')}>{entry.path}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Right panel: route detail */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {selectedEntry ? (
+            <RouteDetail
+              key={selectedKey!}
+              entry={selectedEntry}
+              updateRouteInRef={updateRouteInRef}
+              readOnly={readOnly}
+              enforceAuthorization={enforceAuthorization}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+              Select a route to configure
+            </div>
+          )}
         </div>
       </div>
     );
   }
 );
 
-interface RouteRowProps {
+function MethodBadge({ method }: { method: string }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        'text-xs shrink-0',
+        method === 'GET' && 'border-green-500/50 text-green-700 dark:text-green-400',
+        method === 'POST' && 'border-blue-500/50 text-blue-700 dark:text-blue-400',
+        method === 'PUT' && 'border-amber-500/50 text-amber-700 dark:text-amber-400',
+        method === 'PATCH' && 'border-amber-500/50 text-amber-700 dark:text-amber-400',
+        method === 'DELETE' && 'border-red-500/50 text-red-700 dark:text-red-400'
+      )}
+    >
+      {method}
+    </Badge>
+  );
+}
+
+interface RouteDetailProps {
   entry: RouteEntry;
   updateRouteInRef: (path: string, method: string, updates: Partial<RouteEntry>) => void;
   readOnly: boolean;
-  showPath?: boolean;
-  enforceAuthorization?: boolean;
+  enforceAuthorization: boolean;
 }
 
-function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false, enforceAuthorization = false }: RouteRowProps) {
+function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization }: RouteDetailProps) {
   const [preReqError, setPreReqError] = useState(false);
   const [postRespError, setPostRespError] = useState(false);
   const [cacheError, setCacheError] = useState(false);
@@ -237,24 +283,6 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false, enforce
   const [localAuth, setLocalAuth] = useState(entry.require_authentication);
   const [localAuthzEnabled, setLocalAuthzEnabled] = useState(entry.authorization_enabled);
   const [localPriority, setLocalPriority] = useState<number | undefined>(entry.priority ?? undefined);
-
-  useEffect(() => {
-    setLocalPreReq(entry.pre_request_auth_template);
-    setLocalPostResp(entry.post_response_policy_template);
-    setLocalCache(entry.cache_rules);
-    setLocalAuth(entry.require_authentication);
-    setLocalAuthzEnabled(entry.authorization_enabled);
-    setLocalPriority(entry.priority ?? undefined);
-  }, [
-    entry.path,
-    entry.method,
-    entry.pre_request_auth_template,
-    entry.post_response_policy_template,
-    entry.cache_rules,
-    entry.require_authentication,
-    entry.authorization_enabled,
-    entry.priority,
-  ]);
 
   const handleJsonBlur = (
     value: string,
@@ -267,140 +295,137 @@ function RouteRow({ entry, updateRouteInRef, readOnly, showPath = false, enforce
   };
 
   return (
-    <tr className="border-b bg-muted/20 hover:bg-muted/30">
-      <td className="py-2 px-4 pl-12">
-        <div className="flex flex-col gap-1">
-          {showPath && (
-            <span className="font-mono text-xs text-muted-foreground">{entry.path}</span>
-          )}
-          <Badge
-            variant="outline"
-            className={cn(
-              entry.method === 'GET' && 'border-green-500/50 text-green-700 dark:text-green-400',
-              entry.method === 'POST' && 'border-blue-500/50 text-blue-700 dark:text-blue-400',
-              entry.method === 'PUT' && 'border-amber-500/50 text-amber-700 dark:text-amber-400',
-              entry.method === 'PATCH' && 'border-amber-500/50 text-amber-700 dark:text-amber-400',
-              entry.method === 'DELETE' && 'border-red-500/50 text-red-700 dark:text-red-400'
-            )}
-          >
-            {entry.method}
-          </Badge>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="pb-4 border-b space-y-1.5">
+        <div className="flex items-center gap-3">
+          <MethodBadge method={entry.method} />
+          <span className="font-mono text-sm font-medium">{entry.path}</span>
         </div>
-      </td>
-      <td className="py-2 px-4">
-        {readOnly ? (
-          <span className="text-xs">{entry.priority ?? '—'}</span>
-        ) : (
-          <input
-            type="number"
-            min={1}
-            value={localPriority ?? ''}
-            onChange={(e) => setLocalPriority(e.target.value === '' ? undefined : Number(e.target.value))}
-            onBlur={(e) => {
-              const val = e.target.value === '' ? undefined : Number(e.target.value);
-              if (val === undefined || (Number.isInteger(val) && val >= 1)) {
-                updateRouteInRef(entry.path, entry.method, { priority: val });
-              }
-            }}
-            className="w-16 text-xs border rounded px-2 py-1 bg-background"
-            placeholder="auto"
-          />
+        {entry.description && (
+          <p className="text-sm text-muted-foreground">{entry.description}</p>
         )}
-      </td>
-      <td className="py-2 px-4">
-        <span className="text-muted-foreground text-xs whitespace-normal break-words block">
-          {entry.description || '—'}
-        </span>
-      </td>
-      <td className="py-2 px-4">
-        {readOnly ? (
-          <span>{localAuth ? 'Yes' : 'No'}</span>
-        ) : (
-          <Switch
-            checked={localAuth}
-            onCheckedChange={(checked) => {
-              setLocalAuth(checked);
-              updateRouteInRef(entry.path, entry.method, { require_authentication: checked });
-            }}
-          />
+      </div>
+
+      {/* Toggles + Priority row */}
+      <div className="flex flex-wrap items-center gap-8">
+        <div className="flex items-center gap-3">
+          <Label className="text-sm font-medium whitespace-nowrap">Require Authentication</Label>
+          {readOnly ? (
+            <span className="text-sm">{localAuth ? 'Yes' : 'No'}</span>
+          ) : (
+            <Switch
+              checked={localAuth}
+              onCheckedChange={(checked) => {
+                setLocalAuth(checked);
+                updateRouteInRef(entry.path, entry.method, { require_authentication: checked });
+              }}
+            />
+          )}
+        </div>
+
+        {enforceAuthorization && (
+          <div className="flex items-center gap-3">
+            <Label className="text-sm font-medium whitespace-nowrap">Enable Authorization</Label>
+            <Switch
+              checked={localAuthzEnabled}
+              onCheckedChange={(checked) => {
+                setLocalAuthzEnabled(checked);
+                updateRouteInRef(entry.path, entry.method, { authorization_enabled: checked });
+              }}
+            />
+          </div>
         )}
-      </td>
-      {enforceAuthorization && (
-        <td className="py-2 px-4">
-          <Switch
-            checked={localAuthzEnabled}
-            onCheckedChange={(checked) => {
-              setLocalAuthzEnabled(checked);
-              updateRouteInRef(entry.path, entry.method, { authorization_enabled: checked });
-            }}
-          />
-        </td>
-      )}
-      <td className="py-2 px-4">
+
+        <div className="flex items-center gap-3">
+          <Label className="text-sm font-medium">Priority</Label>
+          {readOnly ? (
+            <span className="text-sm">{localPriority ?? '—'}</span>
+          ) : (
+            <input
+              type="number"
+              min={1}
+              value={localPriority ?? ''}
+              onChange={(e) => setLocalPriority(e.target.value === '' ? undefined : Number(e.target.value))}
+              onBlur={(e) => {
+                const val = e.target.value === '' ? undefined : Number(e.target.value);
+                if (val === undefined || (Number.isInteger(val) && val >= 1)) {
+                  updateRouteInRef(entry.path, entry.method, { priority: val });
+                }
+              }}
+              className="w-20 text-sm border rounded px-2 py-1 bg-background"
+              placeholder="auto"
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Policy templates side-by-side */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">
+            Check Policy
+            <span className="ml-1.5 font-normal text-muted-foreground text-xs">(blocks request if denied)</span>
+          </Label>
+          {readOnly ? (
+            <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[120px]">
+              {entry.pre_request_auth_template || '—'}
+            </pre>
+          ) : (
+            <Textarea
+              value={localPreReq}
+              onChange={(e) => setLocalPreReq(e.target.value)}
+              onBlur={(e) => handleJsonBlur(e.target.value, 'pre_request_auth_template', setPreReqError)}
+              className={cn('font-mono text-xs', preReqError && 'border-red-500')}
+              placeholder={'{\n  "user": "user:{{JWT.sub}}",\n  "relation": "viewer",\n  "object": "reservation:{{PATH.id}}"\n}'}
+              rows={6}
+            />
+          )}
+          {preReqError && <p className="text-xs text-red-500">Invalid JSON</p>}
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">
+            Write Policy
+            <span className="ml-1.5 font-normal text-muted-foreground text-xs">(runs after 2xx response)</span>
+          </Label>
+          {readOnly ? (
+            <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[120px]">
+              {entry.post_response_policy_template || '—'}
+            </pre>
+          ) : (
+            <Textarea
+              value={localPostResp}
+              onChange={(e) => setLocalPostResp(e.target.value)}
+              onBlur={(e) => handleJsonBlur(e.target.value, 'post_response_policy_template', setPostRespError)}
+              className={cn('font-mono text-xs', postRespError && 'border-red-500')}
+              placeholder={'{\n  "user": "user:{{JWT.sub}}",\n  "relation": "owner",\n  "object": "reservation:{{RESPONSE.id}}"\n}'}
+              rows={6}
+            />
+          )}
+          {postRespError && <p className="text-xs text-red-500">Invalid JSON</p>}
+        </div>
+      </div>
+
+      {/* Cache rules */}
+      <div className="space-y-2">
+        <Label className="text-sm font-medium">Cache Rules</Label>
         {readOnly ? (
-          <pre className="font-mono text-xs whitespace-pre-wrap break-words">{entry.pre_request_auth_template || '—'}</pre>
-        ) : (
-          <Textarea
-            value={localPreReq}
-            onChange={(e) => setLocalPreReq(e.target.value)}
-            onBlur={(e) =>
-              handleJsonBlur(
-                e.target.value,
-                'pre_request_auth_template',
-                setPreReqError
-              )
-            }
-            className={cn(
-              'font-mono text-xs min-h-[60px]',
-              preReqError && 'border-red-500'
-            )}
-            placeholder={'{"user":"user:{{JWT.sub}}","relation":"viewer","object":"reservation:{{PATH.id}}"}'}
-            rows={2}
-          />
-        )}
-      </td>
-      <td className="py-2 px-4">
-        {readOnly ? (
-          <pre className="font-mono text-xs whitespace-pre-wrap break-words">{entry.post_response_policy_template || '—'}</pre>
-        ) : (
-          <Textarea
-            value={localPostResp}
-            onChange={(e) => setLocalPostResp(e.target.value)}
-            onBlur={(e) =>
-              handleJsonBlur(
-                e.target.value,
-                'post_response_policy_template',
-                setPostRespError
-              )
-            }
-            className={cn(
-              'font-mono text-xs min-h-[60px]',
-              postRespError && 'border-red-500'
-            )}
-            placeholder={'{"user":"user:{{JWT.sub}}","relation":"owner","object":"reservation:{{RESPONSE.id}}"}'}
-            rows={2}
-          />
-        )}
-      </td>
-      <td className="py-2 px-4">
-        {readOnly ? (
-          <pre className="font-mono text-xs whitespace-pre-wrap break-words">{entry.cache_rules || '—'}</pre>
+          <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[60px]">
+            {entry.cache_rules || '—'}
+          </pre>
         ) : (
           <Textarea
             value={localCache}
             onChange={(e) => setLocalCache(e.target.value)}
-            onBlur={(e) =>
-              handleJsonBlur(e.target.value, 'cache_rules', setCacheError)
-            }
-            className={cn(
-              'font-mono text-xs min-h-[60px]',
-              cacheError && 'border-red-500'
-            )}
+            onBlur={(e) => handleJsonBlur(e.target.value, 'cache_rules', setCacheError)}
+            className={cn('font-mono text-xs', cacheError && 'border-red-500')}
             placeholder=""
-            rows={2}
+            rows={3}
           />
         )}
-      </td>
-    </tr>
+        {cacheError && <p className="text-xs text-red-500">Invalid JSON</p>}
+      </div>
+    </div>
   );
 }

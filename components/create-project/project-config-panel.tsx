@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Loader2, Rocket, ChevronRight, Save } from 'lucide-react';
@@ -102,7 +102,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       opaqueTokenParams: '?access_token={token}',
       opaqueTokenBody: 'token={token}',
       useAuthConfig: false,
-      defaultTenant: 'MyDefaultTenant',
+      defaultTenant: 'api',
       authConfigId: undefined,
       appClientId: undefined,
       defaultAppClient: undefined,
@@ -163,7 +163,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     opaqueTokenParams: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.params as string || '?access_token={token}',
     opaqueTokenBody: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.body as string || 'token={token}',
     useAuthConfig: !!(projectConfig?.auth_config_id as string),
-    defaultTenant: (projectConfig?.default_tenant as string) || 'MyDefaultTenant',
+    defaultTenant: (projectConfig?.default_tenant as string) || 'api',
     authConfigId: projectConfig?.auth_config_id as string | undefined,
     appClientId: undefined,
     defaultAppClient: (projectConfig?.default_app_client_id || projectConfig?.defaultAppClient) as string | undefined,
@@ -241,8 +241,19 @@ export function ProjectConfigPanel({
   const isDeployingRef = useRef(false);
   const routesRef = useRef<RouteEntry[]>([]);
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
+  // Stable object reference so RoutesSection doesn't reload the spec on every render.
+  const routesSectionProject = useMemo(
+    () => currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentProject?.project_id, currentProject?.api_version]
+  );
   const getAppClients = useDashboardCacheStore((s) => s.getAppClients);
   const updateProjectInCache = useDashboardCacheStore((s) => s.updateProjectInCache);
+  // Track project identity so we only reset config when switching to a different project,
+  // not when the same project's data is updated (e.g. after a save).
+  const currentProjectKeyRef = useRef<string | null>(
+    project ? `${project.project_id}:${project.api_version}` : null
+  );
 
   useEffect(() => {
     setCurrentProject(project);
@@ -251,7 +262,9 @@ export function ProjectConfigPanel({
   const [config, setConfig] = useState<ProjectConfig>(() => getInitialConfig(project));
 
   useEffect(() => {
-    if (!isDeployingRef.current) {
+    const newKey = currentProject ? `${currentProject.project_id}:${currentProject.api_version}` : null;
+    if (!isDeployingRef.current && newKey !== currentProjectKeyRef.current) {
+      currentProjectKeyRef.current = newKey;
       setConfig(getInitialConfig(currentProject));
     }
   }, [currentProject]);
@@ -423,7 +436,7 @@ export function ProjectConfigPanel({
             const firstProviderType = config.providers?.[0]?.type ?? config.socialProvider;
             const appClient = await api.createAppClient(currentAuthConfigId, {
               name: `${config.projectName}-appclient`,
-              tenant: (config.defaultTenant?.trim() || 'MyDefaultTenant'),
+              tenant: (config.defaultTenant?.trim() || 'api'),
               scopes: config.scopes,
               providerType: firstProviderType,
               authorizedCallbackUrls: finalCallbackUrls,
@@ -493,7 +506,7 @@ export function ProjectConfigPanel({
               bringMyOwnOAuth: config.bringOwnProvider,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
-              defaultTenant: config.defaultTenant?.trim() || 'MyDefaultTenant',
+              defaultTenant: config.defaultTenant?.trim() || 'api',
             });
             rollbackAuthConfigId = result.authConfigId;
             authConfigId = result.authConfigId;
@@ -801,7 +814,7 @@ export function ProjectConfigPanel({
               config={config}
               updateConfig={updateConfig}
               onGoToGeneral={() => setActiveTab('general')}
-              project={{ project_id: currentProject.project_id, api_version: currentProject.api_version }}
+              project={routesSectionProject}
               routesRef={routesRef}
             />
           )}

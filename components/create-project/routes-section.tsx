@@ -8,8 +8,9 @@ import { ProjectConfig } from './types';
 import type { RouteEntry } from './types';
 import { fetchOpenApiSpec } from '@/lib/api/openapi';
 import { getRouteConfig } from '@/lib/api/route-configs';
-import { FileJson, Loader2, ArrowRight } from 'lucide-react';
+import { FileJson, Loader2, ArrowRight, Info } from 'lucide-react';
 import * as yaml from 'js-yaml';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 interface RoutesSectionProps {
   config: ProjectConfig;
@@ -137,7 +138,8 @@ export function RoutesSection({
   }, [hasSpecSource, hasUpload, hasLoadedProject, projectProp, project, loadSpec]);
 
   useEffect(() => {
-    if (projectProp && !config.routeConfig) {
+    // Skip fetch if routesRef already has data (e.g. after a save that reset config.routeConfig)
+    if (projectProp && !config.routeConfig && !routesRefProp?.current?.length) {
       getRouteConfig(projectProp.project_id, projectProp.api_version)
         .then((rc) => {
           if (rc.routes.length > 0) {
@@ -156,11 +158,37 @@ export function RoutesSection({
 
   return (
     <div className="space-y-6">
-      <div>
-        <Label className="text-base font-semibold">Routes</Label>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configure per-route settings: require authentication, OpenFGA templates, and cache rules. Expand each resource to edit methods.
-        </p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <Label className="text-base font-semibold">Routes</Label>
+          <p className="text-sm text-muted-foreground mt-1">
+            Configure per-route settings: require authentication, OpenFGA templates, and cache rules. Expand each resource to edit methods.
+          </p>
+        </div>
+        {config.enforceAuthorization && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="shrink-0 rounded-full p-1 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                aria-label="Authorization info"
+              >
+                <Info className="h-4 w-4" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-96 text-sm space-y-3 p-5" align="end">
+              <p className="font-semibold text-blue-800 dark:text-blue-300">Authorization is enabled</p>
+              <p className="text-sm text-muted-foreground">
+                Make sure an OpenFGA store and authorization model are configured for this project. Toggle <strong>Enable Authorization</strong> per route, then fill in the policy templates.
+              </p>
+              <div className="text-xs font-mono text-muted-foreground border rounded p-3 bg-muted/40 leading-6">
+                <div>{'{{JWT.sub}}'} · {'{{JWT.email}}'} · {'{{JWT.username}}'}</div>
+                <div>{'{{PATH.paramName}}'} · {'{{QUERY.paramName}}'}</div>
+                <div>{'{{BODY.field}}'} · {'{{RESPONSE.field}}'}</div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
       </div>
 
       {showEmptyState && (
@@ -202,6 +230,7 @@ export function RoutesSection({
             existingRoutes={existingRoutes}
             readOnly={false}
             routesRef={routesRefProp}
+            enforceAuthorization={config.enforceAuthorization}
           />
         </div>
       )}
