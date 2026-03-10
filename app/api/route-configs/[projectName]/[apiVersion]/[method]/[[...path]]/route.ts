@@ -127,23 +127,27 @@ export async function PUT(
 
     // Try PUT first (update existing route).
     // On 404 the route doesn't exist yet — fall back to POST /route to create it.
-    let res = await fetch(putUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...policiesBody, resource: routePath }),
-      signal: controller.signal,
-    });
-
-    if (res.status === 404) {
-      const postUrl = `https://${projectName}.${POLICIES_API_DOMAIN}/route?api_version=${encodeURIComponent(apiVersion)}`;
-      res = await fetch(postUrl, {
-        method: 'POST',
+    let res: Response;
+    try {
+      res = await fetch(putUrl, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method: method.toUpperCase(), resource: routePath, ...policiesBody }),
+        body: JSON.stringify({ ...policiesBody, resource: routePath }),
         signal: controller.signal,
       });
+
+      if (res.status === 404) {
+        const postUrl = `https://${projectName}.${POLICIES_API_DOMAIN}/route?api_version=${encodeURIComponent(apiVersion)}`;
+        res = await fetch(postUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: method.toUpperCase(), resource: routePath, ...policiesBody }),
+          signal: controller.signal,
+        });
+      }
+    } finally {
+      clearTimeout(timer);
     }
-    clearTimeout(timer);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as { error?: string };
