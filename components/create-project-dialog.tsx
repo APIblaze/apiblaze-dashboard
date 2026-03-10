@@ -1084,6 +1084,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       const payload: Record<string, unknown> = {
         default_app_client_id: config.defaultAppClient || null,
         requests_auth,
+        authorization: { enforce_authorization: config.enforceAuthorization },
       };
       await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
       toast({ title: 'Config Saved', description: 'Project configuration has been updated successfully.' });

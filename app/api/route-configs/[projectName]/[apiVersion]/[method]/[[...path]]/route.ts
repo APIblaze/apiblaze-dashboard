@@ -52,10 +52,11 @@ function mapToPoliciesFormat(entry: {
   };
 }
 
-type Params = { projectName: string; apiVersion: string; method: string; path: string[] };
+type Params = { projectName: string; apiVersion: string; method: string; path?: string[] };
 
-// Reconstruct the API route path from the [...path] catch-all segments.
+// Reconstruct the API route path from the [[...path]] catch-all segments.
 // e.g. params.path = ['api', 'v1', 'users', '{id}'] → '/api/v1/users/{id}'
+// params.path is undefined/empty for root endpoints (path = '/').
 // Encode { and } for the URL but keep slashes natural.
 function buildPoliciesUrl(projectName: string, apiVersion: string, method: string, pathSegments: string[]): string {
   const routePath = '/' + pathSegments.join('/');
@@ -102,7 +103,8 @@ export async function PUT(
     const ownershipError = await verifyOwnership(projectName, apiVersion);
     if (ownershipError) return NextResponse.json({ error: ownershipError.error }, { status: ownershipError.status });
 
-    const routePath = '/' + pathSegments.join('/');
+    const segments = pathSegments ?? [];
+    const routePath = '/' + segments.join('/');
 
     let body: Record<string, unknown>;
     try {
@@ -118,7 +120,10 @@ export async function PUT(
       return NextResponse.json({ error: e instanceof SyntaxError ? e.message : 'Invalid config field' }, { status: 400 });
     }
 
-    const putUrl = buildPoliciesUrl(projectName, apiVersion, method, pathSegments);
+    const putUrl = buildPoliciesUrl(projectName, apiVersion, method, segments);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
 
     // Try PUT first (update existing route).
     // On 404 the route doesn't exist yet — fall back to POST /route to create it.
@@ -126,6 +131,7 @@ export async function PUT(
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...policiesBody, resource: routePath }),
+      signal: controller.signal,
     });
 
     if (res.status === 404) {
@@ -134,8 +140,10 @@ export async function PUT(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ method: method.toUpperCase(), resource: routePath, ...policiesBody }),
+        signal: controller.signal,
       });
     }
+    clearTimeout(timer);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as { error?: string };
@@ -161,9 +169,11 @@ export async function DELETE(
     }
     const ownershipError = await verifyOwnership(projectName, apiVersion);
     if (ownershipError) return NextResponse.json({ error: ownershipError.error }, { status: ownershipError.status });
-    const url = buildPoliciesUrl(projectName, apiVersion, method, pathSegments);
+    const url = buildPoliciesUrl(projectName, apiVersion, method, pathSegments ?? []);
 
-    const res = await fetch(url, { method: 'DELETE' });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    const res = await fetch(url, { method: 'DELETE', signal: controller.signal }).finally(() => clearTimeout(timer));
 
     if (!res.ok && res.status !== 404) {
       const err = await res.json().catch(() => ({})) as { error?: string };

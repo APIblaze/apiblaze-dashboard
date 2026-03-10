@@ -29,7 +29,8 @@ export function getRoutesWithConfig(routes: RouteEntry[]): RouteEntry[] {
       r.authorization_enabled === true ||
       (r.pre_request_auth_template?.trim() ?? '').length > 0 ||
       (r.post_response_policy_template?.trim() ?? '').length > 0 ||
-      hasCacheConfig
+      hasCacheConfig ||
+      r.priority !== undefined
     );
   });
 }

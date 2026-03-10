@@ -713,7 +713,7 @@ export function ProjectConfigPanel({
     } finally {
       setIsSavingConfig(false);
     }
-  }, [currentProject, config, onProjectUpdate, toast]);
+  }, [currentProject, config, onProjectUpdate, toast, updateProjectInCache]);
 
   const handleDelete = useCallback(async () => {
     if (!currentProject) return;
