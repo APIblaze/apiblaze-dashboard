@@ -284,6 +284,17 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization }
   const [localAuthzEnabled, setLocalAuthzEnabled] = useState(entry.authorization_enabled);
   const [localPriority, setLocalPriority] = useState<number | undefined>(entry.priority ?? undefined);
 
+  // Sync local state when entry data changes due to async loads (spec then routes).
+  // Safe: entry only changes from data loads, not from updateRouteInRef user edits.
+  useEffect(() => {
+    setLocalPreReq(entry.pre_request_auth_template);
+    setLocalPostResp(entry.post_response_policy_template);
+    setLocalCache(entry.cache_rules);
+    setLocalAuth(entry.require_authentication);
+    setLocalAuthzEnabled(entry.authorization_enabled);
+    setLocalPriority(entry.priority ?? undefined);
+  }, [entry]);
+
   const handleJsonBlur = (
     value: string,
     field: 'pre_request_auth_template' | 'post_response_policy_template' | 'cache_rules',

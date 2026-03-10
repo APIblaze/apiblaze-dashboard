@@ -240,8 +240,12 @@ export function ProjectConfigPanel({
   const [currentProject, setCurrentProject] = useState<Project | null>(project);
   const isDeployingRef = useRef(false);
   const routesRef = useRef<RouteEntry[]>([]);
+  const currentProjectKeyRef = useRef<string | null>(
+    project ? `${project.project_id}:${project.api_version}` : null
+  );
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
   const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
+  const updateProjectInCache = useDashboardCacheStore((s) => s.updateProjectInCache);
 
   useEffect(() => {
     setCurrentProject(project);
@@ -260,6 +264,11 @@ export function ProjectConfigPanel({
   const updateConfig = useCallback((updates: Partial<ProjectConfig>) => {
     setConfig((prev) => ({ ...prev, ...updates }));
   }, []);
+
+  const routesSectionProject = useMemo(
+    () => currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null,
+    [currentProject?.project_id, currentProject?.api_version]
+  );
 
   const isSourceConfigured = () => {
     if (!config.projectName) return false;
@@ -783,17 +792,6 @@ export function ProjectConfigPanel({
                 onProjectUpdate?.(updated);
               }}
               teamId={currentProject?.team_id ?? teamId}
-            />
-          )}
-          {activeTab === 'authorization' && (
-            <AuthorizationSection
-              project={currentProject}
-              config={config}
-              updateConfig={updateConfig}
-              onProjectUpdate={(updated) => {
-                setCurrentProject(updated);
-                onProjectUpdate?.(updated);
-              }}
             />
           )}
           {activeTab === 'authorization' && (

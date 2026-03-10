@@ -65,7 +65,7 @@ function parseTuple(template: string): ParsedTuple | null {
 
 function getTenantId(project: Project): string {
   const cfg = project.config as Record<string, unknown> | undefined;
-  return (cfg?.default_tenant as string) || 'MyDefaultTenant';
+  return (cfg?.default_tenant as string) || 'api';
 }
 
 const POLICIES_API_DOMAIN =
@@ -229,14 +229,14 @@ function EnforcementCard({
       {/* Coverage summary */}
       <CardContent className="space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          {!routesLoading && routes.length > 0 && (
+          {!routesLoading && routes.length > 0 && enforceAuthorization && (
             <div className="flex items-center gap-4 text-sm">
               <span className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
                 <ShieldCheck className="w-4 h-4" />
                 <span>{coveredCount} / {routes.length} routes covered</span>
               </span>
               {uncoveredCount > 0 && (
-                <span className={`flex items-center gap-1.5 ${enforceAuthorization ? 'text-orange-600 dark:text-orange-400' : 'text-muted-foreground'}`}>
+                <span className="flex items-center gap-1.5 text-orange-600 dark:text-orange-400">
                   <ShieldOff className="w-4 h-4" />
                   <span>{uncoveredCount} missing {uncoveredCount === 1 ? 'policy' : 'policies'}</span>
                 </span>

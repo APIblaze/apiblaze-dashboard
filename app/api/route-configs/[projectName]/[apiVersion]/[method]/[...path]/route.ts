@@ -25,8 +25,9 @@ function mapToPoliciesFormat(entry: {
   priority?: number;
   authorization_enabled?: boolean;
 }) {
-  function parseTemplate(s: string | undefined, fieldName: string): object[] | undefined {
-    if (!s?.trim()) return undefined;
+  // made by kevin temporary to see if this properly fixes
+  function parseTemplate(s: string | undefined, fieldName: string): object[] {
+    if (!s?.trim()) return [];
     try {
       const parsed = JSON.parse(s);
       return Array.isArray(parsed) ? parsed : [parsed];
