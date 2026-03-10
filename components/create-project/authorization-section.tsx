@@ -102,7 +102,7 @@ function RouteRow({ route, enforced }: { route: RouteEntry; enforced: boolean })
   const hasCheck = (route.pre_request_auth_template?.trim() ?? '') !== '';
   const hasWrite = (route.post_response_policy_template?.trim() ?? '') !== '';
   const hasPolicy = hasCheck || hasWrite;
-  const willDeny = enforced && !hasPolicy;
+  const willDeny = enforced && route.authorization_enabled && !hasPolicy;
 
   return (
     <div

@@ -25,7 +25,6 @@ function mapToPoliciesFormat(entry: {
   priority?: number;
   authorization_enabled?: boolean;
 }) {
-  // made by kevin temporary to see if this properly fixes
   function parseTemplate(s: string | undefined, fieldName: string): object[] {
     if (!s?.trim()) return [];
     try {
