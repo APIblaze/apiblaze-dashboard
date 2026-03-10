@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/lib/next-auth';
+import { createAPIBlazeClient } from '@/lib/apiblaze-client';
+import { getUserClaims } from '@/app/api/projects/_utils';
 
 // ─── ROUTE CONFIG STORAGE DECISION ───────────────────────────────────────────
 // Proxies to policies-api (*.policies.apiblaze.com/route/*).
@@ -63,20 +63,45 @@ function buildPoliciesUrl(projectName: string, apiVersion: string, method: strin
   return `https://${projectName}.${POLICIES_API_DOMAIN}/route/${encodeURIComponent(method)}${encodedPath}?api_version=${encodeURIComponent(apiVersion)}`;
 }
 
+// ─── Ownership check ──────────────────────────────────────────────────────────
+// Uses checkProjectName (admin-api) to verify the session user's team owns
+// the project before allowing writes to policies-api.
+//
+// ALTERNATIVE: if this adds too much latency, move the check into policies-api
+// itself (e.g. validate a signed JWT passed as a header) so the round-trip to
+// admin-api is eliminated. For now the extra hop is acceptable since route-config
+// writes are infrequent (only on Save, not per-request).
+async function verifyOwnership(projectName: string, apiVersion: string): Promise<{ error: string; status: number } | null> {
+  try {
+    const userClaims = await getUserClaims();
+    const client = createAPIBlazeClient({
+      apiKey: process.env.INTERNAL_API_KEY || '',
+      jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
+    });
+    const ownership = await client.checkProjectName(userClaims, projectName, apiVersion);
+    if (!ownership.project_id) return { error: 'Project not found', status: 404 };
+    // api_version is null when another team owns this project name
+    if (!ownership.api_version) return { error: 'Forbidden', status: 403 };
+    return null;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Unauthorized';
+    if (msg.includes('Unauthorized') || msg.includes('no session')) return { error: 'Unauthorized', status: 401 };
+    return { error: 'Failed to verify project ownership', status: 500 };
+  }
+}
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<Params> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const { projectName, apiVersion, method, path: pathSegments } = await params;
     if (!/^[a-z0-9]+$/.test(projectName)) {
       return NextResponse.json({ error: 'Invalid project name' }, { status: 400 });
     }
+    const ownershipError = await verifyOwnership(projectName, apiVersion);
+    if (ownershipError) return NextResponse.json({ error: ownershipError.error }, { status: ownershipError.status });
+
     const routePath = '/' + pathSegments.join('/');
 
     let body: Record<string, unknown>;
@@ -130,15 +155,12 @@ export async function DELETE(
   { params }: { params: Promise<Params> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const { projectName, apiVersion, method, path: pathSegments } = await params;
     if (!/^[a-z0-9]+$/.test(projectName)) {
       return NextResponse.json({ error: 'Invalid project name' }, { status: 400 });
     }
+    const ownershipError = await verifyOwnership(projectName, apiVersion);
+    if (ownershipError) return NextResponse.json({ error: ownershipError.error }, { status: ownershipError.status });
     const url = buildPoliciesUrl(projectName, apiVersion, method, pathSegments);
 
     const res = await fetch(url, { method: 'DELETE' });

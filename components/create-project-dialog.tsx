@@ -915,6 +915,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
           accountMonthlyQuota: 30000,
         },
         requests_auth,
+        authorization: { enforce_authorization: config.enforceAuthorization },
       };
       
       console.log('[CreateProject] ⚠️ CRITICAL: Project data being sent to API:', {

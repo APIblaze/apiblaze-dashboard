@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/lib/next-auth';
+import { createAPIBlazeClient } from '@/lib/apiblaze-client';
+import { getUserClaims } from '@/app/api/projects/_utils';
 
 // ─── ROUTE CONFIG STORAGE DECISION ───────────────────────────────────────────
 // Proxies to policies-api (*.policies.apiblaze.com) rather than admin-api
@@ -46,14 +46,26 @@ export async function GET(
   { params }: { params: Promise<{ projectName: string; apiVersion: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const { projectName, apiVersion } = await params;
     if (!/^[a-z0-9]+$/.test(projectName)) {
       return NextResponse.json({ error: 'Invalid project name' }, { status: 400 });
+    }
+
+    // Ownership check — same pattern as the PUT/DELETE sibling route.
+    // Any logged-in user could otherwise read another project's authorization policy templates.
+    try {
+      const userClaims = await getUserClaims();
+      const client = createAPIBlazeClient({
+        apiKey: process.env.INTERNAL_API_KEY || '',
+        jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
+      });
+      const ownership = await client.checkProjectName(userClaims, projectName, apiVersion);
+      if (!ownership.project_id) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+      if (!ownership.api_version) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      const status = msg.includes('Unauthorized') || msg.includes('no session') ? 401 : 500;
+      return NextResponse.json({ error: status === 401 ? 'Unauthorized' : 'Failed to verify project ownership' }, { status });
     }
     const url = `https://${projectName}.${POLICIES_API_DOMAIN}/routes?api_version=${encodeURIComponent(apiVersion)}`;
     const controller = new AbortController();

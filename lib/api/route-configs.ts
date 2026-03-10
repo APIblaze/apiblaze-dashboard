@@ -72,7 +72,9 @@ export async function putRouteConfig(
   const toDelete = routes.filter((r) => !toSaveKeys.has(`${r.method}:${r.path}`));
   await Promise.all(
     toDelete.map((entry) =>
-      deleteRouteEntry(projectId, apiVersion, entry.path, entry.method).catch(() => {})
+      deleteRouteEntry(projectId, apiVersion, entry.path, entry.method).catch((err) => {
+        console.warn('[putRouteConfig] Failed to delete stale route entry:', entry.method, entry.path, err);
+      })
     )
   );
 

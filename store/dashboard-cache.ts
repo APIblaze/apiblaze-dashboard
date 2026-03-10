@@ -6,6 +6,27 @@
  */
 
 import { create } from 'zustand';
+
+function deepMerge(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...base };
+  for (const key of Object.keys(patch)) {
+    const patchVal = patch[key];
+    const baseVal = base[key];
+    if (
+      patchVal !== null &&
+      typeof patchVal === 'object' &&
+      !Array.isArray(patchVal) &&
+      baseVal !== null &&
+      typeof baseVal === 'object' &&
+      !Array.isArray(baseVal)
+    ) {
+      result[key] = deepMerge(baseVal as Record<string, unknown>, patchVal as Record<string, unknown>);
+    } else {
+      result[key] = patchVal;
+    }
+  }
+  return result;
+}
 import { listProjects } from '@/lib/api/projects';
 import { api } from '@/lib/api';
 import type { Project } from '@/types/project';
@@ -215,7 +236,7 @@ export const useDashboardCacheStore = create<DashboardCacheState & DashboardCach
     const existing = projects[idx];
     const updated = {
       ...existing,
-      config: { ...(existing.config as Record<string, unknown> ?? {}), ...configPatch },
+      config: deepMerge(existing.config as Record<string, unknown> ?? {}, configPatch),
     };
     set({ projects: [...projects.slice(0, idx), updated, ...projects.slice(idx + 1)] });
   },
