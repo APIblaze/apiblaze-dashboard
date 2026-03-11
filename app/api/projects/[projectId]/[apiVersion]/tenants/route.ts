@@ -73,12 +73,12 @@ export async function POST(
     console.error('Error attaching tenant:', error);
 
     const message = error instanceof Error ? error.message : 'Unknown error';
-    // Surface the original backend details if available (APIBlazeError preserves body.details)
-    const details = error instanceof APIBlazeError
-      ? (error.body.details ?? error.body.error ?? message)
-      : message;
+    const upstreamDetails =
+      error instanceof APIBlazeError
+        ? error.body?.details ?? error.body?.error ?? message
+        : message;
 
-    if (message.includes('Unauthorized') || String(details).includes('Unauthorized')) {
+    if (message.includes('Unauthorized') || String(upstreamDetails).includes('Unauthorized')) {
       return NextResponse.json(
         { error: 'Unauthorized', details: 'Please sign in' },
         { status: 401 }
@@ -86,8 +86,12 @@ export async function POST(
     }
 
     const status = error instanceof APIBlazeError ? error.status : 500;
+    console.error('Upstream attach tenant error details:', upstreamDetails);
     return NextResponse.json(
-      { error: 'Failed to attach tenant', details },
+      {
+        error: 'Failed to attach tenant',
+        details: 'An internal error occurred',
+      },
       { status: status >= 400 ? status : 500 }
     );
   }

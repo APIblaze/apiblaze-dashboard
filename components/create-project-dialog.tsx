@@ -301,6 +301,13 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
 
   const [config, setConfig] = useState<ProjectConfig>(getInitialConfig());
 
+  // Reset selected auth tenant when dialog context changes (new open or different project)
+  useEffect(() => {
+    if (open) {
+      setSelectedAuthTenant(undefined);
+    }
+  }, [open, project?.project_id, project?.api_version]);
+
   // When dialog opens with openToGitHub flag, ensure we're on General tab and GitHub source
   useEffect(() => {
     if (open && openToGitHub) {
@@ -651,9 +658,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             return;
           }
 
-          const tenantName = 'api';
+          const tenantName = selectedAuthTenant || 'api';
           try {
-            // 1. Ensure tenant 'api' exists
+            // 1. Ensure tenant exists
             const tenantsRes = await api.getTeamTenants(teamId, true);
             const tenantsList = Array.isArray(tenantsRes.tenants) ? tenantsRes.tenants : [];
             const hasApiTenant = tenantsList.some(

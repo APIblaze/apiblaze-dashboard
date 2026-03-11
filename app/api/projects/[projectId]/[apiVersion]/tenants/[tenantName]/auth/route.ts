@@ -30,11 +30,12 @@ export async function GET(
     console.error('Error getting tenant auth config:', error);
 
     const message = error instanceof Error ? error.message : 'Unknown error';
-    const details = error instanceof APIBlazeError
-      ? (error.body.details ?? error.body.error ?? message)
-      : message;
+    const upstreamDetails =
+      error instanceof APIBlazeError
+        ? error.body?.details ?? error.body?.error ?? message
+        : message;
 
-    if (message.includes('Unauthorized') || String(details).includes('Unauthorized')) {
+    if (message.includes('Unauthorized') || String(upstreamDetails).includes('Unauthorized')) {
       return NextResponse.json(
         { error: 'Unauthorized', details: 'Please sign in' },
         { status: 401 }
@@ -42,8 +43,12 @@ export async function GET(
     }
 
     const status = error instanceof APIBlazeError ? error.status : 500;
+    console.error('Upstream tenant auth config error details:', upstreamDetails);
     return NextResponse.json(
-      { error: 'Failed to get tenant auth config', details },
+      {
+        error: 'Failed to get tenant auth config',
+        details: 'An internal error occurred',
+      },
       { status: status >= 400 ? status : 500 }
     );
   }

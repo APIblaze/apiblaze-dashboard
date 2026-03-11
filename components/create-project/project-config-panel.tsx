@@ -133,6 +133,12 @@ function getInitialConfig(project: Project | null): ProjectConfig {
   const projectConfig = project?.config as Record<string, unknown> | undefined;
   const specSource = project?.spec_source;
   if (!specSource) return getInitialConfig(null);
+  const requestsAuth = projectConfig?.requests_auth as Record<string, unknown> | undefined;
+  const jwtConfig = requestsAuth?.jwt as Record<string, unknown> | undefined;
+  const apiKeyConfig = requestsAuth?.api_key as Record<string, unknown> | undefined;
+  const opaqueConfig =
+    (requestsAuth?.opaque as Record<string, unknown> | undefined) ??
+    (requestsAuth?.opaque_token as Record<string, unknown> | undefined);
   return {
     projectName: project?.display_name || '',
     apiVersion: project?.api_version || '1.0.0',
@@ -147,14 +153,64 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     enableSocialAuth: true,
     // Auth fields: bootstrap from project-level config so the UI is correct on first render;
     // getTenantAuthConfig will overwrite these with tenant-level values once it loads.
-    requestsAuthMode: ((projectConfig?.requests_auth as Record<string, unknown> | undefined)?.mode as 'authenticate' | 'passthrough' | undefined) ?? 'passthrough',
-    requestsAuthMethods: ((projectConfig?.requests_auth as Record<string, unknown> | undefined)?.methods as ('jwt' | 'opaque' | 'api_key')[] | undefined) ?? ['jwt'],
-    requireApiKeyXEndUserId: false,
-    allowedPairs: (((projectConfig?.requests_auth as Record<string, unknown> | undefined)?.jwt as Record<string, unknown> | undefined)?.allowed_pairs as Array<{ iss?: string; aud?: string }> | undefined)?.filter(p => p?.iss && p?.aud).map(p => ({ iss: p.iss!, aud: p.aud! })) ?? [],
-    opaqueTokenEndpoint: '',
-    opaqueTokenMethod: 'GET' as 'GET' | 'POST',
-    opaqueTokenParams: '?access_token={token}',
-    opaqueTokenBody: 'token={token}',
+    requestsAuthMode:
+      (requestsAuth?.mode as 'authenticate' | 'passthrough' | undefined) ?? 'passthrough',
+    requestsAuthMethods:
+      (requestsAuth?.methods as ('jwt' | 'opaque' | 'api_key')[] | undefined) ?? ['jwt'],
+    requireApiKeyXEndUserId:
+      (typeof requestsAuth?.require_api_key_x_end_user_id === 'boolean'
+        ? (requestsAuth.require_api_key_x_end_user_id as boolean)
+        : (apiKeyConfig?.require_x_end_user_id as boolean | undefined)) ?? false,
+    allowedPairs: (() => {
+      const result: { iss: string; aud: string }[] = [];
+
+      const pairs =
+        (jwtConfig?.allowed_pairs as Array<{ iss?: string; aud?: string }> | undefined) ?? [];
+      if (Array.isArray(pairs) && pairs.length > 0) {
+        for (const p of pairs) {
+          if (p?.iss && p?.aud) {
+            result.push({ iss: p.iss, aud: p.aud });
+          }
+        }
+      }
+
+      const jwtIssuers = jwtConfig?.allowed_issuers as string[] | undefined;
+      const jwtAudiences = jwtConfig?.allowed_audiences as string[] | undefined;
+      if (Array.isArray(jwtIssuers) && Array.isArray(jwtAudiences)) {
+        for (const iss of jwtIssuers) {
+          for (const aud of jwtAudiences) {
+            if (iss && aud) {
+              result.push({ iss, aud });
+            }
+          }
+        }
+      }
+
+      const topIssuers = projectConfig?.allowed_issuers as string[] | undefined;
+      const topAudiences = projectConfig?.allowed_audiences as string[] | undefined;
+      if (Array.isArray(topIssuers) && Array.isArray(topAudiences)) {
+        for (const iss of topIssuers) {
+          for (const aud of topAudiences) {
+            if (iss && aud) {
+              result.push({ iss, aud });
+            }
+          }
+        }
+      }
+
+      // Deduplicate pairs
+      const seen = new Set<string>();
+      return result.filter((p) => {
+        const key = `${p.iss}:::${p.aud}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    })(),
+    opaqueTokenEndpoint: (opaqueConfig?.endpoint as string) || '',
+    opaqueTokenMethod: (opaqueConfig?.method as 'GET' | 'POST' | undefined) ?? 'GET',
+    opaqueTokenParams: (opaqueConfig?.params as string) || '?access_token={token}',
+    opaqueTokenBody: (opaqueConfig?.body as string) || 'token={token}',
     useAuthConfig: !!(projectConfig?.auth_config_id as string),
     defaultTenant: (projectConfig?.default_tenant as string) || 'api',
     authConfigId: projectConfig?.auth_config_id as string | undefined,
@@ -246,6 +302,12 @@ export function ProjectConfigPanel({
   }, [project]);
 
   const [config, setConfig] = useState<ProjectConfig>(() => getInitialConfig(project));
+
+  // Reset selected tenant when the current project context changes so auth section
+  // can fall back to its own loaded selection for the new project.
+  useEffect(() => {
+    setSelectedAuthTenant(undefined);
+  }, [currentProject?.project_id, currentProject?.api_version]);
 
   useEffect(() => {
     const newKey = currentProject ? `${currentProject.project_id}:${currentProject.api_version}` : null;
@@ -420,7 +482,7 @@ export function ProjectConfigPanel({
             const tenantsList = Array.isArray((tenantsRes as { tenants?: unknown }).tenants) ? (tenantsRes as { tenants: Array<{ tenant_name?: string } | string> }).tenants : [];
             const hasTenant = tenantsList.some((t: { tenant_name?: string } | string) => (typeof t === 'string' ? t === tenantName : t?.tenant_name === tenantName));
             if (!hasTenant) await api.createTeamTenant(teamId, { tenant_name: tenantName, display_name: tenantDisplayName });
-            const defaultCallbackUrl = `https://${config.projectName}-${tenantName}.portal.apiblaze.com/${config.apiVersion || '1.0.0'}`;
+            const defaultCallbackUrl = `https://${subdomain}-${tenantName}.portal.apiblaze.com/${config.apiVersion || '1.0.0'}`;
             const callbackUrls = config.authorizedCallbackUrls?.length ? config.authorizedCallbackUrls : [defaultCallbackUrl];
             const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl) ? [defaultCallbackUrl, ...callbackUrls.filter((u) => u !== defaultCallbackUrl)] : [defaultCallbackUrl, ...callbackUrls];
             const appClient = await api.createAppClientForTenant(teamId, tenantName, {
