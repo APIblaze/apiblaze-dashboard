@@ -107,6 +107,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(project || null);
+  const [selectedAuthTenant, setSelectedAuthTenant] = useState<string | undefined>(undefined);
   const isDeployingRef = useRef(false); // Track deployment state to prevent config reset
   const routesRef = useRef<RouteEntry[]>([]);
   const [preloadedGitHubRepos, setPreloadedGitHubRepos] = useState<Array<{ id: number; name: string; full_name: string; description: string; default_branch: string; updated_at: string; language: string; stargazers_count: number }>>([]);
@@ -136,6 +137,8 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     enableSocialAuth: true,
     requestsAuthMode: 'authenticate' as const,
     requestsAuthMethods: ['jwt'] as ('jwt' | 'opaque' | 'api_key')[],
+    allowApiblazeJwt: true,
+    allowOtherJwt: false,
     allowedPairs: [],
     opaqueTokenEndpoint: '',
     opaqueTokenMethod: 'GET' as const,
@@ -764,6 +767,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
               appClientName,
               projectName: config.projectName ?? 'project',
               apiVersion: config.apiVersion || '1.0.0',
+              tenantName: selectedAuthTenant || undefined,
             });
 
             deployTeamId = result.team_id;
@@ -1168,9 +1172,9 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             </TabsContent>
 
             <TabsContent value="auth" className="mt-0">
-              <AuthenticationSection 
-                config={config} 
-                updateConfig={updateConfig} 
+              <AuthenticationSection
+                config={config}
+                updateConfig={updateConfig}
                 isEditMode={!!currentProject}
                 project={currentProject}
                 onProjectUpdate={(updatedProject) => {
@@ -1178,6 +1182,8 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
                   onProjectUpdate?.(updatedProject);
                 }}
                 teamId={session?.user?.id ? `team_${(session.user as { id?: string }).id}` : undefined}
+                selectedAuthTenant={selectedAuthTenant}
+                onAuthTenantChange={setSelectedAuthTenant}
               />
             </TabsContent>
 

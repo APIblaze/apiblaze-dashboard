@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 
 const PROJECT_MENU_ITEMS = [
   { id: 'general', label: 'General' },
-  { id: 'auth', label: 'Auth' },
+  { id: 'auth', label: 'Tenant Auth' },
   { id: 'targets', label: 'Targets' },
   { id: 'throttling', label: 'Throttling' },
   { id: 'routes', label: 'Routes' },

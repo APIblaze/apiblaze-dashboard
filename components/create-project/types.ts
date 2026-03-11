@@ -50,6 +50,10 @@ export interface ProjectConfig {
   requestsAuthMode: 'authenticate' | 'passthrough';
   requestsAuthMethods: ('jwt' | 'opaque' | 'api_key')[];
   requireApiKeyXEndUserId?: boolean;
+  /** Whether to trust APIBlaze-issued JWT tokens (default: true). */
+  allowApiblazeJwt?: boolean;
+  /** Whether to trust external JWT tokens via custom iss/aud pairs (default: false; auto-enabled when login page is off). */
+  allowOtherJwt?: boolean;
   /** Allowed (iss, aud) pairs for JWT verification. Both required per entry. */
   allowedPairs: Array<{ iss: string; aud: string }>;
   opaqueTokenEndpoint: string;

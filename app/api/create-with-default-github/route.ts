@@ -4,7 +4,7 @@ import { getDefaultScopesForProvider } from '@/lib/provider-default-scopes';
 import { getUserClaims } from '../projects/_utils';
 
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
-const TENANT_NAME = 'api';
+const DEFAULT_TENANT_NAME = 'api';
 
 /**
  * Create tenant (api), AppClient, and default GitHub provider.
@@ -31,7 +31,11 @@ export async function POST(request: NextRequest) {
       projectName,
       apiVersion,
       scopes,
+      tenantName: requestedTenantName,
     } = body;
+    const TENANT_NAME = (typeof requestedTenantName === 'string' && requestedTenantName.trim())
+      ? requestedTenantName.trim()
+      : DEFAULT_TENANT_NAME;
 
     if (!teamId || typeof teamId !== 'string' || !teamId.trim()) {
       return NextResponse.json(
@@ -90,7 +94,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const defaultCallbackUrl = `https://${String(projectName).trim()}-api.portal.apiblaze.com/${String(apiVersion).trim()}`;
+    const defaultCallbackUrl = `https://${String(projectName).trim()}-${TENANT_NAME}.portal.apiblaze.com/${String(apiVersion).trim()}`;
     let appClient: Record<string, unknown>;
     try {
       appClient = (await client.createAppClientForTenant(

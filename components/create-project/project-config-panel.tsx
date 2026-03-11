@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils';
 
 const NEW_PROJECT_STEPS: { id: ProjectConfigTab; label: string }[] = [
   { id: 'general', label: 'General' },
-  { id: 'auth', label: 'Auth' },
+  { id: 'auth', label: 'Tenant Auth' },
   { id: 'targets', label: 'Targets' },
   { id: 'throttling', label: 'Throttling' },
   { id: 'preprocessing', label: 'Processing' },
@@ -95,6 +95,8 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       enableSocialAuth: true,
       requestsAuthMode: 'authenticate' as const,
       requestsAuthMethods: ['jwt'] as ('jwt' | 'opaque' | 'api_key')[],
+      allowApiblazeJwt: true,
+      allowOtherJwt: false,
       allowedPairs: [],
       opaqueTokenEndpoint: '',
       opaqueTokenMethod: 'GET' as const,
@@ -140,26 +142,16 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     uploadedFile: null,
     userGroupName: (projectConfig?.auth_config_name as string) || '',
     enableSocialAuth: true,
-    requestsAuthMode: ((projectConfig?.requests_auth as Record<string, unknown>)?.mode as 'authenticate' | 'passthrough') || 'passthrough',
-    requestsAuthMethods: ((projectConfig?.requests_auth as Record<string, unknown>)?.methods as ('jwt' | 'opaque' | 'api_key')[]) || ['jwt'],
-    requireApiKeyXEndUserId: ((projectConfig?.requests_auth as Record<string, unknown>)?.api_key as Record<string, unknown>)?.require_x_end_user_id as boolean || false,
-    allowedPairs: (() => {
-      const jwt = (projectConfig?.requests_auth as Record<string, unknown>)?.jwt as Record<string, unknown> | undefined;
-      const pairs = jwt?.allowed_pairs as Array<{ iss?: string; aud?: string }> | undefined;
-      if (Array.isArray(pairs) && pairs.length > 0) {
-        return pairs.filter((p) => p?.iss && p?.aud).map((p) => ({ iss: p.iss!, aud: p.aud! }));
-      }
-      const issuers = jwt?.allowed_issuers as string[] | undefined;
-      const audiences = jwt?.allowed_audiences as string[] | undefined;
-      if (Array.isArray(issuers) && Array.isArray(audiences) && issuers.length > 0 && audiences.length > 0) {
-        return issuers.flatMap((iss) => audiences!.map((aud) => ({ iss, aud })));
-      }
-      return [];
-    })(),
-    opaqueTokenEndpoint: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.endpoint as string || '',
-    opaqueTokenMethod: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.method as 'GET' | 'POST' || 'GET',
-    opaqueTokenParams: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.params as string || '?access_token={token}',
-    opaqueTokenBody: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.body as string || 'token={token}',
+    // Auth fields: bootstrap from project-level config so the UI is correct on first render;
+    // getTenantAuthConfig will overwrite these with tenant-level values once it loads.
+    requestsAuthMode: ((projectConfig?.requests_auth as Record<string, unknown> | undefined)?.mode as 'authenticate' | 'passthrough' | undefined) ?? 'passthrough',
+    requestsAuthMethods: ((projectConfig?.requests_auth as Record<string, unknown> | undefined)?.methods as ('jwt' | 'opaque' | 'api_key')[] | undefined) ?? ['jwt'],
+    requireApiKeyXEndUserId: false,
+    allowedPairs: (((projectConfig?.requests_auth as Record<string, unknown> | undefined)?.jwt as Record<string, unknown> | undefined)?.allowed_pairs as Array<{ iss?: string; aud?: string }> | undefined)?.filter(p => p?.iss && p?.aud).map(p => ({ iss: p.iss!, aud: p.aud! })) ?? [],
+    opaqueTokenEndpoint: '',
+    opaqueTokenMethod: 'GET' as 'GET' | 'POST',
+    opaqueTokenParams: '?access_token={token}',
+    opaqueTokenBody: 'token={token}',
     useAuthConfig: !!(projectConfig?.auth_config_id as string),
     defaultTenant: (projectConfig?.default_tenant as string) || 'MyDefaultTenant',
     authConfigId: projectConfig?.auth_config_id as string | undefined,
@@ -235,6 +227,7 @@ export function ProjectConfigPanel({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(project);
+  const [selectedAuthTenant, setSelectedAuthTenant] = useState<string | undefined>(undefined);
   const isDeployingRef = useRef(false);
   const routesRef = useRef<RouteEntry[]>([]);
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
@@ -406,12 +399,13 @@ export function ProjectConfigPanel({
             return;
           }
           try {
-            const tenantName = 'api';
+            const tenantName = selectedAuthTenant || 'api';
+            const tenantDisplayName = tenantName === 'api' ? 'Default' : tenantName;
             const tenantsRes = await api.getTeamTenants(teamId, true);
             const tenantsList = Array.isArray((tenantsRes as { tenants?: unknown }).tenants) ? (tenantsRes as { tenants: Array<{ tenant_name?: string } | string> }).tenants : [];
-            const hasApiTenant = tenantsList.some((t: { tenant_name?: string } | string) => (typeof t === 'string' ? t === tenantName : t?.tenant_name === tenantName));
-            if (!hasApiTenant) await api.createTeamTenant(teamId, { tenant_name: tenantName, display_name: 'Default' });
-            const defaultCallbackUrl = `https://${config.projectName}-api.portal.apiblaze.com/${config.apiVersion || '1.0.0'}`;
+            const hasTenant = tenantsList.some((t: { tenant_name?: string } | string) => (typeof t === 'string' ? t === tenantName : t?.tenant_name === tenantName));
+            if (!hasTenant) await api.createTeamTenant(teamId, { tenant_name: tenantName, display_name: tenantDisplayName });
+            const defaultCallbackUrl = `https://${config.projectName}-${tenantName}.portal.apiblaze.com/${config.apiVersion || '1.0.0'}`;
             const callbackUrls = config.authorizedCallbackUrls?.length ? config.authorizedCallbackUrls : [defaultCallbackUrl];
             const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl) ? [defaultCallbackUrl, ...callbackUrls.filter((u) => u !== defaultCallbackUrl)] : [defaultCallbackUrl, ...callbackUrls];
             const appClient = await api.createAppClientForTenant(teamId, tenantName, {
@@ -492,6 +486,7 @@ export function ProjectConfigPanel({
               appClientName,
               projectName: config.projectName,
               apiVersion: config.apiVersion || '1.0.0',
+              tenantName: selectedAuthTenant || undefined,
             });
             deployTeamId = result.team_id;
             deployTenant = result.tenant_name;
@@ -673,7 +668,7 @@ export function ProjectConfigPanel({
         default_app_client_id: config.defaultAppClient || null,
         requests_auth,
       };
-      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
+      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload, { tenant: selectedAuthTenant });
       toast({ title: 'Config Saved', description: 'Project configuration has been updated successfully.' });
       const updatedConfig = { ...(currentProject.config as Record<string, unknown>), ...payload };
       const updatedProject = { ...currentProject, config: updatedConfig };
@@ -768,6 +763,8 @@ export function ProjectConfigPanel({
                 onProjectUpdate?.(updated);
               }}
               teamId={currentProject?.team_id ?? teamId}
+              selectedAuthTenant={selectedAuthTenant}
+              onAuthTenantChange={setSelectedAuthTenant}
             />
           )}
           {activeTab === 'targets' && (
