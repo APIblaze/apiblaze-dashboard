@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -58,6 +58,7 @@ const PROVIDER_LABELS: Record<SocialProvider, string> = {
 };
 
 type AppClientRaw = AppClient & { client_id?: string; authorized_callback_urls?: string[] };
+export type { AppClientRaw };
 type ProviderRaw = AuthSocialProvider & { client_id?: string };
 
 // ─── Provider Icon ────────────────────────────────────────────────────────────
@@ -1827,7 +1828,6 @@ function TenantDetail({
   teamId: string;
   onProjectUpdate?: (p: Project) => void;
 }) {
-  const isEditMode = !!project;
   const projectId = project?.project_id ?? config.projectName ?? '';
   const apiVersion = project?.api_version ?? config.apiVersion ?? '1.0.0';
   const defaultCallbackUrl = `https://${projectId}-${tenant.tenant_name}.portal.apiblaze.com/${apiVersion}`;
@@ -2225,357 +2225,6 @@ function TenantDetail({
   );
 }
 
-// ─── Edit Mode: Tenant Manager ────────────────────────────────────────────────
-
-function EditModeTenantManager({
-  config, updateConfig, project, onProjectUpdate, teamId,
-}: {
-  config: ProjectConfig;
-  updateConfig: (u: Partial<ProjectConfig>) => void;
-  project: Project;
-  onProjectUpdate?: (p: Project) => void;
-  teamId: string;
-}) {
-  const { toast } = useToast();
-  const [attachedTenants, setAttachedTenants] = useState<Array<{ tenant_name: string; display_name: string }>>([]);
-  const [teamTenants, setTeamTenants] = useState<Array<{ tenant_name: string; display_name?: string }>>([]);
-  const [selected, setSelected] = useState<string>('');
-  const [showCreate, setShowCreate] = useState(false);
-
-  // Create tenant form state
-  const [slug, setSlug] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [clientName, setClientName] = useState('');
-  const [providerType, setProviderType] = useState<SocialProvider>('google');
-  const [bringOwn, setBringOwn] = useState(false);
-  const [provClientId, setProvClientId] = useState('');
-  const [provClientSecret, setProvClientSecret] = useState('');
-  const [creating, setCreating] = useState(false);
-
-  // Detach dialog
-  const [detachTarget, setDetachTarget] = useState<{ tenant_name: string; display_name: string } | null>(null);
-  const [detachConfirm, setDetachConfirm] = useState('');
-  const [detachLoading, setDetachLoading] = useState(false);
-  const [attachLoading, setAttachLoading] = useState(false);
-
-  useEffect(() => {
-    api.listProjectTenants(project.project_id, project.api_version)
-      .then(r => {
-        const list = r.tenants ?? [];
-        setAttachedTenants(list);
-        setSelected(prev => list.some(t => t.tenant_name === prev) ? prev : (list[0]?.tenant_name ?? ''));
-      })
-      .catch(() => { });
-  }, [project.project_id, project.api_version]);
-
-  useEffect(() => {
-    api.getTeamTenants(teamId, true)
-      .then(res => {
-        const t = res.tenants;
-        if (!Array.isArray(t) || t.length === 0) { setTeamTenants([]); return; }
-        const list = typeof t[0] === 'string'
-          ? (t as string[]).map(tn => ({ tenant_name: tn, display_name: tn }))
-          : (t as { tenant_name: string; display_name?: string }[]).map(x => ({ tenant_name: x.tenant_name, display_name: x.display_name ?? x.tenant_name }));
-        setTeamTenants(list);
-      })
-      .catch(() => { });
-  }, [teamId]);
-
-  const availableToAttach = useMemo(() => {
-    const attached = new Set(attachedTenants.map(t => t.tenant_name));
-    return teamTenants.filter(t => !attached.has(t.tenant_name));
-  }, [teamTenants, attachedTenants]);
-
-  const resetCreateForm = () => {
-    setSlug(''); setDisplayName(''); setClientName('');
-    setBringOwn(false); setProviderType('google'); setProvClientId(''); setProvClientSecret('');
-  };
-
-  const handleCreate = async () => {
-    const tenantSlug = slug.trim().toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 32);
-    const tenantDisplay = displayName.trim() || tenantSlug;
-    if (!tenantSlug || !tenantDisplay) return;
-    setCreating(true);
-    try {
-      await api.createTeamTenant(teamId, { tenant_name: tenantSlug, display_name: tenantDisplay });
-      await api.attachTenantToProject(project.project_id, project.api_version, { tenant_name: tenantSlug, display_name: tenantDisplay });
-      const appClient = await api.createAppClientForTenant(teamId, tenantSlug, {
-        name: clientName.trim() || `${tenantSlug}-client`,
-        projectName: project.project_id,
-        apiVersion: project.api_version || '1.0.0',
-        tenant: tenantSlug,
-        scopes: bringOwn ? DEFAULT_SCOPES[providerType] : ['read:user', 'user:email'],
-        authorizedCallbackUrls: [`https://${project.project_id}-${tenantSlug}.portal.apiblaze.com/${project.api_version}`],
-      });
-      if (bringOwn && provClientId.trim() && provClientSecret.length >= CLIENT_SECRET_MIN_LENGTH) {
-        const appClientId = (appClient as { id?: string }).id ?? '';
-        if (appClientId) {
-          await api.addProviderByTenant(teamId, tenantSlug, appClientId, {
-            type: providerType,
-            clientId: provClientId.trim(),
-            clientSecret: provClientSecret,
-            scopes: DEFAULT_SCOPES[providerType],
-            domain: PROVIDER_DOMAINS[providerType],
-            tokenType: 'apiblaze',
-            targetServerToken: 'apiblaze',
-            includeApiblazeAccessTokenHeader: false,
-            includeApiblazeIdTokenHeader: false,
-          });
-        }
-      }
-      const updated = await api.listProjectTenants(project.project_id, project.api_version);
-      setAttachedTenants(updated.tenants ?? []);
-      setSelected(tenantSlug);
-      setShowCreate(false);
-      resetCreateForm();
-      onProjectUpdate?.({ ...project });
-      toast({ title: 'Tenant created', description: `${tenantDisplay} is ready.` });
-    } catch (e) {
-      toast({ title: 'Failed to create tenant', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleDetach = async () => {
-    if (!detachTarget || detachConfirm !== detachTarget.tenant_name) return;
-    setDetachLoading(true);
-    try {
-      await api.detachTenantFromProject(project.project_id, project.api_version, detachTarget.tenant_name);
-      const updated = await api.listProjectTenants(project.project_id, project.api_version);
-      setAttachedTenants(updated.tenants ?? []);
-      setSelected(updated.tenants?.[0]?.tenant_name ?? '');
-      setDetachTarget(null); setDetachConfirm('');
-      onProjectUpdate?.({ ...project });
-      toast({ title: 'Tenant removed from project' });
-    } catch (e) {
-      toast({ title: 'Failed to remove tenant', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
-    } finally {
-      setDetachLoading(false);
-    }
-  };
-
-  const selectedTenantObj = attachedTenants.find(t => t.tenant_name === selected);
-
-  return (
-    <div className="space-y-6">
-
-      {/* Tenant selector bar */}
-      <div className="space-y-3">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <Label className="text-sm font-semibold">Tenants</Label>
-            <p className="text-xs text-muted-foreground mt-0.5">Each tenant has its own URL, login page, app clients and providers.</p>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            {availableToAttach.length > 0 && (
-              <select
-                className="text-xs border rounded-md px-2 py-1.5 bg-background cursor-pointer"
-                value=""
-                onChange={async e => {
-                  const t = availableToAttach.find(x => x.tenant_name === e.target.value);
-                  if (!t) return;
-                  setAttachLoading(true);
-                  try {
-                    await api.attachTenantToProject(project.project_id, project.api_version, { tenant_name: t.tenant_name, display_name: t.display_name ?? t.tenant_name });
-                    const updated = await api.listProjectTenants(project.project_id, project.api_version);
-                    setAttachedTenants(updated.tenants ?? []);
-                    setSelected(t.tenant_name);
-                  } catch { toast({ title: 'Failed to attach tenant', variant: 'destructive' }); }
-                  finally { setAttachLoading(false); }
-                }}
-              >
-                <option value="" disabled>{attachLoading ? 'Attaching…' : '+ Attach existing'}</option>
-                {availableToAttach.map(t => <option key={t.tenant_name} value={t.tenant_name}>{t.display_name ?? t.tenant_name}</option>)}
-              </select>
-            )}
-            <Button type="button" variant="outline" size="sm" onClick={() => setShowCreate(v => !v)}>
-              <Plus className="h-4 w-4 mr-1.5" /> {showCreate ? 'Cancel' : 'New tenant'}
-            </Button>
-          </div>
-        </div>
-
-        {/* Pill tabs */}
-        {attachedTenants.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {attachedTenants.map(t => (
-              <div
-                key={t.tenant_name}
-                className={`group flex items-center gap-1.5 rounded-full border px-3 py-1.5 cursor-pointer transition-all select-none ${selected === t.tenant_name ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background border-muted hover:border-muted-foreground/50'}`}
-                onClick={() => setSelected(t.tenant_name)}
-              >
-                <span className="text-sm font-medium">{t.display_name}</span>
-                {t.tenant_name !== 'api' && (
-                  <button
-                    type="button"
-                    className={`ml-0.5 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${selected === t.tenant_name ? 'hover:bg-white/20' : 'hover:bg-muted'}`}
-                    onClick={e => { e.stopPropagation(); setDetachTarget(t); setDetachConfirm(''); }}
-                    title="Remove from project"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {attachedTenants.length === 0 && !showCreate && (
-          <p className="text-sm text-muted-foreground">No tenants attached yet.</p>
-        )}
-      </div>
-
-      {/* Inline create tenant form */}
-      {showCreate && (
-        <Card className="border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/30">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Create new tenant</CardTitle>
-            <CardDescription className="text-xs">Set up an isolated auth environment with its own URL and login page.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {/* Identity */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Tenant</Label>
-                <Input placeholder="e.g. acme" value={slug} onChange={e => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} className="mt-1 font-mono" />
-                <p className="text-xs text-muted-foreground mt-0.5 font-mono">
-                  {project.project_id}-<span className="text-foreground">{slug || 'tenant'}</span>.apiblaze.com
-                </p>
-              </div>
-              <div>
-                <Label className="text-xs">Description</Label>
-                <Input placeholder="e.g. Acme Corp" value={displayName} onChange={e => setDisplayName(e.target.value)} className="mt-1" />
-              </div>
-            </div>
-            <div>
-              <Label className="text-xs">App client name <span className="text-muted-foreground">(optional)</span></Label>
-              <Input placeholder={slug ? `${slug}-client` : 'e.g. main-client'} value={clientName} onChange={e => setClientName(e.target.value)} className="mt-1 max-w-xs" />
-            </div>
-
-            <Separator />
-
-            {/* Provider */}
-            <div>
-              <Label className="text-xs font-medium">Identity provider <span className="text-muted-foreground">(optional — you can add providers later)</span></Label>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
-                {[
-                  { id: 'apiblaze', label: 'APIBlaze', own: false, p: 'github' as SocialProvider },
-                  { id: 'google', label: 'Google', own: true, p: 'google' as SocialProvider },
-                  { id: 'github', label: 'GitHub', own: true, p: 'github' as SocialProvider },
-                  { id: 'microsoft', label: 'Microsoft', own: true, p: 'microsoft' as SocialProvider },
-                  { id: 'facebook', label: 'Facebook', own: true, p: 'facebook' as SocialProvider },
-                  { id: 'auth0', label: 'Auth0', own: true, p: 'auth0' as SocialProvider },
-                  { id: 'other', label: 'Custom', own: true, p: 'other' as SocialProvider },
-                  { id: 'skip', label: 'Skip for now', own: false, p: null as SocialProvider | null },
-                ].map(opt => {
-                  const sel = opt.id === 'skip'
-                    ? !bringOwn && providerType === 'google' && !attachedTenants.some(t => t.tenant_name === 'apiblaze')
-                    : opt.own ? (bringOwn && providerType === opt.p) : (!bringOwn && opt.id !== 'skip');
-                  return (
-                    <button key={opt.id} type="button"
-                      onClick={() => {
-                        if (opt.id === 'skip') { setBringOwn(false); }
-                        else if (opt.own) { setBringOwn(true); setProviderType(opt.p!); }
-                        else { setBringOwn(false); setProviderType('github'); }
-                      }}
-                      className={`flex flex-col items-center gap-1.5 p-2 rounded-lg border-2 text-xs transition-all ${sel ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/40'}`}
-                    >
-                      {opt.id === 'skip' ? <X className="h-4 w-4 text-muted-foreground" /> : <ProviderIcon id={opt.id} size="sm" />}
-                      <span className="text-center leading-tight">{opt.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {bringOwn && (
-              <div className="space-y-3 p-3 rounded-lg border bg-background">
-                <div className="flex items-center gap-2">
-                  <ProviderIcon id={providerType} size="sm" />
-                  <Label className="text-sm font-semibold">{PROVIDER_LABELS[providerType]} credentials</Label>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">Client ID</Label>
-                    <Input placeholder="OAuth client ID" value={provClientId} onChange={e => setProvClientId(e.target.value)} className="mt-1" />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Client Secret</Label>
-                    <Input type="password" placeholder="OAuth client secret" value={provClientSecret} onChange={e => setProvClientSecret(e.target.value)} className="mt-1" />
-                    {provClientSecret.length > 0 && provClientSecret.length < CLIENT_SECRET_MIN_LENGTH && (
-                      <p className="text-xs text-amber-600 mt-1 flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Min {CLIENT_SECRET_MIN_LENGTH} chars</p>
-                    )}
-                  </div>
-                </div>
-                {slug && (
-                  <div className="flex items-start gap-2 p-2 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs">
-                    <AlertCircle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
-                    <span>
-                      Register this callback URL with your provider:{' '}
-                      <code className="font-mono">{`https://${project.project_id}-${slug}.portal.apiblaze.com/${project.api_version}`}</code>
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flex gap-2">
-              <Button type="button" size="sm" disabled={creating || !slug.trim() || !displayName.trim()} onClick={handleCreate}>
-                {creating && <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />} Create tenant
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => { setShowCreate(false); resetCreateForm(); }}>Cancel</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Selected tenant's detail */}
-      {selectedTenantObj && !showCreate && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Shield className="h-4 w-4 text-primary shrink-0" />
-            <Label className="text-sm font-semibold">
-              {selectedTenantObj.display_name}
-              <span className="font-normal text-muted-foreground ml-1">({selectedTenantObj.tenant_name})</span>
-            </Label>
-            <Badge variant="outline" className="text-xs font-mono ml-auto">{project.project_id}-{selectedTenantObj.tenant_name}.apiblaze.com</Badge>
-          </div>
-          <TenantDetail
-            tenant={selectedTenantObj}
-            project={project}
-            config={config}
-            updateConfig={updateConfig}
-            teamId={teamId}
-            onProjectUpdate={onProjectUpdate}
-          />
-        </div>
-      )}
-
-      {/* Detach confirmation dialog */}
-      <Dialog open={!!detachTarget} onOpenChange={o => { if (!o) { setDetachTarget(null); setDetachConfirm(''); } }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Remove tenant from project</DialogTitle>
-            <DialogDescription>
-              Removes &ldquo;{detachTarget?.display_name}&rdquo; from this project. The tenant and its app clients are not deleted — they can be re-attached later.
-            </DialogDescription>
-          </DialogHeader>
-          <div>
-            <Label className="text-xs">Type <code className="bg-muted px-1 rounded">{detachTarget?.tenant_name}</code> to confirm</Label>
-            <Input value={detachConfirm} onChange={e => setDetachConfirm(e.target.value)} placeholder={detachTarget?.tenant_name ?? ''} className="mt-1 font-mono" />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDetachTarget(null)}>Cancel</Button>
-            <Button variant="destructive" disabled={detachConfirm !== (detachTarget?.tenant_name ?? '') || detachLoading} onClick={handleDetach}>
-              {detachLoading && <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />} Remove
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
 type AuthMode = 'create-empty' | 'create-existing' | 'update-empty' | 'update-existing';
@@ -2589,7 +2238,7 @@ export function AuthenticationSection({
   teamId,
   selectedAuthTenant,
   onAuthTenantChange,
-  authMode,
+  authMode: _authMode,
   existingTenantAppClients,
 }: {
   config: ProjectConfig;
@@ -2623,7 +2272,7 @@ export function AuthenticationSection({
   const displayProjectId = project?.project_id ?? config.projectName ?? '';
   const displayVersion = project?.api_version ?? config.apiVersion ?? '';
 
-  const refreshTenants = (selectSlug?: string) => {
+  const refreshTenants = useCallback((selectSlug?: string) => {
     if (!project) return;
     api.listProjectTenants(project.project_id, project.api_version)
       .then(r => {
@@ -2636,13 +2285,13 @@ export function AuthenticationSection({
         }
       })
       .catch(() => {});
-  };
+  }, [project?.project_id, project?.api_version]);
 
-  // Load project tenants when in edit mode
+  // Load project tenants when in edit mode (once per project)
   useEffect(() => {
     if (!isEditMode || !project) return;
     refreshTenants();
-  }, [isEditMode, project?.project_id, project?.api_version]);
+  }, [isEditMode, project?.project_id, project?.api_version, refreshTenants]);
 
   // Load tenant auth config when selected tenant changes
   useEffect(() => {
@@ -2675,7 +2324,7 @@ export function AuthenticationSection({
         // Request failed — leave current config in place rather than resetting to defaults
       })
       .finally(() => setTenantAuthLoading(false));
-  }, [isEditMode, effectiveTenant, project?.project_id, project?.api_version]);
+  }, [isEditMode, effectiveTenant, project?.project_id, project?.api_version, updateConfig]);
 
   const handleAddTenant = async () => {
     const slug = newTenantSlug.trim().toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 32);

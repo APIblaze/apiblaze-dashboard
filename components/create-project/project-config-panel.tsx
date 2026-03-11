@@ -5,7 +5,7 @@ import { useSession } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Loader2, Rocket, ChevronRight, Save } from 'lucide-react';
 import { GeneralSection } from './general-section';
-import { AuthenticationSection } from './authentication-section';
+import { AuthenticationSection, type AppClientRaw } from './authentication-section';
 import { AuthorizationSection } from './authorization-section';
 import { TargetServersSection } from './target-servers-section';
 import { ThrottlingSection } from './throttling-section';
@@ -323,7 +323,7 @@ export function ProjectConfigPanel({
 
   const routesSectionProject = useMemo(
     () => currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null,
-    [currentProject?.project_id, currentProject?.api_version]
+    [currentProject]
   );
 
   // Derived auth state for empty vs non-empty tenant
@@ -363,9 +363,7 @@ export function ProjectConfigPanel({
       existingTenantAppClients,
     });
   }, [
-    currentProject?.project_id,
-    currentProject?.api_version,
-    currentProject?.team_id,
+    currentProject,
     config.defaultTenant,
     selectedAuthTenant,
     session?.user,
@@ -899,7 +897,7 @@ export function ProjectConfigPanel({
               selectedAuthTenant={selectedAuthTenant}
               onAuthTenantChange={setSelectedAuthTenant}
               authMode={derivedAuth.authMode}
-              existingTenantAppClients={derivedAuth.existingTenantAppClients as any}
+              existingTenantAppClients={derivedAuth.existingTenantAppClients as AppClientRaw[]}
             />
           )}
           {activeTab === 'authorization' && (
