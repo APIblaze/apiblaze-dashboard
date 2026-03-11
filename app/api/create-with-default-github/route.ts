@@ -4,7 +4,7 @@ import { getDefaultScopesForProvider } from '@/lib/provider-default-scopes';
 import { getUserClaims } from '../projects/_utils';
 
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
-const TENANT_NAME = 'api';
+const DEFAULT_TENANT_NAME = 'api';
 
 /**
  * Create tenant (api), AppClient, and default GitHub provider.
@@ -31,7 +31,19 @@ export async function POST(request: NextRequest) {
       projectName,
       apiVersion,
       scopes,
+      tenantName: requestedTenantName,
     } = body;
+
+    const rawTenantName =
+      typeof requestedTenantName === 'string' ? requestedTenantName.trim() : '';
+    let tenantName = rawTenantName
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '');
+
+    if (!tenantName) {
+      tenantName = DEFAULT_TENANT_NAME;
+    }
 
     if (!teamId || typeof teamId !== 'string' || !teamId.trim()) {
       return NextResponse.json(
@@ -76,12 +88,12 @@ export async function POST(request: NextRequest) {
       : [];
     const hasApiTenant = tenantsList.some(
       (t: { tenant_name?: string } | string) =>
-        typeof t === 'string' ? t === TENANT_NAME : (t?.tenant_name === TENANT_NAME)
+        typeof t === 'string' ? t === tenantName : t?.tenant_name === tenantName
     );
     if (!hasApiTenant) {
       try {
         await client.createTeamTenant(userClaims, trimmedTeamId, {
-          tenant_name: TENANT_NAME,
+          tenant_name: tenantName,
           display_name: 'Default',
         });
       } catch (err) {
@@ -90,18 +102,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const defaultCallbackUrl = `https://${String(projectName).trim()}-api.portal.apiblaze.com/${String(apiVersion).trim()}`;
+    const defaultCallbackUrl = `https://${String(projectName).trim()}-${tenantName}.portal.apiblaze.com/${String(
+      apiVersion
+    ).trim()}`;
     let appClient: Record<string, unknown>;
     try {
       appClient = (await client.createAppClientForTenant(
         userClaims,
         trimmedTeamId,
-        TENANT_NAME,
+        tenantName,
         {
           name: String(appClientName).trim(),
           projectName: String(projectName).trim(),
           apiVersion: String(apiVersion).trim(),
-          tenant: TENANT_NAME,
+          tenant: tenantName,
           scopes: effectiveScopes,
           authorizedCallbackUrls: [defaultCallbackUrl],
         }
@@ -119,7 +133,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      await client.addProviderByTenant(userClaims, trimmedTeamId, TENANT_NAME, String(appClientId), {
+      await client.addProviderByTenant(userClaims, trimmedTeamId, tenantName, String(appClientId), {
         type: 'github',
         clientId: defaultClientId,
         clientSecret: defaultClientSecret,
@@ -133,7 +147,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       team_id: trimmedTeamId,
-      tenant_name: TENANT_NAME,
+      tenant_name: tenantName,
       appClientId: String(appClientId),
     });
   } catch (error) {

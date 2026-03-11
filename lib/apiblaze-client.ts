@@ -540,6 +540,18 @@ export class APIBlazeClient {
     );
   }
 
+  async getTenantAuthConfig(
+    userClaims: UserAssertionClaims,
+    projectId: string,
+    version: string,
+    tenantName: string
+  ): Promise<{ requests_auth: Record<string, unknown> | null; default_app_client_id: string | null }> {
+    return this.request(
+      `/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(version)}/tenants/${encodeURIComponent(tenantName)}/auth`,
+      { method: 'GET', userClaims }
+    );
+  }
+
   async detachTenantFromProject(
     userClaims: UserAssertionClaims,
     projectId: string,

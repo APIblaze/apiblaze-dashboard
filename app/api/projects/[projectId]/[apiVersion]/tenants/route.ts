@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAPIBlazeClient } from '@/lib/apiblaze-client';
+import { createAPIBlazeClient, APIBlazeError } from '@/lib/apiblaze-client';
 import { getUserClaims } from '@/app/api/projects/_utils';
 
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
@@ -73,17 +73,26 @@ export async function POST(
     console.error('Error attaching tenant:', error);
 
     const message = error instanceof Error ? error.message : 'Unknown error';
+    const upstreamDetails =
+      error instanceof APIBlazeError
+        ? error.body?.details ?? error.body?.error ?? message
+        : message;
 
-    if (message.includes('Unauthorized')) {
+    if (message.includes('Unauthorized') || String(upstreamDetails).includes('Unauthorized')) {
       return NextResponse.json(
         { error: 'Unauthorized', details: 'Please sign in' },
         { status: 401 }
       );
     }
 
+    const status = error instanceof APIBlazeError ? error.status : 500;
+    console.error('Upstream attach tenant error details:', upstreamDetails);
     return NextResponse.json(
-      { error: 'Failed to attach tenant', details: message },
-      { status: 500 }
+      {
+        error: 'Failed to attach tenant',
+        details: 'An internal error occurred',
+      },
+      { status: status >= 400 ? status : 500 }
     );
   }
 }

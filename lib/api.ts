@@ -307,6 +307,12 @@ class ApiClient {
     );
   }
 
+  async getTenantAuthConfig(projectId: string, version: string, tenantName: string): Promise<{ requests_auth: Record<string, unknown> | null; default_app_client_id: string | null }> {
+    return this.request(
+      `/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(version)}/tenants/${encodeURIComponent(tenantName)}/auth`
+    );
+  }
+
   /** List app clients for a tenant (proxy -> tenant -> app clients). */
   async listAppClientsByTenant(teamId: string, tenantName: string): Promise<AppClient[]> {
     return this.request<AppClient[]>(
@@ -419,6 +425,7 @@ class ApiClient {
     projectName: string;
     apiVersion: string;
     scopes?: string[];
+    tenantName?: string;
   }) {
     return this.request<{ team_id: string; tenant_name: string; appClientId: string }>('/create-with-default-github', {
       method: 'POST',
