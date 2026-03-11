@@ -6,15 +6,15 @@ const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ projectId: string; version: string; tenantName: string }> }
+  { params }: { params: Promise<{ projectId: string; apiVersion: string; tenantName: string }> }
 ) {
   try {
     const userClaims = await getUserClaims();
-    const { projectId, version, tenantName } = await params;
+    const { projectId, apiVersion, tenantName } = await params;
 
-    if (!projectId || !version || !tenantName) {
+    if (!projectId || !apiVersion || !tenantName) {
       return NextResponse.json(
-        { error: 'Validation error', details: 'projectId, version, and tenantName are required' },
+        { error: 'Validation error', details: 'projectId, apiVersion, and tenantName are required' },
         { status: 400 }
       );
     }
@@ -24,7 +24,7 @@ export async function GET(
       jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
     });
 
-    const data = await client.getTenantAuthConfig(userClaims, projectId, version, tenantName);
+    const data = await client.getTenantAuthConfig(userClaims, projectId, apiVersion, tenantName);
     return NextResponse.json(data);
   } catch (error: unknown) {
     console.error('Error getting tenant auth config:', error);
