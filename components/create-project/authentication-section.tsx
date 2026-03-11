@@ -434,6 +434,94 @@ const CREATE_PROVIDERS = [
   { id: 'other', label: 'Custom', own: true, p: 'other' as SocialProvider },
 ];
 
+function ExistingTenantLoginSetup({
+  config,
+  updateConfig,
+  tenantSlug,
+  appClients,
+}: {
+  config: ProjectConfig;
+  updateConfig: (u: Partial<ProjectConfig>) => void;
+  tenantSlug: string;
+  appClients: AppClientRaw[];
+}) {
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    if (initialized) return;
+    const existingIds = appClients.map(c => (c.id as string | undefined) ?? (c.client_id as string | undefined)).filter(Boolean);
+    if (existingIds.length === 0) return;
+    const current = config.defaultAppClient && existingIds.includes(config.defaultAppClient)
+      ? config.defaultAppClient
+      : existingIds[0]!;
+    updateConfig({
+      defaultAppClient: current,
+      appClientId: current,
+      useAuthConfig: true,
+      authConfigId: tenantSlug,
+    });
+    setInitialized(true);
+  }, [initialized, appClients, config.defaultAppClient, tenantSlug, updateConfig]);
+
+  const selectedId = config.defaultAppClient ||
+    (appClients[0]?.id as string | undefined) ||
+    (appClients[0]?.client_id as string | undefined) ||
+    '';
+
+  const handleChange = (id: string) => {
+    updateConfig({
+      defaultAppClient: id,
+      appClientId: id,
+      useAuthConfig: true,
+      authConfigId: tenantSlug,
+    });
+  };
+
+  return (
+    <Card className="border-dashed">
+      <CardHeader>
+        <CardTitle className="text-sm">Use existing tenant auth</CardTitle>
+        <CardDescription className="text-xs">
+          This tenant already has app clients. Pick which one this project should use. No new app clients or providers will be created.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {appClients.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No app clients found for this tenant. You can create them from the Tenants section, or switch to a tenant without auth configured.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {appClients.map(client => {
+              const id = (client.id as string | undefined) ?? (client.client_id as string | undefined) ?? '';
+              if (!id) return null;
+              const isSelected = id === selectedId;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => handleChange(id)}
+                  className={`w-full flex items-center justify-between rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+                    isSelected ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/40'
+                  }`}
+                >
+                  <span className="flex flex-col">
+                    <span className="font-medium">{client.name || id}</span>
+                    <span className="text-[11px] text-muted-foreground font-mono truncate">
+                      {id}
+                    </span>
+                  </span>
+                  {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CreateModeLoginSetup({ config, updateConfig }: { config: ProjectConfig; updateConfig: (u: Partial<ProjectConfig>) => void }) {
   const [showAdv, setShowAdv] = useState(false);
   const [newCallbackUrl, setNewCallbackUrl] = useState('');
@@ -1733,12 +1821,17 @@ function TenantDetail({
   tenant, project, config, updateConfig, teamId, onProjectUpdate,
 }: {
   tenant: { tenant_name: string; display_name: string };
-  project: Project;
+  project: Project | null;
   config: ProjectConfig;
   updateConfig: (u: Partial<ProjectConfig>) => void;
   teamId: string;
   onProjectUpdate?: (p: Project) => void;
 }) {
+  const isEditMode = !!project;
+  const projectId = project?.project_id ?? config.projectName ?? '';
+  const apiVersion = project?.api_version ?? config.apiVersion ?? '1.0.0';
+  const defaultCallbackUrl = `https://${projectId}-${tenant.tenant_name}.portal.apiblaze.com/${apiVersion}`;
+
   const { toast } = useToast();
   const getAppClientsForTenant = useDashboardCacheStore(s => s.getAppClientsForTenant);
   const fetchAppClientsForTenant = useDashboardCacheStore(s => s.fetchAppClientsForTenant);
@@ -1746,23 +1839,17 @@ function TenantDetail({
   const appClientsByConfig = useDashboardCacheStore(s => s.appClientsByConfig);
   const isBootstrapping = useDashboardCacheStore(s => s.isBootstrapping);
 
-  // Add form visibility + accordion for existing clients
   const [showAdd, setShowAdd] = useState(false);
   const [existingExpanded, setExistingExpanded] = useState(true);
-
-  // New client form fields
   const [newName, setNewName] = useState('');
   const [newCallbackUrls, setNewCallbackUrls] = useState<string[]>([]);
   const [newCallbackUrlInput, setNewCallbackUrlInput] = useState('');
   const [newBranding, setNewBranding] = useState<AppClientBranding>({});
   const [creating, setCreating] = useState(false);
-
-  // Provider selection in new client form
   const [newBringOwn, setNewBringOwn] = useState(false);
   const [newProviderType, setNewProviderType] = useState<SocialProvider>('google');
   const [newProvClientId, setNewProvClientId] = useState('');
   const [newProvClientSecret, setNewProvClientSecret] = useState('');
-  // Provider advanced settings
   const [newAdvShow, setNewAdvShow] = useState(false);
   const [newDomain, setNewDomain] = useState('');
   const [newTokenType, setNewTokenType] = useState<'apiblaze' | 'thirdParty'>('apiblaze');
@@ -1779,8 +1866,6 @@ function TenantDetail({
   useEffect(() => {
     if (!isBootstrapping) fetchAppClientsForTenant(teamId, tenant.tenant_name);
   }, [teamId, tenant.tenant_name, isBootstrapping, fetchAppClientsForTenant]);
-
-  const defaultCallbackUrl = `https://${project.project_id}-${tenant.tenant_name}.portal.apiblaze.com/${project.api_version}`;
 
   const openAdd = () => {
     setNewCallbackUrls([defaultCallbackUrl]);
@@ -1818,8 +1903,8 @@ function TenantDetail({
         scopes: newBringOwn ? DEFAULT_SCOPES[newProviderType] : ['read:user', 'user:email'],
         authorizedCallbackUrls: newCallbackUrls.length > 0 ? newCallbackUrls : [defaultCallbackUrl],
         branding: newBranding,
-        projectName: project.project_id,
-        apiVersion: project.api_version || '1.0.0',
+        projectName: projectId,
+        apiVersion: apiVersion || '1.0.0',
       });
       const newClientId = (client as { id?: string }).id ?? '';
       if (newBringOwn && newProvClientId.trim() && newProvClientSecret.length >= CLIENT_SECRET_MIN_LENGTH && newClientId) {
@@ -1838,7 +1923,9 @@ function TenantDetail({
       await invalidateAndRefetch(teamId);
       if (appClients.length === 0 || !config.defaultAppClient) {
         updateConfig({ defaultAppClient: newClientId });
-        try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: newClientId }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
+        if (project) {
+          try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: newClientId }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
+        }
       }
       closeAdd();
       toast({ title: 'App client created', description: newBringOwn && newProvClientId.trim() ? 'Provider added.' : 'Add an OAuth provider to enable user login.' });
@@ -1850,8 +1937,13 @@ function TenantDetail({
   };
 
   const handleSetDefault = async (clientId: string) => {
-    updateConfig({ defaultAppClient: clientId });
-    try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: clientId }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
+    updateConfig({
+      defaultAppClient: clientId,
+      ...(project === null ? { useAuthConfig: true, authConfigId: tenant.tenant_name } : {}),
+    });
+    if (project) {
+      try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: clientId }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
+    }
   };
 
   const ADD_PROVIDERS = [
@@ -1870,7 +1962,7 @@ function TenantDetail({
       {/* ── Section header ── */}
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold">AppClients</span>
-        {!showAdd && (
+        {!showAdd && appClients.length === 0 && (
           <Button type="button" variant="outline" size="sm" onClick={openAdd}>
             <Plus className="h-3.5 w-3.5 mr-1.5" /> Add AppClient
           </Button>
@@ -2486,9 +2578,19 @@ function EditModeTenantManager({
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
+type AuthMode = 'create-empty' | 'create-existing' | 'update-empty' | 'update-existing';
+
 export function AuthenticationSection({
-  config, updateConfig, isEditMode = false, project, onProjectUpdate, teamId,
-  selectedAuthTenant, onAuthTenantChange,
+  config,
+  updateConfig,
+  isEditMode = false,
+  project,
+  onProjectUpdate,
+  teamId,
+  selectedAuthTenant,
+  onAuthTenantChange,
+  authMode,
+  existingTenantAppClients,
 }: {
   config: ProjectConfig;
   updateConfig: (updates: Partial<ProjectConfig>) => void;
@@ -2498,6 +2600,8 @@ export function AuthenticationSection({
   teamId?: string;
   selectedAuthTenant?: string;
   onAuthTenantChange?: (tenant: string) => void;
+  authMode?: AuthMode;
+  existingTenantAppClients?: AppClientRaw[];
 }) {
   const projectTeamId = (project as { team_id?: string })?.team_id ?? teamId;
   const { toast } = useToast();
@@ -2641,6 +2745,22 @@ export function AuthenticationSection({
       setTimeout(() => setBannerCopied(false), 2000);
     });
   };
+
+  // Create mode with non-empty tenant: ensure config points at existing tenant so deploy doesn't create new auth
+  useEffect(() => {
+    if (isEditMode || !existingTenantAppClients?.length || !activeTenantObj) return;
+    const firstId = (existingTenantAppClients[0] as { id?: string; client_id?: string })?.id
+      ?? (existingTenantAppClients[0] as { id?: string; client_id?: string })?.client_id;
+    if (!firstId) return;
+    const need = !config.useAuthConfig || config.authConfigId !== activeTenantObj.tenant_name || !config.defaultAppClient;
+    if (need) {
+      updateConfig({
+        useAuthConfig: true,
+        authConfigId: activeTenantObj.tenant_name,
+        defaultAppClient: config.defaultAppClient || firstId,
+      });
+    }
+  }, [isEditMode, existingTenantAppClients, activeTenantObj, config.useAuthConfig, config.authConfigId, config.defaultAppClient, updateConfig]);
 
   return (
     <div className="space-y-8">
@@ -2792,7 +2912,16 @@ export function AuthenticationSection({
               onProjectUpdate={onProjectUpdate}
             />
           );
-        })() : (
+        })() : (existingTenantAppClients && existingTenantAppClients.length > 0 && activeTenantObj && projectTeamId) ? (
+          <TenantDetail
+            tenant={activeTenantObj}
+            project={null}
+            config={config}
+            updateConfig={updateConfig}
+            teamId={projectTeamId}
+            onProjectUpdate={undefined}
+          />
+        ) : (
           <CreateModeLoginSetup config={config} updateConfig={updateConfig} />
         )}
       </div>

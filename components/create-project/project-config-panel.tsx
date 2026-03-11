@@ -326,6 +326,52 @@ export function ProjectConfigPanel({
     [currentProject?.project_id, currentProject?.api_version]
   );
 
+  // Derived auth state for empty vs non-empty tenant
+  const [derivedAuth, setDerivedAuth] = useState<{
+    effectiveTeamId?: string;
+    activeAuthTenant: string;
+    authMode: 'create-empty' | 'create-existing' | 'update-empty' | 'update-existing';
+    existingTenantAppClients: ReturnType<typeof getAppClientsForTenant>;
+  }>({
+    effectiveTeamId: currentProject?.team_id,
+    activeAuthTenant: 'api',
+    authMode: 'create-empty',
+    existingTenantAppClients: [],
+  });
+  useEffect(() => {
+    const baseTeamId =
+      currentProject?.team_id ??
+      (session?.user?.id ? `team_${(session.user as { id?: string }).id}` : undefined);
+    const activeAuthTenant = selectedAuthTenant || config.defaultTenant || 'api';
+    const existingTenantAppClients =
+      baseTeamId && activeAuthTenant
+        ? getAppClientsForTenant(baseTeamId, activeAuthTenant)
+        : [];
+    const isEmptyTenant = existingTenantAppClients.length === 0;
+    const authMode: 'create-empty' | 'create-existing' | 'update-empty' | 'update-existing' =
+      !currentProject
+        ? isEmptyTenant
+          ? 'create-empty'
+          : 'create-existing'
+        : isEmptyTenant
+          ? 'update-empty'
+          : 'update-existing';
+    setDerivedAuth({
+      effectiveTeamId: baseTeamId,
+      activeAuthTenant,
+      authMode,
+      existingTenantAppClients,
+    });
+  }, [
+    currentProject?.project_id,
+    currentProject?.api_version,
+    currentProject?.team_id,
+    config.defaultTenant,
+    selectedAuthTenant,
+    session?.user,
+    getAppClientsForTenant,
+  ]);
+
   const isSourceConfigured = () => {
     if (!config.projectName) return false;
     switch (config.sourceType) {
@@ -849,9 +895,11 @@ export function ProjectConfigPanel({
                 setCurrentProject(updated);
                 onProjectUpdate?.(updated);
               }}
-              teamId={currentProject?.team_id ?? teamId}
+              teamId={currentProject?.team_id ?? derivedAuth.effectiveTeamId}
               selectedAuthTenant={selectedAuthTenant}
               onAuthTenantChange={setSelectedAuthTenant}
+              authMode={derivedAuth.authMode}
+              existingTenantAppClients={derivedAuth.existingTenantAppClients as any}
             />
           )}
           {activeTab === 'authorization' && (
