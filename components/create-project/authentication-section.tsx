@@ -443,9 +443,10 @@ function CreateModeLoginSetup({ config, updateConfig }: { config: ProjectConfig;
   const provider = config.socialProvider ?? 'google';
   const scopes = config.scopes ?? DEFAULT_SCOPES[provider];
   const callbackUrls = config.authorizedCallbackUrls ?? [];
-  const defaultCallbackUrl = config.projectName
-    ? `https://${config.projectName}-api.portal.apiblaze.com/${config.apiVersion || '1.0.0'}`
-    : '';
+  const tenant = config.defaultTenant || 'api';
+  const projectSlug = config.projectName || '{projectName}';
+  const version = config.apiVersion || '{apiVersion}';
+  const defaultCallbackUrl = `https://${projectSlug}-${tenant}.portal.apiblaze.com/${version}`;
 
   return (
     <div className="rounded-xl border bg-card">
@@ -647,8 +648,13 @@ interface ProviderFormState {
   clientId: string;
   clientSecret: string;
   domain: string;
+  tokenType: 'apiblaze' | 'thirdParty';
+  targetServerToken: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
   scopes: string[];
   newScope: string;
+  callbackUrls: string[];
+  newCallbackUrl: string;
+  defaultCallbackUrl?: string;
 }
 
 function ProviderDialog({
@@ -685,15 +691,29 @@ function ProviderDialog({
           <div>
             <Label className="text-xs">Provider</Label>
             <div className="grid grid-cols-3 gap-2 mt-2">
-              {(['google', 'github', 'microsoft', 'facebook', 'auth0', 'other'] as SocialProvider[]).map(p => (
-                <button key={p} type="button"
-                  onClick={() => upd({ type: p, domain: PROVIDER_DOMAINS[p], scopes: [...DEFAULT_SCOPES[p]] })}
-                  className={`flex flex-col items-center gap-1 p-2 rounded-lg border-2 text-xs transition-all ${form.type === p ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/40'}`}
-                >
-                  <ProviderIcon id={p} size="sm" />
-                  <span>{PROVIDER_LABELS[p].split(' ')[0]}</span>
-                </button>
-              ))}
+              {CREATE_PROVIDERS.map(opt => {
+                const p = opt.p;
+                const selected = form.type === p;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() =>
+                      upd({
+                        type: p,
+                        domain: PROVIDER_DOMAINS[p],
+                        scopes: [...DEFAULT_SCOPES[p]],
+                      })
+                    }
+                    className={`flex flex-col items-center gap-1 p-2 rounded-lg border-2 text-xs transition-all ${
+                      selected ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/40'
+                    }`}
+                  >
+                    <ProviderIcon id={opt.id} size="sm" />
+                    <span>{opt.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -714,28 +734,187 @@ function ProviderDialog({
             Advanced (domain, scopes)
           </button>
           {showAdv && (
-            <div className="pl-4 border-l-2 border-muted space-y-3">
+            <div className="pl-4 border-l-2 border-muted space-y-4">
               <div>
                 <Label className="text-xs">Provider domain</Label>
-                <Input placeholder={PROVIDER_DOMAINS[form.type] || 'https://…'} value={form.domain} onChange={e => upd({ domain: e.target.value })} className="mt-1 text-xs" />
+                <Input
+                  placeholder={PROVIDER_DOMAINS[form.type] || 'https://…'}
+                  value={form.domain}
+                  onChange={e => upd({ domain: e.target.value })}
+                  className="mt-1 text-xs"
+                />
               </div>
               <div>
-                <Label className="text-xs">Scopes</Label>
-                <div className="flex flex-wrap gap-1 mt-1 mb-1">
+                <Label className="text-xs font-medium">Client side token type</Label>
+                <p className="text-xs text-muted-foreground mb-1">Tokens the API users will see</p>
+                <Select
+                  value={form.tokenType}
+                  onValueChange={v => upd({ tokenType: v as 'apiblaze' | 'thirdParty' })}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
+                    <SelectItem value="thirdParty">Third Party</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {form.tokenType !== 'thirdParty' && (
+                <div>
+                  <Label className="text-xs font-medium">Target server token type</Label>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    What to send in the Authorization header to your target servers
+                  </p>
+                  <Select
+                    value={form.targetServerToken}
+                    onValueChange={v =>
+                      upd({
+                        targetServerToken: v as
+                          | 'apiblaze'
+                          | 'third_party_access_token'
+                          | 'third_party_id_token'
+                          | 'none',
+                      })
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
+                      <SelectItem value="third_party_access_token">
+                        {PROVIDER_LABELS[form.type]} access token
+                      </SelectItem>
+                      <SelectItem value="third_party_id_token">
+                        {PROVIDER_LABELS[form.type]} ID token
+                      </SelectItem>
+                      <SelectItem value="none">None</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div>
+                <Label className="text-xs font-medium">Authorized Scopes</Label>
+                <p className="text-xs text-muted-foreground mb-1">
+                  Default scopes for {PROVIDER_LABELS[form.type]}:{' '}
+                  {DEFAULT_SCOPES[form.type].join(', ')}
+                </p>
+                <div className="flex flex-wrap gap-1 mb-2">
                   {form.scopes.map(s => (
                     <Badge key={s} variant="secondary" className="gap-1 text-xs">
                       {s}
-                      <button type="button" onClick={() => upd({ scopes: form.scopes.filter(x => x !== s) })}><X className="h-3 w-3" /></button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          upd({
+                            scopes: form.scopes.filter(x => x !== s),
+                          })
+                        }
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
                     </Badge>
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <Input placeholder="Add scope" value={form.newScope} onChange={e => upd({ newScope: e.target.value })}
+                  <Input
+                    placeholder="Add custom scope"
+                    value={form.newScope}
+                    onChange={e => upd({ newScope: e.target.value })}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') { e.preventDefault(); if (form.newScope.trim() && !form.scopes.includes(form.newScope.trim())) { upd({ scopes: [...form.scopes, form.newScope.trim()], newScope: '' }); } }
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const trimmed = form.newScope.trim();
+                        if (trimmed && !form.scopes.includes(trimmed)) {
+                          upd({
+                            scopes: [...form.scopes, trimmed],
+                            newScope: '',
+                          });
+                        }
+                      }
                     }}
-                    className="text-xs h-8" />
-                  <Button type="button" size="sm" className="h-8" onClick={() => { if (form.newScope.trim() && !form.scopes.includes(form.newScope.trim())) { upd({ scopes: [...form.scopes, form.newScope.trim()], newScope: '' }); } }}>
+                    className="text-xs h-8"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8"
+                    onClick={() => {
+                      const trimmed = form.newScope.trim();
+                      if (trimmed && !form.scopes.includes(trimmed)) {
+                        upd({
+                          scopes: [...form.scopes, trimmed],
+                          newScope: '',
+                        });
+                      }
+                    }}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs font-medium">Authorized Callback URLs</Label>
+                <div className="flex flex-wrap gap-1 mt-1 mb-2">
+                  {form.callbackUrls.length > 0
+                    ? form.callbackUrls.map((url, i) => (
+                        <Badge key={i} variant="secondary" className="gap-1 text-xs font-mono">
+                          {url}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              upd({
+                                callbackUrls: form.callbackUrls.filter((_, j) => j !== i),
+                              })
+                            }
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      ))
+                    : form.defaultCallbackUrl
+                      ? (
+                        <Badge variant="secondary" className="gap-1 text-xs font-mono">
+                          <span className="text-muted-foreground">Default</span>
+                          <span>{form.defaultCallbackUrl}</span>
+                        </Badge>
+                      )
+                      : null}
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="https://example.com/callback"
+                    value={form.newCallbackUrl}
+                    onChange={e => upd({ newCallbackUrl: e.target.value })}
+                    className="h-8 text-xs"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const u = form.newCallbackUrl.trim();
+                        if (u && !form.callbackUrls.includes(u)) {
+                          upd({
+                            callbackUrls: [...form.callbackUrls, u],
+                            newCallbackUrl: '',
+                          });
+                        }
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8"
+                    onClick={() => {
+                      const u = form.newCallbackUrl.trim();
+                      if (u && !form.callbackUrls.includes(u)) {
+                        upd({
+                          callbackUrls: [...form.callbackUrls, u],
+                          newCallbackUrl: '',
+                        });
+                      }
+                    }}
+                  >
                     <Plus className="h-3 w-3" />
                   </Button>
                 </div>
@@ -1166,14 +1345,26 @@ function AppClientPanel({
       secret = res.clientSecret ?? '';
     } catch { /* show empty, user can type new one */ }
     const rawScopes = p.scopes ?? [];
-    const scopes = Array.isArray(rawScopes) ? rawScopes as string[] : DEFAULT_SCOPES[p.type as SocialProvider];
+    const scopes = Array.isArray(rawScopes) ? (rawScopes as string[]) : DEFAULT_SCOPES[p.type as SocialProvider];
+    const clientCallbackUrls = (client.authorizedCallbackUrls ?? client.authorized_callback_urls ?? []) as string[];
+    const defaultCallbackUrl =
+      (project?.display_name || project?.project_id || config.projectName)
+        ? `https://${(project?.display_name || project?.project_id || config.projectName)!}-${tenant}.portal.apiblaze.com/${project?.api_version || config.apiVersion || '1.0.0'}`
+        : undefined;
     setEditProviderInitial({
       type: p.type as SocialProvider,
       clientId: p.clientId ?? p.client_id ?? '',
       clientSecret: secret,
       domain: p.domain ?? PROVIDER_DOMAINS[p.type as SocialProvider] ?? '',
+      tokenType: ((p as { tokenType?: 'apiblaze' | 'thirdParty' }).tokenType) ?? 'apiblaze',
+      targetServerToken: ((p as {
+        targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+      }).targetServerToken) ?? 'apiblaze',
       scopes,
       newScope: '',
+      callbackUrls: clientCallbackUrls,
+      newCallbackUrl: '',
+      defaultCallbackUrl,
     });
     setEditingProviderId(p.id);
     setLoadingProviderId(null);
@@ -1200,10 +1391,11 @@ function AppClientPanel({
         clientSecret: form.clientSecret.trim(),
         scopes: form.scopes.length ? form.scopes : DEFAULT_SCOPES[form.type],
         domain: form.domain || PROVIDER_DOMAINS[form.type],
-        tokenType: 'apiblaze' as const,
-        targetServerToken: 'apiblaze' as const,
+        tokenType: form.tokenType,
+        targetServerToken: form.targetServerToken,
         includeApiblazeAccessTokenHeader: false,
         includeApiblazeIdTokenHeader: false,
+        authorizedCallbackUrls: form.callbackUrls.length ? form.callbackUrls : undefined,
       };
       if (editingProviderId) {
         await api.updateProviderByTenant(tenantTeamId, tenant, client.id, editingProviderId, payload);
@@ -1466,7 +1658,28 @@ function AppClientPanel({
             )}
           </div>
           <Button type="button" variant="outline" size="sm"
-            onClick={() => { setEditingProviderId(null); setEditProviderInitial({ type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS['google'], scopes: [...DEFAULT_SCOPES['google']], newScope: '' }); setProviderDialogOpen(true); }}>
+            onClick={() => {
+              setEditingProviderId(null);
+              const clientCallbackUrls = (client.authorizedCallbackUrls ?? client.authorized_callback_urls ?? []) as string[];
+              const defaultCallbackUrl =
+                (project?.display_name || project?.project_id || config.projectName)
+                  ? `https://${(project?.display_name || project?.project_id || config.projectName)!}-${tenant}.portal.apiblaze.com/${project?.api_version || config.apiVersion || '1.0.0'}`
+                  : undefined;
+              setEditProviderInitial({
+                type: 'github',
+                clientId: '',
+                clientSecret: '',
+                domain: PROVIDER_DOMAINS['github'],
+                tokenType: 'apiblaze',
+                targetServerToken: 'apiblaze',
+                scopes: [...DEFAULT_SCOPES['github']],
+                newScope: '',
+                callbackUrls: clientCallbackUrls,
+                newCallbackUrl: '',
+                defaultCallbackUrl,
+              });
+              setProviderDialogOpen(true);
+            }}>
             <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Provider
           </Button>
         </div>
