@@ -122,6 +122,7 @@ export class APIBlazeClient {
     const response = await fetch(fullUrl, {
       ...fetchOptions,
       headers,
+      cache: 'no-store',
     });
     
     // Handle 204 No Content responses first (before checking response.ok)

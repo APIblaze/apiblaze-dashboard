@@ -3,9 +3,11 @@ export interface RouteEntry {
   method: string;
   description: string;
   require_authentication: boolean;
+  authorization_enabled: boolean;
   pre_request_auth_template: string;
   post_response_policy_template: string;
   cache_rules: string;
+  priority?: number;
 }
 
 export interface RouteConfig {
@@ -24,9 +26,11 @@ export function getRoutesWithConfig(routes: RouteEntry[]): RouteEntry[] {
     const hasCacheConfig = cache.length > 0 && cache !== '{}';
     return (
       r.require_authentication === false ||
+      r.authorization_enabled === true ||
       (r.pre_request_auth_template?.trim() ?? '').length > 0 ||
       (r.post_response_policy_template?.trim() ?? '').length > 0 ||
-      hasCacheConfig
+      hasCacheConfig ||
+      r.priority !== undefined
     );
   });
 }
@@ -63,6 +67,18 @@ export async function putRouteConfig(
   routes: RouteEntry[]
 ): Promise<RouteConfig> {
   const toSave = getRoutesWithConfig(routes);
+  const toSaveKeys = new Set(toSave.map((r) => `${r.method}:${r.path}`));
+
+  // Delete routes that were cleared (in the full list but have no config now)
+  const toDelete = routes.filter((r) => !toSaveKeys.has(`${r.method}:${r.path}`));
+  await Promise.all(
+    toDelete.map((entry) =>
+      deleteRouteEntry(projectId, apiVersion, entry.path, entry.method).catch((err) => {
+        console.warn('[putRouteConfig] Failed to delete stale route entry:', entry.method, entry.path, err);
+      })
+    )
+  );
+
   const results = await Promise.all(
     toSave.map((entry) => putRouteEntry(projectId, apiVersion, entry.path, entry.method, entry))
   );
@@ -80,8 +96,12 @@ export async function putRouteEntry(
   method: string,
   entry: RouteEntry
 ): Promise<RouteEntry> {
-  const pathEncoded = encodeURIComponent(path);
-  const url = `/api/route-configs/${encodeURIComponent(projectId)}/${encodeURIComponent(apiVersion)}/${pathEncoded}/${encodeURIComponent(method)}`;
+  // URL: /api/route-configs/{projectName}/{apiVersion}/{METHOD}{/path/segments}
+  // e.g. PUT /api/route-configs/myproject/1.0.0/GET/api/v1/users/{id}
+  // The [...path] catch-all in the Next.js handler rebuilds the route path from segments.
+  // NOTE: path already starts with '/' so no separator needed between method and path.
+  const normalizedPath = path.length > 1 ? path.replace(/\/+$/, '') : path;
+  const url = `/api/route-configs/${encodeURIComponent(projectId)}/${encodeURIComponent(apiVersion)}/${encodeURIComponent(method)}${normalizedPath}`;
   const response = await fetch(url, {
     method: 'PUT',
     credentials: 'include',
@@ -103,8 +123,9 @@ export async function deleteRouteEntry(
   path: string,
   method: string
 ): Promise<void> {
-  const pathEncoded = encodeURIComponent(path);
-  const url = `/api/route-configs/${encodeURIComponent(projectId)}/${encodeURIComponent(apiVersion)}/${pathEncoded}/${encodeURIComponent(method)}`;
+  // URL structure mirrors putRouteEntry — see comment there.
+  const normalizedPath = path.length > 1 ? path.replace(/\/+$/, '') : path;
+  const url = `/api/route-configs/${encodeURIComponent(projectId)}/${encodeURIComponent(apiVersion)}/${encodeURIComponent(method)}${normalizedPath}`;
   const response = await fetch(url, {
     method: 'DELETE',
     credentials: 'include',

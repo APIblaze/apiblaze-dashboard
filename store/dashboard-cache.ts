@@ -6,6 +6,27 @@
  */
 
 import { create } from 'zustand';
+
+function deepMerge(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...base };
+  for (const key of Object.keys(patch)) {
+    const patchVal = patch[key];
+    const baseVal = base[key];
+    if (
+      patchVal !== null &&
+      typeof patchVal === 'object' &&
+      !Array.isArray(patchVal) &&
+      baseVal !== null &&
+      typeof baseVal === 'object' &&
+      !Array.isArray(baseVal)
+    ) {
+      result[key] = deepMerge(baseVal as Record<string, unknown>, patchVal as Record<string, unknown>);
+    } else {
+      result[key] = patchVal;
+    }
+  }
+  return result;
+}
 import { listProjects } from '@/lib/api/projects';
 import { api } from '@/lib/api';
 import type { Project } from '@/types/project';
@@ -43,6 +64,8 @@ export interface DashboardCacheActions {
   /** Find app client by client id across all tenants. Returns tenantKey and appClient. */
   getAppClientWithTenant: (clientId: string) => { tenantKey: string; appClient: AppClient } | undefined;
   getProviders: (tenantKey: string, clientId: string) => SocialProvider[];
+  /** Update a single project's config in cache after a PATCH save. Avoids full invalidateAndRefetch. */
+  updateProjectInCache: (projectId: string, apiVersion: string, configPatch: Record<string, unknown>) => void;
   /** Update a single app client in cache (e.g. after verify). */
   updateAppClientInCache: (tenantKey: string, clientId: string, patch: Partial<AppClient>) => void;
   /** Tenant-only: lazy-load app clients for a tenant. */
@@ -203,6 +226,20 @@ export const useDashboardCacheStore = create<DashboardCacheState & DashboardCach
   },
   getProviders: (tenantKey, clientId) =>
     get().providersByConfigClient[`${tenantKey}:${clientId}`] ?? get().providersByConfigClient[`${tenantKey}-${clientId}`] ?? [],
+
+  updateProjectInCache: (projectId, apiVersion, configPatch) => {
+    const projects = get().projects;
+    const idx = projects.findIndex(
+      (p) => p.project_id === projectId && p.api_version === apiVersion
+    );
+    if (idx < 0) return;
+    const existing = projects[idx];
+    const updated = {
+      ...existing,
+      config: deepMerge(existing.config as Record<string, unknown> ?? {}, configPatch),
+    };
+    set({ projects: [...projects.slice(0, idx), updated, ...projects.slice(idx + 1)] });
+  },
 
   updateAppClientInCache: (tenantKey, clientId, patch) => {
     const clients = get().appClientsByConfig[tenantKey] ?? [];

@@ -6,15 +6,15 @@ const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ projectId: string; version: string; tenantName: string }> }
+  { params }: { params: Promise<{ projectId: string; apiVersion: string; tenantName: string }> }
 ) {
   try {
     const userClaims = await getUserClaims();
-    const { projectId, version, tenantName } = await params;
+    const { projectId, apiVersion, tenantName } = await params;
 
-    if (!projectId || !version || !tenantName) {
+    if (!projectId || !apiVersion || !tenantName) {
       return NextResponse.json(
-        { error: 'Validation error', details: 'projectId, version, and tenantName are required' },
+        { error: 'Validation error', details: 'projectId, apiVersion, and tenantName are required' },
         { status: 400 }
       );
     }
@@ -24,7 +24,7 @@ export async function DELETE(
       jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
     });
 
-    await client.detachTenantFromProject(userClaims, projectId, version, tenantName);
+    await client.detachTenantFromProject(userClaims, projectId, apiVersion, tenantName);
     return new NextResponse(null, { status: 204 });
   } catch (error: unknown) {
     console.error('Error detaching tenant:', error);
