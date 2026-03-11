@@ -470,7 +470,11 @@ export function ProjectConfigPanel({
       const needsAuthConfig = config.enableSocialAuth || authType === 'oauth';
 
       if (needsAuthConfig) {
-        const hasExistingAuthConfig = config.useAuthConfig && config.authConfigId;
+        // Only use "existing" when the tenant actually has app clients; empty tenants need creation
+        const tenantAppClients =
+          teamId && config.authConfigId ? getAppClientsForTenant(teamId, config.authConfigId) : [];
+        const hasExistingAuthConfig =
+          config.useAuthConfig && config.authConfigId && tenantAppClients.length > 0;
         if (hasExistingAuthConfig) {
           const selectedTenantName = config.authConfigId!;
           if (!teamId) {
@@ -483,7 +487,7 @@ export function ProjectConfigPanel({
 
           let selectedAppClientId = config.appClientId || config.defaultAppClient;
           if (!selectedAppClientId && selectedTenantName) {
-            const clientsArray = getAppClientsForTenant(teamId, selectedTenantName);
+            const clientsArray = tenantAppClients;
             if (clientsArray.length === 0) {
               toast({
                 title: 'Configuration Error',
@@ -748,8 +752,115 @@ export function ProjectConfigPanel({
       const apiVersionVal = config.apiVersion || '1.0.0';
       let appClientIdVal = config.defaultAppClient || (currentProject.config as Record<string, unknown>)?.default_app_client_id as string || '';
 
-      // When selected tenant has no app clients and user configured APIBlaze GitHub, create app client + provider first
+      // When selected tenant has no app clients and user configured bring-your-own OAuth, create app client + provider first
       const teamIdForAuth = derivedAuth.effectiveTeamId;
+      const hasProviders = config.providers && config.providers.length > 0;
+      const hasLegacyProvider = !!(config.identityProviderClientId && config.identityProviderClientSecret);
+      const shouldCreateBringOwn =
+        config.enableSocialAuth &&
+        config.bringOwnProvider &&
+        (!derivedAuth.existingTenantAppClients || derivedAuth.existingTenantAppClients.length === 0) &&
+        teamIdForAuth &&
+        (hasProviders || hasLegacyProvider);
+
+      if (shouldCreateBringOwn) {
+        try {
+          const tenantName = derivedAuth.activeAuthTenant;
+          const tenantDisplayName = tenantName === 'api' ? 'Default' : tenantName;
+          const tenantsRes = await api.getTeamTenants(teamIdForAuth, true);
+          const tenantsList = Array.isArray((tenantsRes as { tenants?: unknown }).tenants)
+            ? (tenantsRes as { tenants: Array<{ tenant_name?: string } | string> }).tenants
+            : [];
+          const hasTenant = tenantsList.some(
+            (t: { tenant_name?: string } | string) => (typeof t === 'string' ? t === tenantName : t?.tenant_name === tenantName)
+          );
+          if (!hasTenant) {
+            await api.createTeamTenant(teamIdForAuth, { tenant_name: tenantName, display_name: tenantDisplayName });
+          }
+          const subdomain = (projectNameVal || currentProject.project_id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const defaultCallbackUrl = `https://${subdomain}-${tenantName}.portal.apiblaze.com/${apiVersionVal}`;
+          const callbackUrls = config.authorizedCallbackUrls?.length ? config.authorizedCallbackUrls : [defaultCallbackUrl];
+          const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
+            ? [defaultCallbackUrl, ...callbackUrls.filter((u) => u !== defaultCallbackUrl)]
+            : [defaultCallbackUrl, ...callbackUrls];
+          const appClient = await api.createAppClientForTenant(teamIdForAuth, tenantName, {
+            name: `${projectNameVal || currentProject.project_id}-appclient`,
+            projectName: projectNameVal || currentProject.project_id,
+            apiVersion: apiVersionVal,
+            tenant: tenantName,
+            scopes: config.scopes,
+            authorizedCallbackUrls: finalCallbackUrls,
+          });
+          const newAppClientId = (appClient as { id?: string }).id ?? (appClient as { clientId?: string }).clientId;
+          if (!newAppClientId) {
+            toast({ title: 'Error', description: 'App client was created but no client ID returned.', variant: 'destructive' });
+            setIsSavingConfig(false);
+            return;
+          }
+          const DEFAULT_SCOPES: Record<SocialProvider, string[]> = {
+            google: ['email', 'openid', 'profile'],
+            github: ['read:user', 'user:email'],
+            microsoft: ['email', 'openid', 'profile'],
+            facebook: ['email', 'public_profile'],
+            auth0: ['openid', 'profile', 'email'],
+            other: ['openid', 'profile'],
+          };
+          const providersToAdd = config.providers?.length
+            ? config.providers
+            : config.identityProviderClientId && config.identityProviderClientSecret
+              ? [
+                  {
+                    type: config.socialProvider,
+                    clientId: config.identityProviderClientId,
+                    clientSecret: config.identityProviderClientSecret,
+                    domain: config.identityProviderDomain || undefined,
+                    tokenType: config.tokenType || 'apiblaze',
+                    targetServerToken: config.targetServerToken || 'apiblaze',
+                    includeApiblazeAccessTokenHeader: config.includeApiblazeAccessTokenHeader ?? false,
+                    includeApiblazeIdTokenHeader: config.includeApiblazeIdTokenHeader ?? false,
+                    scopes: config.scopes?.length ? config.scopes : DEFAULT_SCOPES[config.socialProvider],
+                  },
+                ]
+              : [];
+          for (const provider of providersToAdd) {
+            const providerScopes = provider.scopes?.length ? provider.scopes : DEFAULT_SCOPES[provider.type];
+            await api.addProviderByTenant(teamIdForAuth, tenantName, newAppClientId, {
+              type: provider.type,
+              clientId: provider.clientId ?? '',
+              clientSecret: provider.clientSecret ?? '',
+              scopes: providerScopes,
+              domain: provider.domain || undefined,
+              tokenType: ((provider as { tokenType?: string }).tokenType || config.tokenType || 'apiblaze') as 'apiblaze' | 'thirdParty',
+              targetServerToken: ((provider as { targetServerToken?: string }).targetServerToken || config.targetServerToken || 'apiblaze') as
+                | 'apiblaze'
+                | 'third_party_access_token'
+                | 'third_party_id_token'
+                | 'none',
+              includeApiblazeAccessTokenHeader:
+                (provider as { includeApiblazeAccessTokenHeader?: boolean }).includeApiblazeAccessTokenHeader ??
+                config.includeApiblazeAccessTokenHeader ??
+                false,
+              includeApiblazeIdTokenHeader:
+                (provider as { includeApiblazeIdTokenHeader?: boolean }).includeApiblazeIdTokenHeader ??
+                config.includeApiblazeIdTokenHeader ??
+                false,
+            });
+          }
+          appClientIdVal = newAppClientId;
+          updateConfig({ defaultAppClient: newAppClientId });
+          await invalidateAndRefetch(teamIdForAuth);
+        } catch (createError) {
+          toast({
+            title: 'Failed to Create Login Page',
+            description: createError instanceof Error ? createError.message : 'Failed to create app client and provider.',
+            variant: 'destructive',
+          });
+          setIsSavingConfig(false);
+          return;
+        }
+      }
+
+      // When selected tenant has no app clients and user configured APIBlaze GitHub, create app client + provider first
       const shouldCreateAppClient =
         config.enableSocialAuth &&
         !config.bringOwnProvider &&

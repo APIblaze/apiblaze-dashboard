@@ -730,7 +730,7 @@ function CreateModeLoginSetup({ config, updateConfig }: { config: ProjectConfig;
   );
 }
 
-// ─── Provider Dialog (Add / Edit) ─────────────────────────────────────────────
+// ─── Provider Form (Add / Edit inline) ────────────────────────────────────────
 
 interface ProviderFormState {
   type: SocialProvider;
@@ -746,280 +746,229 @@ interface ProviderFormState {
   defaultCallbackUrl?: string;
 }
 
-function ProviderDialog({
-  open, onOpenChange, initial, isEdit, onSave, saving,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  initial: ProviderFormState;
-  isEdit: boolean;
-  onSave: (f: ProviderFormState) => Promise<void>;
-  saving: boolean;
-}) {
-  const [form, setForm] = useState<ProviderFormState>(initial);
-  const [showAdv, setShowAdv] = useState(false);
-  const upd = (u: Partial<ProviderFormState>) => setForm(f => ({ ...f, ...u }));
+// OAuth-only providers (exclude APIBlaze built-in)
+const OAUTH_PROVIDERS = CREATE_PROVIDERS.filter(opt => opt.own);
 
-  useEffect(() => {
-    if (open) { setForm(initial); setShowAdv(false); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+function ProviderFormInline({
+  form,
+  onUpdate,
+  onSave,
+  onCancel,
+  saving,
+  isEdit,
+}: {
+  form: ProviderFormState;
+  onUpdate: (u: Partial<ProviderFormState>) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  saving: boolean;
+  isEdit: boolean;
+}) {
+  const [showAdv, setShowAdv] = useState(false);
+  const upd = onUpdate;
 
   const secretOk = form.clientSecret === '' || form.clientSecret.length >= CLIENT_SECRET_MIN_LENGTH;
-  const canSave = form.clientId.trim() !== '' && secretOk && (!isEdit || form.clientSecret !== '' ? secretOk : true);
+  const canSave = form.clientId.trim() !== '' && ((isEdit && form.clientSecret === '') || (secretOk && form.clientSecret.trim() !== ''));
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? 'Edit provider' : 'Add OAuth provider'}</DialogTitle>
-          <DialogDescription>Configure which OAuth identity provider users will log in with.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 py-2">
-          {/* Provider type chips */}
-          <div>
-            <Label className="text-xs">Provider</Label>
-            <div className="grid grid-cols-3 gap-2 mt-2">
-              {CREATE_PROVIDERS.map(opt => {
-                const p = opt.p;
-                const selected = form.type === p;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() =>
-                      upd({
-                        type: p,
-                        domain: PROVIDER_DOMAINS[p],
-                        scopes: [...DEFAULT_SCOPES[p]],
-                      })
-                    }
-                    className={`flex flex-col items-center gap-1 p-2 rounded-lg border-2 text-xs transition-all ${
-                      selected ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/40'
-                    }`}
-                  >
-                    <ProviderIcon id={opt.id} size="sm" />
-                    <span>{opt.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+    <div className="space-y-4 rounded-xl border bg-card p-4">
+      <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Identity provider</Label>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {OAUTH_PROVIDERS.map(opt => {
+          const selected = form.type === opt.p;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() =>
+                upd({
+                  type: opt.p,
+                  domain: PROVIDER_DOMAINS[opt.p],
+                  scopes: [...DEFAULT_SCOPES[opt.p]],
+                })
+              }
+              className={`flex flex-col items-center gap-2 p-3 rounded-xl border-2 text-center transition-all ${selected ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/40'}`}
+            >
+              <ProviderIcon id={opt.id} size="lg" />
+              <span className="text-xs font-medium leading-tight">{opt.label}</span>
+              {selected && <Check className="h-3 w-3 text-primary" />}
+            </button>
+          );
+        })}
+      </div>
 
+      <div className="space-y-3 p-4 border rounded-lg bg-muted/20">
+        <div className="flex items-center gap-2">
+          <ProviderIcon id={form.type} size="sm" />
+          <Label className="text-sm font-semibold">{PROVIDER_LABELS[form.type]} credentials</Label>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <Label className="text-xs">Client ID</Label>
             <Input placeholder="Your OAuth client ID" value={form.clientId} onChange={e => upd({ clientId: e.target.value })} className="mt-1" />
           </div>
           <div>
             <Label className="text-xs">Client Secret</Label>
-            <Input type="password" placeholder={isEdit ? 'Leave blank to keep current secret' : 'Your OAuth client secret'} value={form.clientSecret} onChange={e => upd({ clientSecret: e.target.value })} className="mt-1" />
+            <Input
+              type="password"
+              placeholder={isEdit ? 'Leave blank to keep current secret' : 'Your OAuth client secret'}
+              value={form.clientSecret}
+              onChange={e => upd({ clientSecret: e.target.value })}
+              className="mt-1"
+            />
             {form.clientSecret.length > 0 && form.clientSecret.length < CLIENT_SECRET_MIN_LENGTH && (
-              <p className="text-xs text-amber-600 mt-1 flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Must be at least {CLIENT_SECRET_MIN_LENGTH} characters.</p>
+              <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" /> Must be at least {CLIENT_SECRET_MIN_LENGTH} characters.
+              </p>
             )}
           </div>
+        </div>
 
-          <button type="button" onClick={() => setShowAdv(v => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-            {showAdv ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Advanced (domain, scopes)
-          </button>
-          {showAdv && (
-            <div className="pl-4 border-l-2 border-muted space-y-4">
+        <button type="button" onClick={() => setShowAdv(v => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+          {showAdv ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          Advanced settings
+        </button>
+        {showAdv && (
+          <div className="pl-4 border-l-2 border-muted space-y-4">
+            <div>
+              <Label className="text-xs">Identity provider domain</Label>
+              <Input
+                placeholder={PROVIDER_DOMAINS[form.type] || 'https://your-domain.example.com'}
+                value={form.domain}
+                onChange={e => upd({ domain: e.target.value })}
+                className="mt-1 text-xs"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-medium">Client side token type</Label>
+              <p className="text-xs text-muted-foreground mb-1">Tokens the API users will see</p>
+              <Select value={form.tokenType} onValueChange={v => upd({ tokenType: v as 'apiblaze' | 'thirdParty' })}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
+                  <SelectItem value="thirdParty">Third Party</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {form.tokenType !== 'thirdParty' && (
               <div>
-                <Label className="text-xs">Provider domain</Label>
-                <Input
-                  placeholder={PROVIDER_DOMAINS[form.type] || 'https://…'}
-                  value={form.domain}
-                  onChange={e => upd({ domain: e.target.value })}
-                  className="mt-1 text-xs"
-                />
-              </div>
-              <div>
-                <Label className="text-xs font-medium">Client side token type</Label>
-                <p className="text-xs text-muted-foreground mb-1">Tokens the API users will see</p>
+                <Label className="text-xs font-medium">Target server token type</Label>
+                <p className="text-xs text-muted-foreground mb-1">What to send in the Authorization header to your target servers</p>
                 <Select
-                  value={form.tokenType}
-                  onValueChange={v => upd({ tokenType: v as 'apiblaze' | 'thirdParty' })}
+                  value={form.targetServerToken}
+                  onValueChange={v => upd({ targetServerToken: v as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none' })}
                 >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
-                    <SelectItem value="thirdParty">Third Party</SelectItem>
+                    <SelectItem value="third_party_access_token">{PROVIDER_LABELS[form.type]} access token</SelectItem>
+                    <SelectItem value="third_party_id_token">{PROVIDER_LABELS[form.type]} ID token</SelectItem>
+                    <SelectItem value="none">None</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              {form.tokenType !== 'thirdParty' && (
-                <div>
-                  <Label className="text-xs font-medium">Target server token type</Label>
-                  <p className="text-xs text-muted-foreground mb-1">
-                    What to send in the Authorization header to your target servers
-                  </p>
-                  <Select
-                    value={form.targetServerToken}
-                    onValueChange={v =>
-                      upd({
-                        targetServerToken: v as
-                          | 'apiblaze'
-                          | 'third_party_access_token'
-                          | 'third_party_id_token'
-                          | 'none',
-                      })
-                    }
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
-                      <SelectItem value="third_party_access_token">
-                        {PROVIDER_LABELS[form.type]} access token
-                      </SelectItem>
-                      <SelectItem value="third_party_id_token">
-                        {PROVIDER_LABELS[form.type]} ID token
-                      </SelectItem>
-                      <SelectItem value="none">None</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <div>
-                <Label className="text-xs font-medium">Authorized Scopes</Label>
-                <p className="text-xs text-muted-foreground mb-1">
-                  Default scopes for {PROVIDER_LABELS[form.type]}:{' '}
-                  {DEFAULT_SCOPES[form.type].join(', ')}
-                </p>
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {form.scopes.map(s => (
-                    <Badge key={s} variant="secondary" className="gap-1 text-xs">
-                      {s}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          upd({
-                            scopes: form.scopes.filter(x => x !== s),
-                          })
-                        }
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Add custom scope"
-                    value={form.newScope}
-                    onChange={e => upd({ newScope: e.target.value })}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const trimmed = form.newScope.trim();
-                        if (trimmed && !form.scopes.includes(trimmed)) {
-                          upd({
-                            scopes: [...form.scopes, trimmed],
-                            newScope: '',
-                          });
-                        }
-                      }
-                    }}
-                    className="text-xs h-8"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-8"
-                    onClick={() => {
+            )}
+            <div>
+              <Label className="text-xs font-medium">Authorized Scopes</Label>
+              <p className="text-xs text-muted-foreground mb-1">Default scopes for {PROVIDER_LABELS[form.type]}: {DEFAULT_SCOPES[form.type].join(', ')}</p>
+              <div className="flex flex-wrap gap-1 mb-2">
+                {form.scopes.map(s => (
+                  <Badge key={s} variant="secondary" className="gap-1 text-xs">
+                    {s}
+                    <button type="button" onClick={() => upd({ scopes: form.scopes.filter(x => x !== s) })}><X className="h-3 w-3" /></button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Add custom scope"
+                  value={form.newScope}
+                  onChange={e => upd({ newScope: e.target.value })}
+                  className="h-8 text-xs"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
                       const trimmed = form.newScope.trim();
                       if (trimmed && !form.scopes.includes(trimmed)) {
-                        upd({
-                          scopes: [...form.scopes, trimmed],
-                          newScope: '',
-                        });
+                        upd({ scopes: [...form.scopes, trimmed], newScope: '' });
                       }
-                    }}
-                  >
-                    <Plus className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs font-medium">Authorized Callback URLs</Label>
-                <div className="flex flex-wrap gap-1 mt-1 mb-2">
-                  {form.callbackUrls.length > 0
-                    ? form.callbackUrls.map((url, i) => (
-                        <Badge key={i} variant="secondary" className="gap-1 text-xs font-mono">
-                          {url}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              upd({
-                                callbackUrls: form.callbackUrls.filter((_, j) => j !== i),
-                              })
-                            }
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </Badge>
-                      ))
-                    : form.defaultCallbackUrl
-                      ? (
-                        <Badge variant="secondary" className="gap-1 text-xs font-mono">
-                          <span className="text-muted-foreground">Default</span>
-                          <span>{form.defaultCallbackUrl}</span>
-                        </Badge>
-                      )
-                      : null}
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="https://example.com/callback"
-                    value={form.newCallbackUrl}
-                    onChange={e => upd({ newCallbackUrl: e.target.value })}
-                    className="h-8 text-xs"
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const u = form.newCallbackUrl.trim();
-                        if (u && !form.callbackUrls.includes(u)) {
-                          upd({
-                            callbackUrls: [...form.callbackUrls, u],
-                            newCallbackUrl: '',
-                          });
-                        }
-                      }
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-8"
-                    onClick={() => {
-                      const u = form.newCallbackUrl.trim();
-                      if (u && !form.callbackUrls.includes(u)) {
-                        upd({
-                          callbackUrls: [...form.callbackUrls, u],
-                          newCallbackUrl: '',
-                        });
-                      }
-                    }}
-                  >
-                    <Plus className="h-3 w-3" />
-                  </Button>
-                </div>
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => {
+                    const trimmed = form.newScope.trim();
+                    if (trimmed && !form.scopes.includes(trimmed)) {
+                      upd({ scopes: [...form.scopes, trimmed], newScope: '' });
+                    }
+                  }}
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
               </div>
             </div>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button disabled={!canSave || saving} onClick={() => onSave(form)}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-            {isEdit ? 'Save changes' : 'Add provider'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            <div>
+              <Label className="text-xs font-medium">Authorized Callback URLs</Label>
+              <div className="flex flex-wrap gap-1 mt-1 mb-2">
+                {form.callbackUrls.length > 0
+                  ? form.callbackUrls.map((url, i) => (
+                      <Badge key={i} variant="secondary" className="gap-1 text-xs font-mono">
+                        {url}
+                        <button type="button" onClick={() => upd({ callbackUrls: form.callbackUrls.filter((_, j) => j !== i) })}><X className="h-3 w-3" /></button>
+                      </Badge>
+                    ))
+                  : form.defaultCallbackUrl
+                    ? <Badge variant="secondary" className="gap-1 text-xs font-mono"><span className="text-muted-foreground">Default:</span> {form.defaultCallbackUrl}</Badge>
+                    : null}
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://example.com/callback"
+                  value={form.newCallbackUrl}
+                  onChange={e => upd({ newCallbackUrl: e.target.value })}
+                  className="h-8 text-xs"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const u = form.newCallbackUrl.trim();
+                      if (u && !form.callbackUrls.includes(u)) {
+                        upd({ callbackUrls: [...form.callbackUrls, u], newCallbackUrl: '' });
+                      }
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => {
+                    const u = form.newCallbackUrl.trim();
+                    if (u && !form.callbackUrls.includes(u)) {
+                      upd({ callbackUrls: [...form.callbackUrls, u], newCallbackUrl: '' });
+                    }
+                  }}
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <ProviderSetupGuide provider={form.type} />
+      </div>
+
+      <div className="flex gap-2 pt-2">
+        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button type="button" disabled={!canSave || saving} onClick={onSave}>
+          {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+          {isEdit ? 'Save changes' : 'Add provider'}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -1381,7 +1330,6 @@ function AppClientPanel({
   const providersByConfigClient = useDashboardCacheStore(s => s.providersByConfigClient);
 
   const [expanded, setExpanded] = useState(defaultExpanded ?? false);
-  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [editProviderInitial, setEditProviderInitial] = useState<ProviderFormState | null>(null);
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [loadingProviderId, setLoadingProviderId] = useState<string | null>(null);
@@ -1457,7 +1405,6 @@ function AppClientPanel({
     });
     setEditingProviderId(p.id);
     setLoadingProviderId(null);
-    setProviderDialogOpen(true);
   };
 
   const handleDeleteProvider = async (p: ProviderRaw) => {
@@ -1494,7 +1441,6 @@ function AppClientPanel({
         toast({ title: 'Provider added' });
       }
       await invalidateAndRefetch(teamId);
-      setProviderDialogOpen(false);
       setEditingProviderId(null);
       setEditProviderInitial(null);
     } catch (e) {
@@ -1738,6 +1684,17 @@ function AppClientPanel({
 
       {/* ── OAuth Providers — always visible ── */}
       <div className="px-4 py-3 border-t">
+        {editProviderInitial ? (
+          <ProviderFormInline
+            form={editProviderInitial}
+            onUpdate={u => setEditProviderInitial(prev => prev ? { ...prev, ...u } : null)}
+            onSave={() => handleSaveProvider(editProviderInitial)}
+            onCancel={() => { setEditingProviderId(null); setEditProviderInitial(null); }}
+            saving={providerSaving}
+            isEdit={!!editingProviderId}
+          />
+        ) : (
+        <>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-muted-foreground" />
@@ -1767,7 +1724,6 @@ function AppClientPanel({
                 newCallbackUrl: '',
                 defaultCallbackUrl,
               });
-              setProviderDialogOpen(true);
             }}>
             <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Provider
           </Button>
@@ -1799,19 +1755,9 @@ function AppClientPanel({
             })}
           </div>
         )}
+        </>
+        )}
       </div>
-
-      {/* Provider dialog */}
-      {editProviderInitial && (
-        <ProviderDialog
-          open={providerDialogOpen}
-          onOpenChange={o => { setProviderDialogOpen(o); if (!o) { setEditingProviderId(null); setEditProviderInitial(null); } }}
-          initial={editProviderInitial}
-          isEdit={!!editingProviderId}
-          onSave={handleSaveProvider}
-          saving={providerSaving}
-        />
-      )}
     </div>
   );
 }
