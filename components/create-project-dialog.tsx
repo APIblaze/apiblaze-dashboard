@@ -1097,7 +1097,10 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         requests_auth,
         authorization: { enforce_authorization: config.enforceAuthorization },
       };
-      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
+      const effectiveTenant = selectedAuthTenant || config.defaultTenant || 'api';
+      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload, {
+        tenant: effectiveTenant,
+      });
       toast({ title: 'Config Saved', description: 'Project configuration has been updated successfully.' });
       const updatedConfig = { ...(currentProject.config as Record<string, unknown>), ...payload };
       const updatedProject = { ...currentProject, config: updatedConfig };
@@ -1113,7 +1116,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     } finally {
       setIsSavingConfig(false);
     }
-  }, [currentProject, config, onProjectUpdate, toast]);
+  }, [currentProject, config, selectedAuthTenant, onProjectUpdate, toast]);
 
   const handleDelete = useCallback(async () => {
     if (!currentProject) return;

@@ -296,6 +296,7 @@ export function ProjectConfigPanel({
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
   const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
   const updateProjectInCache = useDashboardCacheStore((s) => s.updateProjectInCache);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
 
   useEffect(() => {
     setCurrentProject(project);
@@ -743,9 +744,41 @@ export function ProjectConfigPanel({
     if (!currentProject) return;
     setIsSavingConfig(true);
     try {
-      const projectNameVal = config.projectName || '';
+      const projectNameVal = config.projectName || currentProject.project_id || '';
       const apiVersionVal = config.apiVersion || '1.0.0';
-      const appClientIdVal = config.defaultAppClient || (currentProject.config as Record<string, unknown>)?.default_app_client_id as string || '';
+      let appClientIdVal = config.defaultAppClient || (currentProject.config as Record<string, unknown>)?.default_app_client_id as string || '';
+
+      // When selected tenant has no app clients and user configured APIBlaze GitHub, create app client + provider first
+      const teamIdForAuth = derivedAuth.effectiveTeamId;
+      const shouldCreateAppClient =
+        config.enableSocialAuth &&
+        !config.bringOwnProvider &&
+        (!derivedAuth.existingTenantAppClients || derivedAuth.existingTenantAppClients.length === 0) &&
+        teamIdForAuth;
+
+      if (shouldCreateAppClient) {
+        try {
+          const result = await api.createAuthConfigWithDefaultGitHub({
+            teamId: teamIdForAuth,
+            tenantName: derivedAuth.activeAuthTenant,
+            appClientName: `${projectNameVal || currentProject.project_id}-appclient`,
+            projectName: projectNameVal || currentProject.project_id,
+            apiVersion: apiVersionVal,
+            scopes: config.scopes?.length ? config.scopes : undefined,
+          });
+          appClientIdVal = result.appClientId;
+          updateConfig({ defaultAppClient: result.appClientId });
+          await invalidateAndRefetch(teamIdForAuth);
+        } catch (createError) {
+          toast({
+            title: 'Failed to Create Login Page',
+            description: createError instanceof Error ? createError.message : 'Default GitHub credentials may not be configured. Deploy to create the login page.',
+            variant: 'destructive',
+          });
+          setIsSavingConfig(false);
+          return;
+        }
+      }
       const substitutePlaceholders = (s: string) =>
         s.replace(/\{projectName\}/g, projectNameVal).replace(/\{apiVersion\}/g, apiVersionVal).replace(/\{appClientId\}/g, appClientIdVal);
 
@@ -786,11 +819,13 @@ export function ProjectConfigPanel({
       }
 
       const payload: Record<string, unknown> = {
-        default_app_client_id: config.defaultAppClient || null,
+        default_app_client_id: appClientIdVal || null,
         requests_auth,
         authorization: { enforce_authorization: config.enforceAuthorization },
       };
-      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
+      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload, {
+        tenant: derivedAuth.activeAuthTenant,
+      });
 
       // Save route config if any routes are present
       const routesToSave = routesRef.current?.length ? routesRef.current : (config.routeConfig?.routes ?? []);
@@ -815,7 +850,7 @@ export function ProjectConfigPanel({
     } finally {
       setIsSavingConfig(false);
     }
-  }, [currentProject, config, onProjectUpdate, toast, updateProjectInCache]);
+  }, [currentProject, config, derivedAuth, onProjectUpdate, toast, updateProjectInCache, updateConfig, invalidateAndRefetch]);
 
   const handleDelete = useCallback(async () => {
     if (!currentProject) return;

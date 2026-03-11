@@ -1924,7 +1924,7 @@ function TenantDetail({
       if (appClients.length === 0 || !config.defaultAppClient) {
         updateConfig({ defaultAppClient: newClientId });
         if (project) {
-          try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: newClientId }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
+          try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: newClientId }, { tenant: tenant.tenant_name }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
         }
       }
       closeAdd();
@@ -1942,7 +1942,7 @@ function TenantDetail({
       ...(project === null ? { useAuthConfig: true, authConfigId: tenant.tenant_name } : {}),
     });
     if (project) {
-      try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: clientId }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
+      try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: clientId }, { tenant: tenant.tenant_name }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
     }
   };
 
