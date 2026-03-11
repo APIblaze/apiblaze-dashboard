@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Loader2, Rocket, ChevronRight, Save } from 'lucide-react';
 import { GeneralSection } from './general-section';
 import { AuthenticationSection } from './authentication-section';
+import { AuthorizationSection } from './authorization-section';
 import { TargetServersSection } from './target-servers-section';
 import { ThrottlingSection } from './throttling-section';
 import { RoutesSection } from './routes-section';
@@ -24,7 +25,8 @@ import { cn } from '@/lib/utils';
 
 const NEW_PROJECT_STEPS: { id: ProjectConfigTab; label: string }[] = [
   { id: 'general', label: 'General' },
-  { id: 'auth', label: 'Tenant Auth' },
+  { id: 'authentication', label: 'Tenant Auth' },
+  { id: 'authorization', label: 'Authorization' },
   { id: 'targets', label: 'Targets' },
   { id: 'throttling', label: 'Throttling' },
   { id: 'preprocessing', label: 'Processing' },
@@ -103,7 +105,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       opaqueTokenParams: '?access_token={token}',
       opaqueTokenBody: 'token={token}',
       useAuthConfig: false,
-      defaultTenant: 'MyDefaultTenant',
+      defaultTenant: 'api',
       authConfigId: undefined,
       appClientId: undefined,
       defaultAppClient: undefined,
@@ -125,6 +127,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
       preProcessingPath: '',
       postProcessingPath: '',
       customDomains: [],
+      enforceAuthorization: false,
     };
   }
   const projectConfig = project?.config as Record<string, unknown> | undefined;
@@ -153,7 +156,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     opaqueTokenParams: '?access_token={token}',
     opaqueTokenBody: 'token={token}',
     useAuthConfig: !!(projectConfig?.auth_config_id as string),
-    defaultTenant: (projectConfig?.default_tenant as string) || 'MyDefaultTenant',
+    defaultTenant: (projectConfig?.default_tenant as string) || 'api',
     authConfigId: projectConfig?.auth_config_id as string | undefined,
     appClientId: undefined,
     defaultAppClient: (projectConfig?.default_app_client_id || projectConfig?.defaultAppClient) as string | undefined,
@@ -194,6 +197,7 @@ function getInitialConfig(project: Project | null): ProjectConfig {
     preProcessingPath: '',
     postProcessingPath: '',
     customDomains: [],
+    enforceAuthorization: (projectConfig?.authorization as Record<string, unknown>)?.enforce_authorization === true,
   };
 }
 
@@ -230,8 +234,12 @@ export function ProjectConfigPanel({
   const [selectedAuthTenant, setSelectedAuthTenant] = useState<string | undefined>(undefined);
   const isDeployingRef = useRef(false);
   const routesRef = useRef<RouteEntry[]>([]);
+  const currentProjectKeyRef = useRef<string | null>(
+    project ? `${project.project_id}:${project.api_version}` : null
+  );
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
   const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
+  const updateProjectInCache = useDashboardCacheStore((s) => s.updateProjectInCache);
 
   useEffect(() => {
     setCurrentProject(project);
@@ -240,7 +248,9 @@ export function ProjectConfigPanel({
   const [config, setConfig] = useState<ProjectConfig>(() => getInitialConfig(project));
 
   useEffect(() => {
-    if (!isDeployingRef.current) {
+    const newKey = currentProject ? `${currentProject.project_id}:${currentProject.api_version}` : null;
+    if (!isDeployingRef.current && newKey !== currentProjectKeyRef.current) {
+      currentProjectKeyRef.current = newKey;
       setConfig(getInitialConfig(currentProject));
     }
   }, [currentProject]);
@@ -248,6 +258,11 @@ export function ProjectConfigPanel({
   const updateConfig = useCallback((updates: Partial<ProjectConfig>) => {
     setConfig((prev) => ({ ...prev, ...updates }));
   }, []);
+
+  const routesSectionProject = useMemo(
+    () => currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null,
+    [currentProject?.project_id, currentProject?.api_version]
+  );
 
   const isSourceConfigured = () => {
     if (!config.projectName) return false;
@@ -368,7 +383,7 @@ export function ProjectConfigPanel({
                 description: 'The selected tenant has no app clients.',
                 variant: 'destructive',
               });
-              setActiveTab('auth');
+              setActiveTab('authentication');
               setIsDeploying(false);
               return;
             }
@@ -389,7 +404,7 @@ export function ProjectConfigPanel({
               description: 'Please add at least one OAuth provider with Client ID and Client Secret',
               variant: 'destructive',
             });
-            setActiveTab('auth');
+            setActiveTab('authentication');
             setIsDeploying(false);
             return;
           }
@@ -667,12 +682,22 @@ export function ProjectConfigPanel({
       const payload: Record<string, unknown> = {
         default_app_client_id: config.defaultAppClient || null,
         requests_auth,
+        authorization: { enforce_authorization: config.enforceAuthorization },
       };
-      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload, { tenant: selectedAuthTenant });
+      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
+
+      // Save route config if any routes are present
+      const routesToSave = routesRef.current?.length ? routesRef.current : (config.routeConfig?.routes ?? []);
+      if (routesToSave.length > 0) {
+        const { putRouteConfig } = await import('@/lib/api/route-configs');
+        await putRouteConfig(currentProject.project_id, currentProject.api_version, routesToSave);
+      }
+
       toast({ title: 'Config Saved', description: 'Project configuration has been updated successfully.' });
       const updatedConfig = { ...(currentProject.config as Record<string, unknown>), ...payload };
       const updatedProject = { ...currentProject, config: updatedConfig };
       setCurrentProject(updatedProject);
+      updateProjectInCache(currentProject.project_id, currentProject.api_version, payload);
       onProjectUpdate?.(updatedProject);
     } catch (error) {
       console.error('Failed to save config:', error);
@@ -684,7 +709,7 @@ export function ProjectConfigPanel({
     } finally {
       setIsSavingConfig(false);
     }
-  }, [currentProject, config, onProjectUpdate, toast]);
+  }, [currentProject, config, onProjectUpdate, toast, updateProjectInCache]);
 
   const handleDelete = useCallback(async () => {
     if (!currentProject) return;
@@ -752,7 +777,7 @@ export function ProjectConfigPanel({
               isDeleting={isDeleting}
             />
           )}
-          {activeTab === 'auth' && (
+          {activeTab === 'authentication' && (
             <AuthenticationSection
               config={config}
               updateConfig={updateConfig}
@@ -767,6 +792,18 @@ export function ProjectConfigPanel({
               onAuthTenantChange={setSelectedAuthTenant}
             />
           )}
+          {activeTab === 'authorization' && (
+            <AuthorizationSection
+              project={currentProject}
+              config={config}
+              updateConfig={updateConfig}
+              onProjectUpdate={(updated) => {
+                setCurrentProject(updated);
+                onProjectUpdate?.(updated);
+              }}
+            />
+          )}
+          
           {activeTab === 'targets' && (
             <TargetServersSection config={config} updateConfig={updateConfig} />
           )}
@@ -778,7 +815,7 @@ export function ProjectConfigPanel({
               config={config}
               updateConfig={updateConfig}
               onGoToGeneral={() => setActiveTab('general')}
-              project={{ project_id: currentProject.project_id, api_version: currentProject.api_version }}
+              project={routesSectionProject}
               routesRef={routesRef}
             />
           )}

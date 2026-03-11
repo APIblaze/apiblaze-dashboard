@@ -1,16 +1,16 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { RoutesTable, type RoutesTableRef } from './routes-table';
+import { RoutesTable } from './routes-table';
 import { ProjectConfig } from './types';
 import type { RouteEntry } from './types';
 import { fetchOpenApiSpec } from '@/lib/api/openapi';
-import { getRouteConfig, putRouteConfig } from '@/lib/api/route-configs';
-import { FileJson, Loader2, ArrowRight, Save } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { getRouteConfig } from '@/lib/api/route-configs';
+import { FileJson, Loader2, ArrowRight, Info } from 'lucide-react';
 import * as yaml from 'js-yaml';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 interface RoutesSectionProps {
   config: ProjectConfig;
@@ -53,10 +53,8 @@ export function RoutesSection({
   project: projectProp,
   routesRef: routesRefProp,
 }: RoutesSectionProps) {
-  const { toast } = useToast();
   const [spec, setSpec] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const existingRoutes = config.routeConfig?.routes ?? [];
@@ -140,10 +138,12 @@ export function RoutesSection({
   }, [hasSpecSource, hasUpload, hasLoadedProject, projectProp, project, loadSpec]);
 
   useEffect(() => {
-    if (projectProp && !config.routeConfig && !loading) {
+    // Skip fetch if routesRef already has data (e.g. after a save that reset config.routeConfig)
+    if (projectProp && !config.routeConfig && !routesRefProp?.current?.length) {
       getRouteConfig(projectProp.project_id, projectProp.api_version)
         .then((rc) => {
           if (rc.routes.length > 0) {
+            if (routesRefProp) routesRefProp.current = [];
             updateConfig({ routeConfig: { routes: rc.routes } });
           }
         })
@@ -151,39 +151,44 @@ export function RoutesSection({
           // No existing route config is fine
         });
     }
-  }, [projectProp, config.routeConfig, loading, updateConfig]);
-
-  const tableRef = useRef<RoutesTableRef>(null);
-
-  const handleSave = useCallback(async () => {
-    if (!projectProp) return;
-    const routes = tableRef.current?.getRoutes() ?? [];
-    if (routes.length === 0) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await putRouteConfig(projectProp.project_id, projectProp.api_version, routes);
-      updateConfig({ routeConfig: { routes } });
-      toast({ title: 'Saved', description: 'Route config saved successfully.' });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to save route config';
-      setError(msg);
-      toast({ title: 'Save failed', description: msg, variant: 'destructive' });
-    } finally {
-      setSaving(false);
-    }
-  }, [projectProp, updateConfig, toast]);
+  }, [projectProp?.project_id, projectProp?.api_version, config.routeConfig, updateConfig, routesRefProp]);
 
   const showEmptyState =
     !hasSpecSource && !hasUpload && !hasLoadedProject;
 
   return (
     <div className="space-y-6">
-      <div>
-        <Label className="text-base font-semibold">Routes</Label>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configure per-route settings: require authentication, OpenFGA templates, and cache rules. Expand each resource to edit methods.
-        </p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <Label className="text-base font-semibold">Routes</Label>
+          <p className="text-sm text-muted-foreground mt-1">
+            Configure per-route settings: require authentication, OpenFGA templates, and cache rules. Expand each resource to edit methods.
+          </p>
+        </div>
+        {config.enforceAuthorization && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="shrink-0 rounded-full p-1 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                aria-label="Authorization info"
+              >
+                <Info className="h-4 w-4" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-96 text-sm space-y-3 p-5" align="end">
+              <p className="font-semibold text-blue-800 dark:text-blue-300">Authorization is enabled</p>
+              <p className="text-sm text-muted-foreground">
+                Make sure an OpenFGA store and authorization model are configured for this project. Toggle <strong>Enable Authorization</strong> per route, then fill in the policy templates.
+              </p>
+              <div className="text-xs font-mono text-muted-foreground border rounded p-3 bg-muted/40 leading-6">
+                <div>{'{{JWT.sub}}'} · {'{{JWT.email}}'} · {'{{JWT.username}}'}</div>
+                <div>{'{{PATH.paramName}}'} · {'{{QUERY.paramName}}'}</div>
+                <div>{'{{BODY.field}}'} · {'{{RESPONSE.field}}'}</div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
       </div>
 
       {showEmptyState && (
@@ -220,34 +225,12 @@ export function RoutesSection({
 
       {!showEmptyState && !loading && !error && spec && (
         <div className="space-y-4">
-          {projectProp && spec && (
-            <div className="flex justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleSave}
-                disabled={saving}
-              >
-                {saving ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save Routes Config
-                  </>
-                )}
-              </Button>
-            </div>
-          )}
           <RoutesTable
-            ref={tableRef}
             spec={spec}
             existingRoutes={existingRoutes}
             readOnly={false}
             routesRef={routesRefProp}
+            enforceAuthorization={config.enforceAuthorization}
           />
         </div>
       )}

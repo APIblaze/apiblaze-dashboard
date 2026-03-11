@@ -6,15 +6,15 @@ const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ projectId: string; version: string }> }
+  { params }: { params: Promise<{ projectId: string; apiVersion: string }> }
 ) {
   try {
     const userClaims = await getUserClaims();
-    const { projectId, version } = await params;
+    const { projectId, apiVersion } = await params;
 
-    if (!projectId || !version) {
+    if (!projectId || !apiVersion) {
       return NextResponse.json(
-        { error: 'Validation error', details: 'projectId and version are required' },
+        { error: 'Validation error', details: 'projectId and apiVersion are required' },
         { status: 400 }
       );
     }
@@ -24,7 +24,7 @@ export async function GET(
       jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
     });
 
-    const data = await client.listProjectTenants(userClaims, projectId, version);
+    const data = await client.listProjectTenants(userClaims, projectId, apiVersion);
     return NextResponse.json(data);
   } catch (error: unknown) {
     console.error('Error listing project tenants:', error);
@@ -47,15 +47,15 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ projectId: string; version: string }> }
+  { params }: { params: Promise<{ projectId: string; apiVersion: string }> }
 ) {
   try {
     const userClaims = await getUserClaims();
-    const { projectId, version } = await params;
+    const { projectId, apiVersion } = await params;
 
-    if (!projectId || !version) {
+    if (!projectId || !apiVersion) {
       return NextResponse.json(
-        { error: 'Validation error', details: 'projectId and version are required' },
+        { error: 'Validation error', details: 'projectId and apiVersion are required' },
         { status: 400 }
       );
     }
@@ -67,7 +67,7 @@ export async function POST(
       jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
     });
 
-    const data = await client.attachTenantToProject(userClaims, projectId, version, body);
+    const data = await client.attachTenantToProject(userClaims, projectId, apiVersion, body);
     return NextResponse.json(data, { status: 201 });
   } catch (error: unknown) {
     console.error('Error attaching tenant:', error);

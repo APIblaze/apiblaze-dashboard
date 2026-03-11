@@ -145,7 +145,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     opaqueTokenParams: '?access_token={token}',
     opaqueTokenBody: 'token={token}',
     useAuthConfig: false,
-    defaultTenant: 'MyDefaultTenant',
+    defaultTenant: 'api',
     authConfigId: undefined,
     appClientId: undefined,
     defaultAppClient: undefined,
@@ -181,6 +181,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     
     // Domains (placeholder)
     customDomains: [],
+    enforceAuthorization: false,
       };
     }
 
@@ -228,7 +229,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       opaqueTokenParams: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.params as string || '?access_token={token}',
       opaqueTokenBody: ((projectConfig?.requests_auth as Record<string, unknown>)?.opaque as Record<string, unknown>)?.body as string || 'token={token}',
       useAuthConfig: !!(projectConfig?.auth_config_id as string),
-      defaultTenant: (projectConfig?.default_tenant as string) || 'MyDefaultTenant',
+      defaultTenant: (projectConfig?.default_tenant as string) || 'api',
       authConfigId: projectConfig?.auth_config_id as string | undefined,
       appClientId: undefined, // Not stored in config - selected at deployment time from database
       defaultAppClient: (projectConfig?.default_app_client_id || projectConfig?.defaultAppClient) as string | undefined,
@@ -294,6 +295,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       
       // Domains
       customDomains: [],
+      enforceAuthorization: (projectConfig?.authorization as Record<string, unknown>)?.enforce_authorization === true,
     };
   };
 
@@ -917,6 +919,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
           accountMonthlyQuota: 30000,
         },
         requests_auth,
+        authorization: { enforce_authorization: config.enforceAuthorization },
       };
       
       console.log('[CreateProject] ⚠️ CRITICAL: Project data being sent to API:', {
@@ -1085,6 +1088,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       const payload: Record<string, unknown> = {
         default_app_client_id: config.defaultAppClient || null,
         requests_auth,
+        authorization: { enforce_authorization: config.enforceAuthorization },
       };
       await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
       toast({ title: 'Config Saved', description: 'Project configuration has been updated successfully.' });
