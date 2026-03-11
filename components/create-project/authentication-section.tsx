@@ -2615,7 +2615,6 @@ export function AuthenticationSection({
   const handleTenantChange = (v: string) => { setInternalSelectedTenant(v); onAuthTenantChange?.(v); };
   const [tenantAuthLoading, setTenantAuthLoading] = useState(false);
   const [showAddTenant, setShowAddTenant] = useState(false);
-  const [showNewTenantDialog, setShowNewTenantDialog] = useState(false);
   const [newTenantSlug, setNewTenantSlug] = useState('');
   const [newTenantDisplay, setNewTenantDisplay] = useState('');
   const [addingTenant, setAddingTenant] = useState(false);
@@ -2762,6 +2761,36 @@ export function AuthenticationSection({
     }
   }, [isEditMode, existingTenantAppClients, activeTenantObj, config.useAuthConfig, config.authConfigId, config.defaultAppClient, updateConfig]);
 
+  // Update-project + empty tenant: bootstrap auth settings like create-project fast funnel
+  useEffect(() => {
+    if (!isEditMode || !activeTenantObj || existingTenantAppClients?.length) return;
+    const shouldBootstrap =
+      (config.requestsAuthMode ?? 'passthrough') === 'passthrough' &&
+      !config.defaultAppClient;
+    if (!shouldBootstrap) return;
+    updateConfig({
+      requestsAuthMode: 'authenticate',
+      requestsAuthMethods: config.requestsAuthMethods ?? ['jwt'],
+      enableSocialAuth: true,
+      whoCanRegisterToLogin: config.whoCanRegisterToLogin ?? 'anyone',
+      bringOwnProvider: false,
+      socialProvider: 'github',
+      scopes: config.scopes ?? DEFAULT_SCOPES.github,
+      allowApiblazeJwt: true,
+      allowOtherJwt: true,
+    });
+  }, [
+    isEditMode,
+    activeTenantObj,
+    existingTenantAppClients,
+    config.requestsAuthMode,
+    config.requestsAuthMethods,
+    config.defaultAppClient,
+    config.whoCanRegisterToLogin,
+    config.scopes,
+    updateConfig,
+  ]);
+
   return (
     <div className="space-y-8">
       {/* ── Tenant scope banner ── */}
@@ -2816,7 +2845,7 @@ export function AuthenticationSection({
                 variant="outline"
                 size="sm"
                 className="h-8 shrink-0"
-                onClick={() => isEditMode ? setShowNewTenantDialog(true) : setShowAddTenant(true)}
+                onClick={() => setShowAddTenant(true)}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />New tenant
               </Button>
@@ -2902,6 +2931,15 @@ export function AuthenticationSection({
         {isEditMode && project && projectTeamId ? (() => {
           const tenantObj = attachedTenants.find(t => t.tenant_name === effectiveTenant);
           if (!tenantObj) return <p className="text-sm text-muted-foreground">Select a tenant above to manage its login page.</p>;
+          const isEmptyForEdit = !existingTenantAppClients || existingTenantAppClients.length === 0;
+          if (isEmptyForEdit) {
+            return (
+              <CreateModeLoginSetup
+                config={config}
+                updateConfig={updateConfig}
+              />
+            );
+          }
           return (
             <TenantDetail
               tenant={tenantObj}
@@ -2926,25 +2964,6 @@ export function AuthenticationSection({
         )}
       </div>
 
-      {/* New tenant setup dialog (edit mode) */}
-      {isEditMode && project && projectTeamId && (
-        <NewTenantSetupDialog
-          open={showNewTenantDialog}
-          onOpenChange={setShowNewTenantDialog}
-          teamId={projectTeamId}
-          project={project}
-          onSuccess={slug => refreshTenants(slug)}
-          onEnableJwt={() => {
-            const currentMethods = config.requestsAuthMethods ?? ['jwt'];
-            updateConfig({
-              requestsAuthMethods: currentMethods.includes('jwt') ? currentMethods : [...currentMethods, 'jwt'],
-              allowApiblazeJwt: true,
-              allowOtherJwt: true,
-              enableSocialAuth: true,
-            });
-          }}
-        />
-      )}
     </div>
   );
 }
