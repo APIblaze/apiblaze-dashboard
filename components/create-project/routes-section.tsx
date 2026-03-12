@@ -20,6 +20,10 @@ interface RoutesSectionProps {
   project?: { project_id: string; api_version: string } | null;
   /** Ref for parent to read current routes (persists when section unmounts on tab switch) */
   routesRef?: React.MutableRefObject<RouteEntry[]>;
+  /** Relation names from the authorization model for quick-insert chips */
+  modelRelations?: string[];
+  /** Non-user type names from the model for quick-insert object prefix */
+  modelTypes?: string[];
 }
 
 function parseUploadedFile(file: File): Promise<Record<string, unknown>> {
@@ -52,6 +56,8 @@ export function RoutesSection({
   onGoToGeneral,
   project: projectProp,
   routesRef: routesRefProp,
+  modelRelations,
+  modelTypes,
 }: RoutesSectionProps) {
   const [spec, setSpec] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
@@ -231,6 +237,8 @@ export function RoutesSection({
             readOnly={false}
             routesRef={routesRefProp}
             enforceAuthorization={config.enforceAuthorization}
+            modelRelations={modelRelations}
+            modelTypes={modelTypes}
           />
         </div>
       )}

@@ -32,6 +32,9 @@ import { api } from '@/lib/api';
 import type { Project } from '@/types/project';
 import type { AuthConfig, AppClient, SocialProvider } from '@/types/auth-config';
 
+// In-flight dedup for listProjectTenants — prevents simultaneous mount calls from firing twice.
+const pendingProjectTenants = new Map<string, Promise<void>>();
+
 export interface DashboardCacheState {
   projects: Project[];
   authConfigs: AuthConfig[];
@@ -39,6 +42,8 @@ export interface DashboardCacheState {
   providersByConfigClient: Record<string, SocialProvider[]>;
   /** Per-key errors when provider fetch fails (key = tenantKey or tenant:teamId:tenantName:clientId) */
   providersErrorByKey: Record<string, string>;
+  /** Attached tenants per project, keyed by `${projectId}:${apiVersion}`. */
+  projectTenantsByProject: Record<string, Array<{ tenant_name: string; display_name: string }>>;
   lastTeamId: string | undefined;
   isBootstrapping: boolean;
   error: string | null;
@@ -80,6 +85,12 @@ export interface DashboardCacheActions {
   getProvidersErrorForTenant: (teamId: string, tenantName: string, clientId: string) => string | null;
   /** Tenant-only: clear provider error and cached providers for a tenant client (allows retry). */
   clearProvidersForRetryForTenant: (teamId: string, tenantName: string, clientId: string) => void;
+  /** Fetch attached tenants for a project (deduped; cached after first load). */
+  fetchProjectTenants: (projectId: string, apiVersion: string) => Promise<void>;
+  /** Get cached attached tenants for a project. */
+  getProjectTenants: (projectId: string, apiVersion: string) => Array<{ tenant_name: string; display_name: string }>;
+  /** Invalidate cached tenants for a project (call after attach/detach/create). */
+  invalidateProjectTenants: (projectId: string, apiVersion: string) => void;
 }
 
 const initialState: DashboardCacheState = {
@@ -88,6 +99,7 @@ const initialState: DashboardCacheState = {
   appClientsByConfig: {},
   providersByConfigClient: {},
   providersErrorByKey: {},
+  projectTenantsByProject: {},
   lastTeamId: undefined,
   isBootstrapping: false,
   error: null,
@@ -270,6 +282,33 @@ export const useDashboardCacheStore = create<DashboardCacheState & DashboardCach
     delete nextProviders[key];
     delete nextErrors[key];
     set({ providersByConfigClient: nextProviders, providersErrorByKey: nextErrors });
+  },
+
+  getProjectTenants: (projectId, apiVersion) =>
+    get().projectTenantsByProject[`${projectId}:${apiVersion}`] ?? [],
+
+  invalidateProjectTenants: (projectId, apiVersion) => {
+    const key = `${projectId}:${apiVersion}`;
+    pendingProjectTenants.delete(key);
+    const next = { ...get().projectTenantsByProject };
+    delete next[key];
+    set({ projectTenantsByProject: next });
+  },
+
+  fetchProjectTenants: async (projectId, apiVersion) => {
+    const key = `${projectId}:${apiVersion}`;
+    if (key in get().projectTenantsByProject) return;
+    if (pendingProjectTenants.has(key)) return pendingProjectTenants.get(key)!;
+    const promise = api.listProjectTenants(projectId, apiVersion)
+      .then(r => {
+        set({ projectTenantsByProject: { ...get().projectTenantsByProject, [key]: r.tenants ?? [] } });
+      })
+      .catch(() => {
+        set({ projectTenantsByProject: { ...get().projectTenantsByProject, [key]: [] } });
+      })
+      .finally(() => pendingProjectTenants.delete(key));
+    pendingProjectTenants.set(key, promise);
+    return promise;
   },
 
   fetchAppClientsForTenant: async (teamId, tenantName) => {

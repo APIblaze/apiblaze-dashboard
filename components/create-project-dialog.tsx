@@ -1093,6 +1093,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
       }
 
       const payload: Record<string, unknown> = {
+        tenant: selectedAuthTenant || 'api',
         default_app_client_id: config.defaultAppClient || null,
         requests_auth,
         authorization: { enforce_authorization: config.enforceAuthorization },

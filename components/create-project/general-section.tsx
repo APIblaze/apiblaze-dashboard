@@ -14,6 +14,7 @@ import { GitHubRepoSelectorModal } from './github-repo-selector-modal';
 import { GitHubAppInstallModal } from './github-app-install-modal';
 import { fetchGitHubAPI } from '@/lib/github-api';
 import { api } from '@/lib/api';
+import { useDashboardCacheStore } from '@/store/dashboard-cache';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DeleteProjectConfirmDialog } from '@/components/delete-project-confirm-dialog';
 
@@ -48,37 +49,38 @@ export function GeneralSection({ config, updateConfig, validationError, preloade
   const [installModalOpen, setInstallModalOpen] = useState(false);
   const [githubAppInstalled, setGithubAppInstalled] = useState(false);
   const [, setCheckingInstallation] = useState(true);
-  const [attachedTenants, setAttachedTenants] = useState<Array<{ tenant_name: string; display_name: string }>>([]);
   const [selectedUrlTenant, setSelectedUrlTenant] = useState<string>('api');
 
-  useEffect(() => {
-    // Check if GitHub App is installed
-    console.log('[General Section] Component mounted, checking GitHub installation');
-    checkGitHubInstallation();
-  }, []);
+  const fetchProjectTenants = useDashboardCacheStore(s => s.fetchProjectTenants);
+  const projectTenantsByProject = useDashboardCacheStore(s => s.projectTenantsByProject);
+  const attachedTenants = editingProject
+    ? (projectTenantsByProject[`${editingProject.project_id}:${editingProject.api_version}`] ?? [])
+    : [];
 
+  // Trigger tenant fetch when editing project changes
   useEffect(() => {
     if (!editingProject) return;
-    api.listProjectTenants(editingProject.project_id, editingProject.api_version)
-      .then((r) => {
-        setAttachedTenants(r.tenants ?? []);
-        setSelectedUrlTenant(r.tenants?.[0]?.tenant_name ?? 'api');
-      })
-      .catch(() => setAttachedTenants([]));
+    fetchProjectTenants(editingProject.project_id, editingProject.api_version);
   }, [editingProject?.project_id, editingProject?.api_version]);
 
-  // Re-check if app was just installed
+  // Sync URL tenant selector when tenants load
   useEffect(() => {
+    if (attachedTenants.length > 0) {
+      setSelectedUrlTenant(prev =>
+        attachedTenants.some(t => t.tenant_name === prev) ? prev : (attachedTenants[0].tenant_name ?? 'api')
+      );
+    }
+  }, [editingProject?.project_id, editingProject?.api_version, projectTenantsByProject]);
+
+  // Check GitHub App installation on mount; also re-check if just installed
+  useEffect(() => {
+    console.log('[General Section] Component mounted, checking GitHub installation');
+    checkGitHubInstallation();
     const justInstalled = localStorage.getItem('github_app_just_installed');
-    console.log('[General Section] Checking just_installed flag:', justInstalled);
     if (justInstalled === 'true') {
       console.log('[General Section] App was just installed! Re-checking status...');
-      // Clear the flag
       localStorage.removeItem('github_app_just_installed');
-      // Re-check installation status
-      setTimeout(() => {
-        checkGitHubInstallation();
-      }, 500); // Small delay to ensure token is ready
+      setTimeout(() => checkGitHubInstallation(), 500);
     }
   }, []);
 

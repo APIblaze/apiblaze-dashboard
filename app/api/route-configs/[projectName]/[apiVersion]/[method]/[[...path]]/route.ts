@@ -12,6 +12,7 @@ import { getUserClaims } from '@/app/api/projects/_utils';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const POLICIES_API_DOMAIN = process.env.POLICIES_API_DOMAIN || 'policies.apiblaze.com';
+const POLICIES_API_TIMEOUT_MS = 10_000;
 
 // Map the dashboard RouteEntry schema to the policies-api request body.
 // Dashboard stores pre/post templates as single JSON strings; policies-api
@@ -123,7 +124,7 @@ export async function PUT(
     const putUrl = buildPoliciesUrl(projectName, apiVersion, method, segments);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
+    const timer = setTimeout(() => controller.abort(), POLICIES_API_TIMEOUT_MS);
 
     // Try PUT first (update existing route).
     // On 404 the route doesn't exist yet — fall back to POST /route to create it.
@@ -176,7 +177,7 @@ export async function DELETE(
     const url = buildPoliciesUrl(projectName, apiVersion, method, pathSegments ?? []);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
+    const timer = setTimeout(() => controller.abort(), POLICIES_API_TIMEOUT_MS);
     const res = await fetch(url, { method: 'DELETE', signal: controller.signal }).finally(() => clearTimeout(timer));
 
     if (!res.ok && res.status !== 404) {

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
@@ -106,10 +106,14 @@ interface RoutesTableProps {
   routesRef?: React.MutableRefObject<RouteEntry[]>;
   /** When false, the "Enable Authorization" toggle is hidden (API-level kill switch is OFF) */
   enforceAuthorization?: boolean;
+  /** Relation names from the authorization model — used to populate quick-insert chips */
+  modelRelations?: string[];
+  /** Non-user type names from the model — used as object prefix in quick-insert chips */
+  modelTypes?: string[];
 }
 
 export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
-  function RoutesTable({ spec, existingRoutes, readOnly = false, routesRef: externalRoutesRef, enforceAuthorization = false }, ref) {
+  function RoutesTable({ spec, existingRoutes, readOnly = false, routesRef: externalRoutesRef, enforceAuthorization = false, modelRelations, modelTypes }, ref) {
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
@@ -204,6 +208,17 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
                 {isExpanded && group.entries.map((entry) => {
                   const key = `${entry.method}:${entry.path}`;
                   const isSelected = selectedKey === key;
+                  const hasCheck = (entry.pre_request_auth_template?.trim() ?? '') !== '';
+                  const hasWrite = (entry.post_response_policy_template?.trim() ?? '') !== '';
+                  const hasRules = hasCheck || hasWrite;
+                  const willDeny = enforceAuthorization && entry.authorization_enabled && !hasRules;
+                  const methodBorderClass = isSelected ? {
+                    GET: 'border-l-green-500 bg-green-500/10 hover:bg-green-500/15',
+                    POST: 'border-l-blue-500 bg-blue-500/10 hover:bg-blue-500/15',
+                    PUT: 'border-l-amber-500 bg-amber-500/10 hover:bg-amber-500/15',
+                    PATCH: 'border-l-amber-500 bg-amber-500/10 hover:bg-amber-500/15',
+                    DELETE: 'border-l-red-500 bg-red-500/10 hover:bg-red-500/15',
+                  }[entry.method] ?? 'border-l-primary bg-primary/10 hover:bg-primary/15' : '';
                   return (
                     <button
                       key={key}
@@ -211,13 +226,19 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
                       className={cn(
                         'w-full flex items-center gap-2 px-4 py-3.5 text-left border-b transition-colors',
                         isSelected
-                          ? 'bg-primary/15 border-l-[3px] border-l-primary hover:bg-primary/25'
+                          ? cn('border-l-[3px]', methodBorderClass)
                           : 'hover:bg-muted/40'
                       )}
                       onClick={() => setSelectedKey(key)}
                     >
                       <MethodBadge method={entry.method} />
-                      <span className={cn('font-mono text-xs truncate', isSelected ? 'text-foreground font-medium' : 'text-muted-foreground')}>{entry.path}</span>
+                      <span className={cn('font-mono text-xs truncate flex-1', isSelected ? 'text-foreground font-medium' : 'text-muted-foreground')}>{entry.path}</span>
+                      <span
+                        className={cn(
+                          'w-1.5 h-1.5 rounded-full shrink-0',
+                          hasRules ? 'bg-green-500' : willDeny ? 'bg-amber-500' : 'bg-muted-foreground/25'
+                        )}
+                      />
                     </button>
                   );
                 })}
@@ -235,6 +256,8 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
               updateRouteInRef={updateRouteInRef}
               readOnly={readOnly}
               enforceAuthorization={enforceAuthorization}
+              modelRelations={modelRelations}
+              modelTypes={modelTypes}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
@@ -270,9 +293,12 @@ interface RouteDetailProps {
   updateRouteInRef: (path: string, method: string, updates: Partial<RouteEntry>) => void;
   readOnly: boolean;
   enforceAuthorization: boolean;
+  modelRelations?: string[];
+  modelTypes?: string[];
 }
 
-function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization }: RouteDetailProps) {
+function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization, modelRelations, modelTypes }: RouteDetailProps) {
+  const objectType = modelTypes?.[0] ?? 'resource';
   const [preReqError, setPreReqError] = useState(false);
   const [postRespError, setPostRespError] = useState(false);
   const [cacheError, setCacheError] = useState(false);
@@ -308,7 +334,13 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization }
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="pb-4 border-b space-y-1.5">
+      <div className={cn(
+        'pb-4 border-b space-y-1.5 -mx-6 -mt-6 mb-0 px-6 pt-5 pb-4',
+        entry.method === 'GET' && 'bg-green-500/5 border-b-green-200 dark:border-b-green-900',
+        entry.method === 'POST' && 'bg-blue-500/5 border-b-blue-200 dark:border-b-blue-900',
+        (entry.method === 'PUT' || entry.method === 'PATCH') && 'bg-amber-500/5 border-b-amber-200 dark:border-b-amber-900',
+        entry.method === 'DELETE' && 'bg-red-500/5 border-b-red-200 dark:border-b-red-900',
+      )}>
         <div className="flex items-center gap-3">
           <MethodBadge method={entry.method} />
           <span className="font-mono text-sm font-medium">{entry.path}</span>
@@ -318,12 +350,18 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization }
         )}
       </div>
 
-      {/* Toggles + Priority row */}
-      <div className="flex flex-wrap items-center gap-8">
-        <div className="flex items-center gap-3">
-          <Label className="text-sm font-medium whitespace-nowrap">Require Authentication</Label>
+      {/* Settings cards */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className={cn(
+          'rounded-lg border px-4 py-3 flex items-center justify-between gap-3 transition-colors',
+          localAuth ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800' : 'bg-muted/20',
+        )}>
+          <div>
+            <p className="text-sm font-medium">Authentication</p>
+            <p className="text-xs text-muted-foreground">Require a valid token</p>
+          </div>
           {readOnly ? (
-            <span className="text-sm">{localAuth ? 'Yes' : 'No'}</span>
+            <span className="text-sm font-medium">{localAuth ? 'On' : 'Off'}</span>
           ) : (
             <Switch
               checked={localAuth}
@@ -335,23 +373,37 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization }
           )}
         </div>
 
-        {enforceAuthorization && (
-          <div className="flex items-center gap-3">
-            <Label className="text-sm font-medium whitespace-nowrap">Enable Authorization</Label>
+        <div className={cn(
+          'rounded-lg border px-4 py-3 flex items-center justify-between gap-3 transition-colors',
+          !enforceAuthorization && 'opacity-40',
+          enforceAuthorization && localAuthzEnabled && 'bg-violet-50/50 dark:bg-violet-950/20 border-violet-200 dark:border-violet-800',
+          enforceAuthorization && !localAuthzEnabled && 'bg-muted/20',
+        )}>
+          <div>
+            <p className="text-sm font-medium">Protected Route</p>
+            <p className="text-xs text-muted-foreground">Run check rule before request</p>
+          </div>
+          {readOnly ? (
+            <span className="text-sm font-medium">{localAuthzEnabled ? 'On' : 'Off'}</span>
+          ) : (
             <Switch
               checked={localAuthzEnabled}
+              disabled={!enforceAuthorization}
               onCheckedChange={(checked) => {
                 setLocalAuthzEnabled(checked);
                 updateRouteInRef(entry.path, entry.method, { authorization_enabled: checked });
               }}
             />
-          </div>
-        )}
+          )}
+        </div>
 
-        <div className="flex items-center gap-3">
-          <Label className="text-sm font-medium">Priority</Label>
+        <div className="rounded-lg border bg-muted/20 px-4 py-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">Priority</p>
+            <p className="text-xs text-muted-foreground">Route match order</p>
+          </div>
           {readOnly ? (
-            <span className="text-sm">{localPriority ?? '—'}</span>
+            <span className="text-sm font-medium">{localPriority ?? 'auto'}</span>
           ) : (
             <input
               type="number"
@@ -364,20 +416,53 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization }
                   updateRouteInRef(entry.path, entry.method, { priority: val });
                 }
               }}
-              className="w-20 text-sm border rounded px-2 py-1 bg-background"
+              className="w-16 text-sm border rounded px-2 py-1 bg-background text-right"
               placeholder="auto"
             />
           )}
         </div>
       </div>
 
+      {/* Warning: Protected Route on but no check rule */}
+      {enforceAuthorization && localAuthzEnabled && !localPreReq.trim() && !localPostResp.trim() && !readOnly && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/30 px-3.5 py-2.5 text-sm text-amber-800 dark:text-amber-300">
+          <TriangleAlert className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>
+            <span className="font-medium">Protected Route is on but no rule is set.</span>
+            {' '}Every request to this route will be denied until you add one.
+          </span>
+        </div>
+      )}
+
       {/* Policy templates side-by-side */}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label className="text-sm font-medium">
-            Check Policy
-            <span className="ml-1.5 font-normal text-muted-foreground text-xs">(blocks request if denied)</span>
-          </Label>
+          <div className="flex items-center gap-2">
+            <span className="w-1 h-4 rounded-full bg-blue-500 shrink-0" />
+            <Label className="text-sm font-medium">
+              Check Rule
+              <span className="ml-1.5 font-normal text-muted-foreground text-xs">runs before request — blocks if denied</span>
+            </Label>
+          </div>
+          {!readOnly && modelRelations && modelRelations.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-muted-foreground">Quick insert:</span>
+              {modelRelations.slice(0, 4).map((relation) => (
+                <button
+                  key={relation}
+                  type="button"
+                  onClick={() => {
+                    const tpl = JSON.stringify([{ user: 'user:{{JWT.sub}}', relation, object: `${objectType}:{{PATH.id}}` }], null, 2);
+                    setLocalPreReq(tpl);
+                    updateRouteInRef(entry.path, entry.method, { pre_request_auth_template: tpl });
+                  }}
+                  className="text-xs px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                >
+                  {relation}
+                </button>
+              ))}
+            </div>
+          )}
           {readOnly ? (
             <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[120px]">
               {entry.pre_request_auth_template || '—'}
@@ -388,18 +473,40 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization }
               onChange={(e) => setLocalPreReq(e.target.value)}
               onBlur={(e) => handleJsonBlur(e.target.value, 'pre_request_auth_template', setPreReqError)}
               className={cn('font-mono text-xs', preReqError && 'border-red-500')}
-              placeholder={'{\n  "user": "user:{{JWT.sub}}",\n  "relation": "viewer",\n  "object": "reservation:{{PATH.id}}"\n}'}
-              rows={6}
+              placeholder={'[\n  {\n    "user": "user:{{JWT.sub}}",\n    "relation": "viewer",\n    "object": "reservation:{{PATH.id}}"\n  }\n]'}
+              rows={8}
             />
           )}
           {preReqError && <p className="text-xs text-red-500">Invalid JSON</p>}
         </div>
 
         <div className="space-y-2">
-          <Label className="text-sm font-medium">
-            Write Policy
-            <span className="ml-1.5 font-normal text-muted-foreground text-xs">(runs after 2xx response)</span>
-          </Label>
+          <div className="flex items-center gap-2">
+            <span className="w-1 h-4 rounded-full bg-violet-500 shrink-0" />
+            <Label className="text-sm font-medium">
+              Write Rule
+              <span className="ml-1.5 font-normal text-muted-foreground text-xs">runs after success — records who owns what</span>
+            </Label>
+          </div>
+          {!readOnly && modelRelations && modelRelations.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-muted-foreground">Quick insert:</span>
+              {modelRelations.slice(0, 4).map((relation) => (
+                <button
+                  key={relation}
+                  type="button"
+                  onClick={() => {
+                    const tpl = JSON.stringify([{ user: 'user:{{JWT.sub}}', relation, object: `${objectType}:{{RESPONSE.id}}` }], null, 2);
+                    setLocalPostResp(tpl);
+                    updateRouteInRef(entry.path, entry.method, { post_response_policy_template: tpl });
+                  }}
+                  className="text-xs px-2 py-0.5 rounded border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors"
+                >
+                  {relation}
+                </button>
+              ))}
+            </div>
+          )}
           {readOnly ? (
             <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[120px]">
               {entry.post_response_policy_template || '—'}
@@ -410,17 +517,41 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization }
               onChange={(e) => setLocalPostResp(e.target.value)}
               onBlur={(e) => handleJsonBlur(e.target.value, 'post_response_policy_template', setPostRespError)}
               className={cn('font-mono text-xs', postRespError && 'border-red-500')}
-              placeholder={'{\n  "user": "user:{{JWT.sub}}",\n  "relation": "owner",\n  "object": "reservation:{{RESPONSE.id}}"\n}'}
-              rows={6}
+              placeholder={'[\n  {\n    "user": "user:{{JWT.sub}}",\n    "relation": "owner",\n    "object": "reservation:{{RESPONSE.id}}"\n  }\n]'}
+              rows={8}
             />
           )}
           {postRespError && <p className="text-xs text-red-500">Invalid JSON</p>}
         </div>
       </div>
 
+      {/* Variable reference */}
+      {!readOnly && (
+        <div className="rounded-md border border-dashed bg-muted/20 px-3.5 py-2.5 space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground">Available variables</p>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+            {[
+              { v: '{{JWT.sub}}', desc: 'user ID from the JWT token', both: true },
+              { v: '{{PATH.id}}', desc: 'path param  e.g. /pokemon/{id}', both: true },
+              { v: '{{QUERY.field}}', desc: 'query string param', both: true },
+              { v: '{{BODY.field}}', desc: 'request body field', both: true },
+              { v: '{{RESPONSE.id}}', desc: 'response field — Write Rule only', both: false },
+            ].map(({ v, desc, both }) => (
+              <div key={v} className="flex items-baseline gap-2">
+                <code className={`text-xs font-mono shrink-0 ${both ? 'text-foreground' : 'text-violet-600 dark:text-violet-400'}`}>{v}</code>
+                <span className="text-xs text-muted-foreground truncate">{desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Cache rules */}
       <div className="space-y-2">
-        <Label className="text-sm font-medium">Cache Rules</Label>
+        <div>
+          <Label className="text-sm font-medium">Cache Rules</Label>
+          <p className="text-xs text-muted-foreground mt-0.5">Store upstream responses so repeat requests skip the origin — define TTL and cache key fields.</p>
+        </div>
         {readOnly ? (
           <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[60px]">
             {entry.cache_rules || '—'}

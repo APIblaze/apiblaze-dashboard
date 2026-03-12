@@ -288,6 +288,8 @@ export function ProjectConfigPanel({
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(project);
   const [selectedAuthTenant, setSelectedAuthTenant] = useState<string | undefined>(undefined);
+  const [modelRelations, setModelRelations] = useState<string[]>([]);
+  const [modelTypes, setModelTypes] = useState<string[]>([]);
   const isDeployingRef = useRef(false);
   const routesRef = useRef<RouteEntry[]>([]);
   const currentProjectKeyRef = useRef<string | null>(
@@ -742,6 +744,7 @@ export function ProjectConfigPanel({
       }
 
       const payload: Record<string, unknown> = {
+        tenant: selectedAuthTenant || 'api',
         default_app_client_id: config.defaultAppClient || null,
         requests_auth,
         authorization: { enforce_authorization: config.enforceAuthorization },
@@ -854,7 +857,7 @@ export function ProjectConfigPanel({
               onAuthTenantChange={setSelectedAuthTenant}
             />
           )}
-          {activeTab === 'authorization' && (
+          <div className={activeTab === 'authorization' ? '' : 'hidden'}>
             <AuthorizationSection
               project={currentProject}
               config={config}
@@ -863,8 +866,11 @@ export function ProjectConfigPanel({
                 setCurrentProject(updated);
                 onProjectUpdate?.(updated);
               }}
+              onRelationsChange={setModelRelations}
+              onTypesChange={setModelTypes}
+              onGoToRoutes={() => setActiveTab('routes')}
             />
-          )}
+          </div>
           
           {activeTab === 'targets' && (
             <TargetServersSection config={config} updateConfig={updateConfig} />
@@ -872,14 +878,18 @@ export function ProjectConfigPanel({
           {activeTab === 'throttling' && (
             <ThrottlingSection config={config} updateConfig={updateConfig} />
           )}
-          {activeTab === 'routes' && currentProject && (
-            <RoutesSection
-              config={config}
-              updateConfig={updateConfig}
-              onGoToGeneral={() => setActiveTab('general')}
-              project={routesSectionProject}
-              routesRef={routesRef}
-            />
+          {currentProject && (
+            <div className={activeTab === 'routes' ? '' : 'hidden'}>
+              <RoutesSection
+                config={config}
+                updateConfig={updateConfig}
+                onGoToGeneral={() => setActiveTab('general')}
+                project={routesSectionProject}
+                routesRef={routesRef}
+                modelRelations={modelRelations}
+                modelTypes={modelTypes}
+              />
+            </div>
           )}
           {activeTab === 'preprocessing' && (
             <PrePostProcessingSection config={config} updateConfig={updateConfig} />

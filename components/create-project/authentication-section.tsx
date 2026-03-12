@@ -1953,15 +1953,20 @@ function EditModeTenantManager({
   const [detachLoading, setDetachLoading] = useState(false);
   const [attachLoading, setAttachLoading] = useState(false);
 
+  const fetchProjectTenants = useDashboardCacheStore(s => s.fetchProjectTenants);
+  const invalidateProjectTenants = useDashboardCacheStore(s => s.invalidateProjectTenants);
+  const projectTenantsByProject = useDashboardCacheStore(s => s.projectTenantsByProject);
+
   useEffect(() => {
-    api.listProjectTenants(project.project_id, project.api_version)
-      .then(r => {
-        const list = r.tenants ?? [];
-        setAttachedTenants(list);
-        setSelected(prev => list.some(t => t.tenant_name === prev) ? prev : (list[0]?.tenant_name ?? ''));
-      })
-      .catch(() => { });
+    fetchProjectTenants(project.project_id, project.api_version);
   }, [project.project_id, project.api_version]);
+
+  useEffect(() => {
+    const list = projectTenantsByProject[`${project.project_id}:${project.api_version}`];
+    if (!list) return;
+    setAttachedTenants(list);
+    setSelected(prev => list.some(t => t.tenant_name === prev) ? prev : (list[0]?.tenant_name ?? ''));
+  }, [project.project_id, project.api_version, projectTenantsByProject]);
 
   useEffect(() => {
     api.getTeamTenants(teamId, true)
@@ -2018,8 +2023,8 @@ function EditModeTenantManager({
           });
         }
       }
-      const updated = await api.listProjectTenants(project.project_id, project.api_version);
-      setAttachedTenants(updated.tenants ?? []);
+      invalidateProjectTenants(project.project_id, project.api_version);
+      await fetchProjectTenants(project.project_id, project.api_version);
       setSelected(tenantSlug);
       setShowCreate(false);
       resetCreateForm();
@@ -2037,9 +2042,10 @@ function EditModeTenantManager({
     setDetachLoading(true);
     try {
       await api.detachTenantFromProject(project.project_id, project.api_version, detachTarget.tenant_name);
-      const updated = await api.listProjectTenants(project.project_id, project.api_version);
-      setAttachedTenants(updated.tenants ?? []);
-      setSelected(updated.tenants?.[0]?.tenant_name ?? '');
+      invalidateProjectTenants(project.project_id, project.api_version);
+      await fetchProjectTenants(project.project_id, project.api_version);
+      const refreshed = useDashboardCacheStore.getState().getProjectTenants(project.project_id, project.api_version);
+      setSelected(refreshed[0]?.tenant_name ?? '');
       setDetachTarget(null); setDetachConfirm('');
       onProjectUpdate?.({ ...project });
       toast({ title: 'Tenant removed from project' });
@@ -2073,8 +2079,8 @@ function EditModeTenantManager({
                   setAttachLoading(true);
                   try {
                     await api.attachTenantToProject(project.project_id, project.api_version, { tenant_name: t.tenant_name, display_name: t.display_name ?? t.tenant_name });
-                    const updated = await api.listProjectTenants(project.project_id, project.api_version);
-                    setAttachedTenants(updated.tenants ?? []);
+                    invalidateProjectTenants(project.project_id, project.api_version);
+                    await fetchProjectTenants(project.project_id, project.api_version);
                     setSelected(t.tenant_name);
                   } catch { toast({ title: 'Failed to attach tenant', variant: 'destructive' }); }
                   finally { setAttachLoading(false); }
@@ -2307,25 +2313,33 @@ export function AuthenticationSection({
   const displayProjectId = project?.project_id ?? config.projectName ?? '';
   const displayVersion = project?.api_version ?? config.apiVersion ?? '';
 
-  const refreshTenants = (selectSlug?: string) => {
+  const fetchProjectTenants = useDashboardCacheStore(s => s.fetchProjectTenants);
+  const invalidateProjectTenants = useDashboardCacheStore(s => s.invalidateProjectTenants);
+  const projectTenantsByProject = useDashboardCacheStore(s => s.projectTenantsByProject);
+
+  const refreshTenants = async (selectSlug?: string) => {
     if (!project) return;
-    api.listProjectTenants(project.project_id, project.api_version)
-      .then(r => {
-        const list = r.tenants ?? [];
-        setAttachedTenants(list);
-        if (selectSlug) {
-          handleTenantChange(selectSlug);
-        } else if (!effectiveTenant && list.length > 0) {
-          handleTenantChange(list[0].tenant_name);
-        }
-      })
-      .catch(() => {});
+    invalidateProjectTenants(project.project_id, project.api_version);
+    await fetchProjectTenants(project.project_id, project.api_version);
+    // Read fresh from store — closure's projectTenantsByProject is stale after invalidate+fetch
+    const list = useDashboardCacheStore.getState().getProjectTenants(project.project_id, project.api_version);
+    if (selectSlug) {
+      handleTenantChange(selectSlug);
+    } else if (!effectiveTenant && list.length > 0) {
+      handleTenantChange(list[0].tenant_name);
+    }
   };
+
+  // Sync attachedTenants from store
+  useEffect(() => {
+    const list = projectTenantsByProject[`${project?.project_id}:${project?.api_version}`];
+    if (list) setAttachedTenants(list);
+  }, [project?.project_id, project?.api_version, projectTenantsByProject]);
 
   // Load project tenants when in edit mode
   useEffect(() => {
     if (!isEditMode || !project) return;
-    refreshTenants();
+    fetchProjectTenants(project.project_id, project.api_version);
   }, [isEditMode, project?.project_id, project?.api_version]);
 
   // Load tenant auth config when selected tenant changes
