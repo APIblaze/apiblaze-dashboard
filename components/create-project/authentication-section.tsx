@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -58,6 +58,7 @@ const PROVIDER_LABELS: Record<SocialProvider, string> = {
 };
 
 type AppClientRaw = AppClient & { client_id?: string; authorized_callback_urls?: string[] };
+export type { AppClientRaw };
 type ProviderRaw = AuthSocialProvider & { client_id?: string };
 
 // ─── Provider Icon ────────────────────────────────────────────────────────────
@@ -434,6 +435,94 @@ const CREATE_PROVIDERS = [
   { id: 'other', label: 'Custom', own: true, p: 'other' as SocialProvider },
 ];
 
+function ExistingTenantLoginSetup({
+  config,
+  updateConfig,
+  tenantSlug,
+  appClients,
+}: {
+  config: ProjectConfig;
+  updateConfig: (u: Partial<ProjectConfig>) => void;
+  tenantSlug: string;
+  appClients: AppClientRaw[];
+}) {
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    if (initialized) return;
+    const existingIds = appClients.map(c => (c.id as string | undefined) ?? (c.client_id as string | undefined)).filter(Boolean);
+    if (existingIds.length === 0) return;
+    const current = config.defaultAppClient && existingIds.includes(config.defaultAppClient)
+      ? config.defaultAppClient
+      : existingIds[0]!;
+    updateConfig({
+      defaultAppClient: current,
+      appClientId: current,
+      useAuthConfig: true,
+      authConfigId: tenantSlug,
+    });
+    setInitialized(true);
+  }, [initialized, appClients, config.defaultAppClient, tenantSlug, updateConfig]);
+
+  const selectedId = config.defaultAppClient ||
+    (appClients[0]?.id as string | undefined) ||
+    (appClients[0]?.client_id as string | undefined) ||
+    '';
+
+  const handleChange = (id: string) => {
+    updateConfig({
+      defaultAppClient: id,
+      appClientId: id,
+      useAuthConfig: true,
+      authConfigId: tenantSlug,
+    });
+  };
+
+  return (
+    <Card className="border-dashed">
+      <CardHeader>
+        <CardTitle className="text-sm">Use existing tenant auth</CardTitle>
+        <CardDescription className="text-xs">
+          This tenant already has app clients. Pick which one this project should use. No new app clients or providers will be created.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {appClients.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No app clients found for this tenant. You can create them from the Tenants section, or switch to a tenant without auth configured.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {appClients.map(client => {
+              const id = (client.id as string | undefined) ?? (client.client_id as string | undefined) ?? '';
+              if (!id) return null;
+              const isSelected = id === selectedId;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => handleChange(id)}
+                  className={`w-full flex items-center justify-between rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+                    isSelected ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/40'
+                  }`}
+                >
+                  <span className="flex flex-col">
+                    <span className="font-medium">{client.name || id}</span>
+                    <span className="text-[11px] text-muted-foreground font-mono truncate">
+                      {id}
+                    </span>
+                  </span>
+                  {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CreateModeLoginSetup({ config, updateConfig }: { config: ProjectConfig; updateConfig: (u: Partial<ProjectConfig>) => void }) {
   const [showAdv, setShowAdv] = useState(false);
   const [newCallbackUrl, setNewCallbackUrl] = useState('');
@@ -443,9 +532,10 @@ function CreateModeLoginSetup({ config, updateConfig }: { config: ProjectConfig;
   const provider = config.socialProvider ?? 'google';
   const scopes = config.scopes ?? DEFAULT_SCOPES[provider];
   const callbackUrls = config.authorizedCallbackUrls ?? [];
-  const defaultCallbackUrl = config.projectName
-    ? `https://${config.projectName}-api.portal.apiblaze.com/${config.apiVersion || '1.0.0'}`
-    : '';
+  const tenant = config.defaultTenant || 'api';
+  const projectSlug = config.projectName || '{projectName}';
+  const version = config.apiVersion || '{apiVersion}';
+  const defaultCallbackUrl = `https://${projectSlug}-${tenant}.portal.apiblaze.com/${version}`;
 
   return (
     <div className="rounded-xl border bg-card">
@@ -640,118 +730,245 @@ function CreateModeLoginSetup({ config, updateConfig }: { config: ProjectConfig;
   );
 }
 
-// ─── Provider Dialog (Add / Edit) ─────────────────────────────────────────────
+// ─── Provider Form (Add / Edit inline) ────────────────────────────────────────
 
 interface ProviderFormState {
   type: SocialProvider;
   clientId: string;
   clientSecret: string;
   domain: string;
+  tokenType: 'apiblaze' | 'thirdParty';
+  targetServerToken: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
   scopes: string[];
   newScope: string;
+  callbackUrls: string[];
+  newCallbackUrl: string;
+  defaultCallbackUrl?: string;
 }
 
-function ProviderDialog({
-  open, onOpenChange, initial, isEdit, onSave, saving,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  initial: ProviderFormState;
-  isEdit: boolean;
-  onSave: (f: ProviderFormState) => Promise<void>;
-  saving: boolean;
-}) {
-  const [form, setForm] = useState<ProviderFormState>(initial);
-  const [showAdv, setShowAdv] = useState(false);
-  const upd = (u: Partial<ProviderFormState>) => setForm(f => ({ ...f, ...u }));
+// OAuth-only providers (exclude APIBlaze built-in)
+const OAUTH_PROVIDERS = CREATE_PROVIDERS.filter(opt => opt.own);
 
-  useEffect(() => {
-    if (open) { setForm(initial); setShowAdv(false); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+function ProviderFormInline({
+  form,
+  onUpdate,
+  onSave,
+  onCancel,
+  saving,
+  isEdit,
+}: {
+  form: ProviderFormState;
+  onUpdate: (u: Partial<ProviderFormState>) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  saving: boolean;
+  isEdit: boolean;
+}) {
+  const [showAdv, setShowAdv] = useState(false);
+  const upd = onUpdate;
 
   const secretOk = form.clientSecret === '' || form.clientSecret.length >= CLIENT_SECRET_MIN_LENGTH;
-  const canSave = form.clientId.trim() !== '' && secretOk && (!isEdit || form.clientSecret !== '' ? secretOk : true);
+  const canSave = form.clientId.trim() !== '' && ((isEdit && form.clientSecret === '') || (secretOk && form.clientSecret.trim() !== ''));
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? 'Edit provider' : 'Add OAuth provider'}</DialogTitle>
-          <DialogDescription>Configure which OAuth identity provider users will log in with.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 py-2">
-          {/* Provider type chips */}
-          <div>
-            <Label className="text-xs">Provider</Label>
-            <div className="grid grid-cols-3 gap-2 mt-2">
-              {(['google', 'github', 'microsoft', 'facebook', 'auth0', 'other'] as SocialProvider[]).map(p => (
-                <button key={p} type="button"
-                  onClick={() => upd({ type: p, domain: PROVIDER_DOMAINS[p], scopes: [...DEFAULT_SCOPES[p]] })}
-                  className={`flex flex-col items-center gap-1 p-2 rounded-lg border-2 text-xs transition-all ${form.type === p ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/40'}`}
-                >
-                  <ProviderIcon id={p} size="sm" />
-                  <span>{PROVIDER_LABELS[p].split(' ')[0]}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+    <div className="space-y-4 rounded-xl border bg-card p-4">
+      <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Identity provider</Label>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {OAUTH_PROVIDERS.map(opt => {
+          const selected = form.type === opt.p;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() =>
+                upd({
+                  type: opt.p,
+                  domain: PROVIDER_DOMAINS[opt.p],
+                  scopes: [...DEFAULT_SCOPES[opt.p]],
+                })
+              }
+              className={`flex flex-col items-center gap-2 p-3 rounded-xl border-2 text-center transition-all ${selected ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/40'}`}
+            >
+              <ProviderIcon id={opt.id} size="lg" />
+              <span className="text-xs font-medium leading-tight">{opt.label}</span>
+              {selected && <Check className="h-3 w-3 text-primary" />}
+            </button>
+          );
+        })}
+      </div>
 
+      <div className="space-y-3 p-4 border rounded-lg bg-muted/20">
+        <div className="flex items-center gap-2">
+          <ProviderIcon id={form.type} size="sm" />
+          <Label className="text-sm font-semibold">{PROVIDER_LABELS[form.type]} credentials</Label>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <Label className="text-xs">Client ID</Label>
             <Input placeholder="Your OAuth client ID" value={form.clientId} onChange={e => upd({ clientId: e.target.value })} className="mt-1" />
           </div>
           <div>
             <Label className="text-xs">Client Secret</Label>
-            <Input type="password" placeholder={isEdit ? 'Leave blank to keep current secret' : 'Your OAuth client secret'} value={form.clientSecret} onChange={e => upd({ clientSecret: e.target.value })} className="mt-1" />
+            <Input
+              type="password"
+              placeholder={isEdit ? 'Leave blank to keep current secret' : 'Your OAuth client secret'}
+              value={form.clientSecret}
+              onChange={e => upd({ clientSecret: e.target.value })}
+              className="mt-1"
+            />
             {form.clientSecret.length > 0 && form.clientSecret.length < CLIENT_SECRET_MIN_LENGTH && (
-              <p className="text-xs text-amber-600 mt-1 flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Must be at least {CLIENT_SECRET_MIN_LENGTH} characters.</p>
+              <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" /> Must be at least {CLIENT_SECRET_MIN_LENGTH} characters.
+              </p>
             )}
           </div>
+        </div>
 
-          <button type="button" onClick={() => setShowAdv(v => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-            {showAdv ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Advanced (domain, scopes)
-          </button>
-          {showAdv && (
-            <div className="pl-4 border-l-2 border-muted space-y-3">
+        <button type="button" onClick={() => setShowAdv(v => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+          {showAdv ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          Advanced settings
+        </button>
+        {showAdv && (
+          <div className="pl-4 border-l-2 border-muted space-y-4">
+            <div>
+              <Label className="text-xs">Identity provider domain</Label>
+              <Input
+                placeholder={PROVIDER_DOMAINS[form.type] || 'https://your-domain.example.com'}
+                value={form.domain}
+                onChange={e => upd({ domain: e.target.value })}
+                className="mt-1 text-xs"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-medium">Client side token type</Label>
+              <p className="text-xs text-muted-foreground mb-1">Tokens the API users will see</p>
+              <Select value={form.tokenType} onValueChange={v => upd({ tokenType: v as 'apiblaze' | 'thirdParty' })}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
+                  <SelectItem value="thirdParty">Third Party</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {form.tokenType !== 'thirdParty' && (
               <div>
-                <Label className="text-xs">Provider domain</Label>
-                <Input placeholder={PROVIDER_DOMAINS[form.type] || 'https://…'} value={form.domain} onChange={e => upd({ domain: e.target.value })} className="mt-1 text-xs" />
+                <Label className="text-xs font-medium">Target server token type</Label>
+                <p className="text-xs text-muted-foreground mb-1">What to send in the Authorization header to your target servers</p>
+                <Select
+                  value={form.targetServerToken}
+                  onValueChange={v => upd({ targetServerToken: v as 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none' })}
+                >
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="apiblaze">API Blaze JWT token</SelectItem>
+                    <SelectItem value="third_party_access_token">{PROVIDER_LABELS[form.type]} access token</SelectItem>
+                    <SelectItem value="third_party_id_token">{PROVIDER_LABELS[form.type]} ID token</SelectItem>
+                    <SelectItem value="none">None</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div>
-                <Label className="text-xs">Scopes</Label>
-                <div className="flex flex-wrap gap-1 mt-1 mb-1">
-                  {form.scopes.map(s => (
-                    <Badge key={s} variant="secondary" className="gap-1 text-xs">
-                      {s}
-                      <button type="button" onClick={() => upd({ scopes: form.scopes.filter(x => x !== s) })}><X className="h-3 w-3" /></button>
-                    </Badge>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <Input placeholder="Add scope" value={form.newScope} onChange={e => upd({ newScope: e.target.value })}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') { e.preventDefault(); if (form.newScope.trim() && !form.scopes.includes(form.newScope.trim())) { upd({ scopes: [...form.scopes, form.newScope.trim()], newScope: '' }); } }
-                    }}
-                    className="text-xs h-8" />
-                  <Button type="button" size="sm" className="h-8" onClick={() => { if (form.newScope.trim() && !form.scopes.includes(form.newScope.trim())) { upd({ scopes: [...form.scopes, form.newScope.trim()], newScope: '' }); } }}>
-                    <Plus className="h-3 w-3" />
-                  </Button>
-                </div>
+            )}
+            <div>
+              <Label className="text-xs font-medium">Authorized Scopes</Label>
+              <p className="text-xs text-muted-foreground mb-1">Default scopes for {PROVIDER_LABELS[form.type]}: {DEFAULT_SCOPES[form.type].join(', ')}</p>
+              <div className="flex flex-wrap gap-1 mb-2">
+                {form.scopes.map(s => (
+                  <Badge key={s} variant="secondary" className="gap-1 text-xs">
+                    {s}
+                    <button type="button" onClick={() => upd({ scopes: form.scopes.filter(x => x !== s) })}><X className="h-3 w-3" /></button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Add custom scope"
+                  value={form.newScope}
+                  onChange={e => upd({ newScope: e.target.value })}
+                  className="h-8 text-xs"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const trimmed = form.newScope.trim();
+                      if (trimmed && !form.scopes.includes(trimmed)) {
+                        upd({ scopes: [...form.scopes, trimmed], newScope: '' });
+                      }
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => {
+                    const trimmed = form.newScope.trim();
+                    if (trimmed && !form.scopes.includes(trimmed)) {
+                      upd({ scopes: [...form.scopes, trimmed], newScope: '' });
+                    }
+                  }}
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
               </div>
             </div>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button disabled={!canSave || saving} onClick={() => onSave(form)}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-            {isEdit ? 'Save changes' : 'Add provider'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            <div>
+              <Label className="text-xs font-medium">Authorized Callback URLs</Label>
+              <div className="flex flex-wrap gap-1 mt-1 mb-2">
+                {form.callbackUrls.length > 0
+                  ? form.callbackUrls.map((url, i) => (
+                      <Badge key={i} variant="secondary" className="gap-1 text-xs font-mono">
+                        {url}
+                        <button type="button" onClick={() => upd({ callbackUrls: form.callbackUrls.filter((_, j) => j !== i) })}><X className="h-3 w-3" /></button>
+                      </Badge>
+                    ))
+                  : form.defaultCallbackUrl
+                    ? <Badge variant="secondary" className="gap-1 text-xs font-mono"><span className="text-muted-foreground">Default:</span> {form.defaultCallbackUrl}</Badge>
+                    : null}
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://example.com/callback"
+                  value={form.newCallbackUrl}
+                  onChange={e => upd({ newCallbackUrl: e.target.value })}
+                  className="h-8 text-xs"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const u = form.newCallbackUrl.trim();
+                      if (u && !form.callbackUrls.includes(u)) {
+                        upd({ callbackUrls: [...form.callbackUrls, u], newCallbackUrl: '' });
+                      }
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => {
+                    const u = form.newCallbackUrl.trim();
+                    if (u && !form.callbackUrls.includes(u)) {
+                      upd({ callbackUrls: [...form.callbackUrls, u], newCallbackUrl: '' });
+                    }
+                  }}
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <ProviderSetupGuide provider={form.type} />
+      </div>
+
+      <div className="flex gap-2 pt-2">
+        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button type="button" disabled={!canSave || saving} onClick={onSave}>
+          {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+          {isEdit ? 'Save changes' : 'Add provider'}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -1113,7 +1330,6 @@ function AppClientPanel({
   const providersByConfigClient = useDashboardCacheStore(s => s.providersByConfigClient);
 
   const [expanded, setExpanded] = useState(defaultExpanded ?? false);
-  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [editProviderInitial, setEditProviderInitial] = useState<ProviderFormState | null>(null);
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [loadingProviderId, setLoadingProviderId] = useState<string | null>(null);
@@ -1166,18 +1382,29 @@ function AppClientPanel({
       secret = res.clientSecret ?? '';
     } catch { /* show empty, user can type new one */ }
     const rawScopes = p.scopes ?? [];
-    const scopes = Array.isArray(rawScopes) ? rawScopes as string[] : DEFAULT_SCOPES[p.type as SocialProvider];
+    const scopes = Array.isArray(rawScopes) ? (rawScopes as string[]) : DEFAULT_SCOPES[p.type as SocialProvider];
+    const clientCallbackUrls = (client.authorizedCallbackUrls ?? client.authorized_callback_urls ?? []) as string[];
+    const defaultCallbackUrl =
+      (project?.display_name || project?.project_id || config.projectName)
+        ? `https://${(project?.display_name || project?.project_id || config.projectName)!}-${tenant}.portal.apiblaze.com/${project?.api_version || config.apiVersion || '1.0.0'}`
+        : undefined;
     setEditProviderInitial({
       type: p.type as SocialProvider,
       clientId: p.clientId ?? p.client_id ?? '',
       clientSecret: secret,
       domain: p.domain ?? PROVIDER_DOMAINS[p.type as SocialProvider] ?? '',
+      tokenType: ((p as { tokenType?: 'apiblaze' | 'thirdParty' }).tokenType) ?? 'apiblaze',
+      targetServerToken: ((p as {
+        targetServerToken?: 'apiblaze' | 'third_party_access_token' | 'third_party_id_token' | 'none';
+      }).targetServerToken) ?? 'apiblaze',
       scopes,
       newScope: '',
+      callbackUrls: clientCallbackUrls,
+      newCallbackUrl: '',
+      defaultCallbackUrl,
     });
     setEditingProviderId(p.id);
     setLoadingProviderId(null);
-    setProviderDialogOpen(true);
   };
 
   const handleDeleteProvider = async (p: ProviderRaw) => {
@@ -1200,10 +1427,11 @@ function AppClientPanel({
         clientSecret: form.clientSecret.trim(),
         scopes: form.scopes.length ? form.scopes : DEFAULT_SCOPES[form.type],
         domain: form.domain || PROVIDER_DOMAINS[form.type],
-        tokenType: 'apiblaze' as const,
-        targetServerToken: 'apiblaze' as const,
+        tokenType: form.tokenType,
+        targetServerToken: form.targetServerToken,
         includeApiblazeAccessTokenHeader: false,
         includeApiblazeIdTokenHeader: false,
+        authorizedCallbackUrls: form.callbackUrls.length ? form.callbackUrls : undefined,
       };
       if (editingProviderId) {
         await api.updateProviderByTenant(tenantTeamId, tenant, client.id, editingProviderId, payload);
@@ -1213,7 +1441,6 @@ function AppClientPanel({
         toast({ title: 'Provider added' });
       }
       await invalidateAndRefetch(teamId);
-      setProviderDialogOpen(false);
       setEditingProviderId(null);
       setEditProviderInitial(null);
     } catch (e) {
@@ -1457,6 +1684,17 @@ function AppClientPanel({
 
       {/* ── OAuth Providers — always visible ── */}
       <div className="px-4 py-3 border-t">
+        {editProviderInitial ? (
+          <ProviderFormInline
+            form={editProviderInitial}
+            onUpdate={u => setEditProviderInitial(prev => prev ? { ...prev, ...u } : null)}
+            onSave={() => handleSaveProvider(editProviderInitial)}
+            onCancel={() => { setEditingProviderId(null); setEditProviderInitial(null); }}
+            saving={providerSaving}
+            isEdit={!!editingProviderId}
+          />
+        ) : (
+        <>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-muted-foreground" />
@@ -1466,7 +1704,27 @@ function AppClientPanel({
             )}
           </div>
           <Button type="button" variant="outline" size="sm"
-            onClick={() => { setEditingProviderId(null); setEditProviderInitial({ type: 'google', clientId: '', clientSecret: '', domain: PROVIDER_DOMAINS['google'], scopes: [...DEFAULT_SCOPES['google']], newScope: '' }); setProviderDialogOpen(true); }}>
+            onClick={() => {
+              setEditingProviderId(null);
+              const clientCallbackUrls = (client.authorizedCallbackUrls ?? client.authorized_callback_urls ?? []) as string[];
+              const defaultCallbackUrl =
+                (project?.display_name || project?.project_id || config.projectName)
+                  ? `https://${(project?.display_name || project?.project_id || config.projectName)!}-${tenant}.portal.apiblaze.com/${project?.api_version || config.apiVersion || '1.0.0'}`
+                  : undefined;
+              setEditProviderInitial({
+                type: 'github',
+                clientId: '',
+                clientSecret: '',
+                domain: PROVIDER_DOMAINS['github'],
+                tokenType: 'apiblaze',
+                targetServerToken: 'apiblaze',
+                scopes: [...DEFAULT_SCOPES['github']],
+                newScope: '',
+                callbackUrls: clientCallbackUrls,
+                newCallbackUrl: '',
+                defaultCallbackUrl,
+              });
+            }}>
             <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Provider
           </Button>
         </div>
@@ -1497,19 +1755,9 @@ function AppClientPanel({
             })}
           </div>
         )}
+        </>
+        )}
       </div>
-
-      {/* Provider dialog */}
-      {editProviderInitial && (
-        <ProviderDialog
-          open={providerDialogOpen}
-          onOpenChange={o => { setProviderDialogOpen(o); if (!o) { setEditingProviderId(null); setEditProviderInitial(null); } }}
-          initial={editProviderInitial}
-          isEdit={!!editingProviderId}
-          onSave={handleSaveProvider}
-          saving={providerSaving}
-        />
-      )}
     </div>
   );
 }
@@ -1520,12 +1768,16 @@ function TenantDetail({
   tenant, project, config, updateConfig, teamId, onProjectUpdate,
 }: {
   tenant: { tenant_name: string; display_name: string };
-  project: Project;
+  project: Project | null;
   config: ProjectConfig;
   updateConfig: (u: Partial<ProjectConfig>) => void;
   teamId: string;
   onProjectUpdate?: (p: Project) => void;
 }) {
+  const projectId = project?.project_id ?? config.projectName ?? '';
+  const apiVersion = project?.api_version ?? config.apiVersion ?? '1.0.0';
+  const defaultCallbackUrl = `https://${projectId}-${tenant.tenant_name}.portal.apiblaze.com/${apiVersion}`;
+
   const { toast } = useToast();
   const getAppClientsForTenant = useDashboardCacheStore(s => s.getAppClientsForTenant);
   const fetchAppClientsForTenant = useDashboardCacheStore(s => s.fetchAppClientsForTenant);
@@ -1533,23 +1785,17 @@ function TenantDetail({
   const appClientsByConfig = useDashboardCacheStore(s => s.appClientsByConfig);
   const isBootstrapping = useDashboardCacheStore(s => s.isBootstrapping);
 
-  // Add form visibility + accordion for existing clients
   const [showAdd, setShowAdd] = useState(false);
   const [existingExpanded, setExistingExpanded] = useState(true);
-
-  // New client form fields
   const [newName, setNewName] = useState('');
   const [newCallbackUrls, setNewCallbackUrls] = useState<string[]>([]);
   const [newCallbackUrlInput, setNewCallbackUrlInput] = useState('');
   const [newBranding, setNewBranding] = useState<AppClientBranding>({});
   const [creating, setCreating] = useState(false);
-
-  // Provider selection in new client form
   const [newBringOwn, setNewBringOwn] = useState(false);
   const [newProviderType, setNewProviderType] = useState<SocialProvider>('google');
   const [newProvClientId, setNewProvClientId] = useState('');
   const [newProvClientSecret, setNewProvClientSecret] = useState('');
-  // Provider advanced settings
   const [newAdvShow, setNewAdvShow] = useState(false);
   const [newDomain, setNewDomain] = useState('');
   const [newTokenType, setNewTokenType] = useState<'apiblaze' | 'thirdParty'>('apiblaze');
@@ -1566,8 +1812,6 @@ function TenantDetail({
   useEffect(() => {
     if (!isBootstrapping) fetchAppClientsForTenant(teamId, tenant.tenant_name);
   }, [teamId, tenant.tenant_name, isBootstrapping, fetchAppClientsForTenant]);
-
-  const defaultCallbackUrl = `https://${project.project_id}-${tenant.tenant_name}.portal.apiblaze.com/${project.api_version}`;
 
   const openAdd = () => {
     setNewCallbackUrls([defaultCallbackUrl]);
@@ -1605,8 +1849,8 @@ function TenantDetail({
         scopes: newBringOwn ? DEFAULT_SCOPES[newProviderType] : ['read:user', 'user:email'],
         authorizedCallbackUrls: newCallbackUrls.length > 0 ? newCallbackUrls : [defaultCallbackUrl],
         branding: newBranding,
-        projectName: project.project_id,
-        apiVersion: project.api_version || '1.0.0',
+        projectName: projectId,
+        apiVersion: apiVersion || '1.0.0',
       });
       const newClientId = (client as { id?: string }).id ?? '';
       if (newBringOwn && newProvClientId.trim() && newProvClientSecret.length >= CLIENT_SECRET_MIN_LENGTH && newClientId) {
@@ -1625,7 +1869,9 @@ function TenantDetail({
       await invalidateAndRefetch(teamId);
       if (appClients.length === 0 || !config.defaultAppClient) {
         updateConfig({ defaultAppClient: newClientId });
-        try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: newClientId }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
+        if (project) {
+          try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: newClientId }, { tenant: tenant.tenant_name }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
+        }
       }
       closeAdd();
       toast({ title: 'App client created', description: newBringOwn && newProvClientId.trim() ? 'Provider added.' : 'Add an OAuth provider to enable user login.' });
@@ -1637,8 +1883,13 @@ function TenantDetail({
   };
 
   const handleSetDefault = async (clientId: string) => {
-    updateConfig({ defaultAppClient: clientId });
-    try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: clientId }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
+    updateConfig({
+      defaultAppClient: clientId,
+      ...(project === null ? { useAuthConfig: true, authConfigId: tenant.tenant_name } : {}),
+    });
+    if (project) {
+      try { await updateProjectConfig(project.project_id, project.api_version, { default_app_client_id: clientId }, { tenant: tenant.tenant_name }); onProjectUpdate?.({ ...project }); } catch { /* non-fatal */ }
+    }
   };
 
   const ADD_PROVIDERS = [
@@ -1657,7 +1908,7 @@ function TenantDetail({
       {/* ── Section header ── */}
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold">AppClients</span>
-        {!showAdd && (
+        {!showAdd && appClients.length === 0 && (
           <Button type="button" variant="outline" size="sm" onClick={openAdd}>
             <Plus className="h-3.5 w-3.5 mr-1.5" /> Add AppClient
           </Button>
@@ -1953,20 +2204,15 @@ function EditModeTenantManager({
   const [detachLoading, setDetachLoading] = useState(false);
   const [attachLoading, setAttachLoading] = useState(false);
 
-  const fetchProjectTenants = useDashboardCacheStore(s => s.fetchProjectTenants);
-  const invalidateProjectTenants = useDashboardCacheStore(s => s.invalidateProjectTenants);
-  const projectTenantsByProject = useDashboardCacheStore(s => s.projectTenantsByProject);
-
   useEffect(() => {
-    fetchProjectTenants(project.project_id, project.api_version);
+    api.listProjectTenants(project.project_id, project.api_version)
+      .then(r => {
+        const list = r.tenants ?? [];
+        setAttachedTenants(list);
+        setSelected(prev => list.some(t => t.tenant_name === prev) ? prev : (list[0]?.tenant_name ?? ''));
+      })
+      .catch(() => { });
   }, [project.project_id, project.api_version]);
-
-  useEffect(() => {
-    const list = projectTenantsByProject[`${project.project_id}:${project.api_version}`];
-    if (!list) return;
-    setAttachedTenants(list);
-    setSelected(prev => list.some(t => t.tenant_name === prev) ? prev : (list[0]?.tenant_name ?? ''));
-  }, [project.project_id, project.api_version, projectTenantsByProject]);
 
   useEffect(() => {
     api.getTeamTenants(teamId, true)
@@ -2023,8 +2269,8 @@ function EditModeTenantManager({
           });
         }
       }
-      invalidateProjectTenants(project.project_id, project.api_version);
-      await fetchProjectTenants(project.project_id, project.api_version);
+      const updated = await api.listProjectTenants(project.project_id, project.api_version);
+      setAttachedTenants(updated.tenants ?? []);
       setSelected(tenantSlug);
       setShowCreate(false);
       resetCreateForm();
@@ -2042,10 +2288,9 @@ function EditModeTenantManager({
     setDetachLoading(true);
     try {
       await api.detachTenantFromProject(project.project_id, project.api_version, detachTarget.tenant_name);
-      invalidateProjectTenants(project.project_id, project.api_version);
-      await fetchProjectTenants(project.project_id, project.api_version);
-      const refreshed = useDashboardCacheStore.getState().getProjectTenants(project.project_id, project.api_version);
-      setSelected(refreshed[0]?.tenant_name ?? '');
+      const updated = await api.listProjectTenants(project.project_id, project.api_version);
+      setAttachedTenants(updated.tenants ?? []);
+      setSelected(updated.tenants?.[0]?.tenant_name ?? '');
       setDetachTarget(null); setDetachConfirm('');
       onProjectUpdate?.({ ...project });
       toast({ title: 'Tenant removed from project' });
@@ -2079,8 +2324,8 @@ function EditModeTenantManager({
                   setAttachLoading(true);
                   try {
                     await api.attachTenantToProject(project.project_id, project.api_version, { tenant_name: t.tenant_name, display_name: t.display_name ?? t.tenant_name });
-                    invalidateProjectTenants(project.project_id, project.api_version);
-                    await fetchProjectTenants(project.project_id, project.api_version);
+                    const updated = await api.listProjectTenants(project.project_id, project.api_version);
+                    setAttachedTenants(updated.tenants ?? []);
                     setSelected(t.tenant_name);
                   } catch { toast({ title: 'Failed to attach tenant', variant: 'destructive' }); }
                   finally { setAttachLoading(false); }
@@ -2279,9 +2524,19 @@ function EditModeTenantManager({
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
+type AuthMode = 'create-empty' | 'create-existing' | 'update-empty' | 'update-existing';
+
 export function AuthenticationSection({
-  config, updateConfig, isEditMode = false, project, onProjectUpdate, teamId,
-  selectedAuthTenant, onAuthTenantChange,
+  config,
+  updateConfig,
+  isEditMode = false,
+  project,
+  onProjectUpdate,
+  teamId,
+  selectedAuthTenant,
+  onAuthTenantChange,
+  authMode: _authMode,
+  existingTenantAppClients,
 }: {
   config: ProjectConfig;
   updateConfig: (updates: Partial<ProjectConfig>) => void;
@@ -2291,6 +2546,8 @@ export function AuthenticationSection({
   teamId?: string;
   selectedAuthTenant?: string;
   onAuthTenantChange?: (tenant: string) => void;
+  authMode?: AuthMode;
+  existingTenantAppClients?: AppClientRaw[];
 }) {
   const projectTeamId = (project as { team_id?: string })?.team_id ?? teamId;
   const { toast } = useToast();
@@ -2304,7 +2561,6 @@ export function AuthenticationSection({
   const handleTenantChange = (v: string) => { setInternalSelectedTenant(v); onAuthTenantChange?.(v); };
   const [tenantAuthLoading, setTenantAuthLoading] = useState(false);
   const [showAddTenant, setShowAddTenant] = useState(false);
-  const [showNewTenantDialog, setShowNewTenantDialog] = useState(false);
   const [newTenantSlug, setNewTenantSlug] = useState('');
   const [newTenantDisplay, setNewTenantDisplay] = useState('');
   const [addingTenant, setAddingTenant] = useState(false);
@@ -2313,33 +2569,46 @@ export function AuthenticationSection({
   const displayProjectId = project?.project_id ?? config.projectName ?? '';
   const displayVersion = project?.api_version ?? config.apiVersion ?? '';
 
-  const fetchProjectTenants = useDashboardCacheStore(s => s.fetchProjectTenants);
-  const invalidateProjectTenants = useDashboardCacheStore(s => s.invalidateProjectTenants);
-  const projectTenantsByProject = useDashboardCacheStore(s => s.projectTenantsByProject);
+  // Cache-store version (avoids redundant API calls — swap in if direct fetching gets expensive):
+  // const fetchProjectTenants = useDashboardCacheStore(s => s.fetchProjectTenants);
+  // const invalidateProjectTenants = useDashboardCacheStore(s => s.invalidateProjectTenants);
+  // const projectTenantsByProject = useDashboardCacheStore(s => s.projectTenantsByProject);
+  // const refreshTenants = async (selectSlug?: string) => {
+  //   if (!project) return;
+  //   invalidateProjectTenants(project.project_id, project.api_version);
+  //   await fetchProjectTenants(project.project_id, project.api_version);
+  //   const list = useDashboardCacheStore.getState().getProjectTenants(project.project_id, project.api_version);
+  //   if (selectSlug) { handleTenantChange(selectSlug); }
+  //   else if (!effectiveTenant && list.length > 0) { handleTenantChange(list[0].tenant_name); }
+  // };
+  // useEffect(() => {
+  //   const list = projectTenantsByProject[`${project?.project_id}:${project?.api_version}`];
+  //   if (list) setAttachedTenants(list);
+  // }, [project?.project_id, project?.api_version, projectTenantsByProject]);
+  // useEffect(() => {
+  //   if (!isEditMode || !project) return;
+  //   fetchProjectTenants(project.project_id, project.api_version);
+  // }, [isEditMode, project?.project_id, project?.api_version]);
 
-  const refreshTenants = async (selectSlug?: string) => {
+  const refreshTenants = (selectSlug?: string) => {
     if (!project) return;
-    invalidateProjectTenants(project.project_id, project.api_version);
-    await fetchProjectTenants(project.project_id, project.api_version);
-    // Read fresh from store — closure's projectTenantsByProject is stale after invalidate+fetch
-    const list = useDashboardCacheStore.getState().getProjectTenants(project.project_id, project.api_version);
-    if (selectSlug) {
-      handleTenantChange(selectSlug);
-    } else if (!effectiveTenant && list.length > 0) {
-      handleTenantChange(list[0].tenant_name);
-    }
+    api.listProjectTenants(project.project_id, project.api_version)
+      .then(r => {
+        const list = r.tenants ?? [];
+        setAttachedTenants(list);
+        if (selectSlug) {
+          handleTenantChange(selectSlug);
+        } else if (!effectiveTenant && list.length > 0) {
+          handleTenantChange(list[0].tenant_name);
+        }
+      })
+      .catch(() => {});
   };
 
-  // Sync attachedTenants from store
-  useEffect(() => {
-    const list = projectTenantsByProject[`${project?.project_id}:${project?.api_version}`];
-    if (list) setAttachedTenants(list);
-  }, [project?.project_id, project?.api_version, projectTenantsByProject]);
-
-  // Load project tenants when in edit mode
+  // Load project tenants when in edit mode (once per project)
   useEffect(() => {
     if (!isEditMode || !project) return;
-    fetchProjectTenants(project.project_id, project.api_version);
+    refreshTenants();
   }, [isEditMode, project?.project_id, project?.api_version]);
 
   // Load tenant auth config when selected tenant changes
@@ -2373,7 +2642,7 @@ export function AuthenticationSection({
         // Request failed — leave current config in place rather than resetting to defaults
       })
       .finally(() => setTenantAuthLoading(false));
-  }, [isEditMode, effectiveTenant, project?.project_id, project?.api_version]);
+  }, [isEditMode, effectiveTenant, project?.project_id, project?.api_version, updateConfig]);
 
   const handleAddTenant = async () => {
     const slug = newTenantSlug.trim().toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 32);
@@ -2443,6 +2712,52 @@ export function AuthenticationSection({
     });
   };
 
+  // Create mode with non-empty tenant: ensure config points at existing tenant so deploy doesn't create new auth
+  useEffect(() => {
+    if (isEditMode || !existingTenantAppClients?.length || !activeTenantObj) return;
+    const firstId = (existingTenantAppClients[0] as { id?: string; client_id?: string })?.id
+      ?? (existingTenantAppClients[0] as { id?: string; client_id?: string })?.client_id;
+    if (!firstId) return;
+    const need = !config.useAuthConfig || config.authConfigId !== activeTenantObj.tenant_name || !config.defaultAppClient;
+    if (need) {
+      updateConfig({
+        useAuthConfig: true,
+        authConfigId: activeTenantObj.tenant_name,
+        defaultAppClient: config.defaultAppClient || firstId,
+      });
+    }
+  }, [isEditMode, existingTenantAppClients, activeTenantObj, config.useAuthConfig, config.authConfigId, config.defaultAppClient, updateConfig]);
+
+  // Update-project + empty tenant: bootstrap auth settings like create-project fast funnel
+  useEffect(() => {
+    if (!isEditMode || !activeTenantObj || existingTenantAppClients?.length) return;
+    const shouldBootstrap =
+      (config.requestsAuthMode ?? 'passthrough') === 'passthrough' &&
+      !config.defaultAppClient;
+    if (!shouldBootstrap) return;
+    updateConfig({
+      requestsAuthMode: 'authenticate',
+      requestsAuthMethods: config.requestsAuthMethods ?? ['jwt'],
+      enableSocialAuth: true,
+      whoCanRegisterToLogin: config.whoCanRegisterToLogin ?? 'anyone',
+      bringOwnProvider: false,
+      socialProvider: 'github',
+      scopes: config.scopes ?? DEFAULT_SCOPES.github,
+      allowApiblazeJwt: true,
+      allowOtherJwt: true,
+    });
+  }, [
+    isEditMode,
+    activeTenantObj,
+    existingTenantAppClients,
+    config.requestsAuthMode,
+    config.requestsAuthMethods,
+    config.defaultAppClient,
+    config.whoCanRegisterToLogin,
+    config.scopes,
+    updateConfig,
+  ]);
+
   return (
     <div className="space-y-8">
       {/* ── Tenant scope banner ── */}
@@ -2497,7 +2812,7 @@ export function AuthenticationSection({
                 variant="outline"
                 size="sm"
                 className="h-8 shrink-0"
-                onClick={() => isEditMode ? setShowNewTenantDialog(true) : setShowAddTenant(true)}
+                onClick={() => setShowAddTenant(true)}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />New tenant
               </Button>
@@ -2583,6 +2898,15 @@ export function AuthenticationSection({
         {isEditMode && project && projectTeamId ? (() => {
           const tenantObj = attachedTenants.find(t => t.tenant_name === effectiveTenant);
           if (!tenantObj) return <p className="text-sm text-muted-foreground">Select a tenant above to manage its login page.</p>;
+          const isEmptyForEdit = !existingTenantAppClients || existingTenantAppClients.length === 0;
+          if (isEmptyForEdit) {
+            return (
+              <CreateModeLoginSetup
+                config={config}
+                updateConfig={updateConfig}
+              />
+            );
+          }
           return (
             <TenantDetail
               tenant={tenantObj}
@@ -2593,30 +2917,20 @@ export function AuthenticationSection({
               onProjectUpdate={onProjectUpdate}
             />
           );
-        })() : (
+        })() : (existingTenantAppClients && existingTenantAppClients.length > 0 && activeTenantObj && projectTeamId) ? (
+          <TenantDetail
+            tenant={activeTenantObj}
+            project={null}
+            config={config}
+            updateConfig={updateConfig}
+            teamId={projectTeamId}
+            onProjectUpdate={undefined}
+          />
+        ) : (
           <CreateModeLoginSetup config={config} updateConfig={updateConfig} />
         )}
       </div>
 
-      {/* New tenant setup dialog (edit mode) */}
-      {isEditMode && project && projectTeamId && (
-        <NewTenantSetupDialog
-          open={showNewTenantDialog}
-          onOpenChange={setShowNewTenantDialog}
-          teamId={projectTeamId}
-          project={project}
-          onSuccess={slug => refreshTenants(slug)}
-          onEnableJwt={() => {
-            const currentMethods = config.requestsAuthMethods ?? ['jwt'];
-            updateConfig({
-              requestsAuthMethods: currentMethods.includes('jwt') ? currentMethods : [...currentMethods, 'jwt'],
-              allowApiblazeJwt: true,
-              allowOtherJwt: true,
-              enableSocialAuth: true,
-            });
-          }}
-        />
-      )}
     </div>
   );
 }

@@ -559,10 +559,14 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         });
 
         // Check if we should use an existing AuthConfig
-        // IMPORTANT: Always use config.authConfigId from the current config state (which reflects UI changes)
-        // Do NOT use currentProject.config.auth_config_id as it may contain the old value
-        // During deployment, config.authConfigId should reflect the user's latest selection from the UI
-        const hasExistingAuthConfig = config.useAuthConfig && config.authConfigId;
+        // Only use "existing" when the tenant actually has app clients; empty tenants need creation
+        const sessionTeamId = session?.user?.id ? `team_${(session.user as { id?: string }).id}` : undefined;
+        const tenantAppClients =
+          sessionTeamId && config.authConfigId
+            ? getAppClientsForTenant(sessionTeamId, config.authConfigId)
+            : [];
+        const hasExistingAuthConfig =
+          config.useAuthConfig && config.authConfigId && tenantAppClients.length > 0;
         
         console.log('[CreateProject] 🔍 Checking existing AuthConfig:', {
           hasExistingAuthConfig,
@@ -594,7 +598,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
 
           // If no app client is selected, automatically pick the first one from the tenant (cache)
           if (!selectedAppClientId && selectedTenantName) {
-            const clientsArray = getAppClientsForTenant(sessionTeamId, selectedTenantName);
+            const clientsArray = tenantAppClients;
             if (clientsArray.length === 0) {
               toast({
                 title: 'Configuration Error',
@@ -673,7 +677,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
             // 2. Create AppClient under tenant
             const projectName = config.projectName || 'project';
             const apiVersion = config.apiVersion || '1.0.0';
-            const defaultCallbackUrl = `https://${projectName}-api.portal.apiblaze.com/${apiVersion}`;
+            const defaultCallbackUrl = `https://${projectName}-${tenantName}.portal.apiblaze.com/${apiVersion}`;
             const callbackUrls = config.authorizedCallbackUrls && config.authorizedCallbackUrls.length > 0
               ? config.authorizedCallbackUrls
               : [defaultCallbackUrl];
@@ -1098,7 +1102,10 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
         requests_auth,
         authorization: { enforce_authorization: config.enforceAuthorization },
       };
-      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
+      const effectiveTenant = selectedAuthTenant || config.defaultTenant || 'api';
+      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload, {
+        tenant: effectiveTenant,
+      });
       toast({ title: 'Config Saved', description: 'Project configuration has been updated successfully.' });
       const updatedConfig = { ...(currentProject.config as Record<string, unknown>), ...payload };
       const updatedProject = { ...currentProject, config: updatedConfig };
@@ -1114,7 +1121,7 @@ export function CreateProjectDialog({ open, onOpenChange, onSuccess, openToGitHu
     } finally {
       setIsSavingConfig(false);
     }
-  }, [currentProject, config, onProjectUpdate, toast]);
+  }, [currentProject, config, selectedAuthTenant, onProjectUpdate, toast]);
 
   const handleDelete = useCallback(async () => {
     if (!currentProject) return;

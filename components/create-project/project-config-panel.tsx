@@ -5,7 +5,7 @@ import { useSession } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Loader2, Rocket, ChevronRight, Save } from 'lucide-react';
 import { GeneralSection } from './general-section';
-import { AuthenticationSection } from './authentication-section';
+import { AuthenticationSection, type AppClientRaw } from './authentication-section';
 import { AuthorizationSection } from './authorization-section';
 import { TargetServersSection } from './target-servers-section';
 import { ThrottlingSection } from './throttling-section';
@@ -298,6 +298,7 @@ export function ProjectConfigPanel({
   const [projectNameCheckBlockDeploy, setProjectNameCheckBlockDeploy] = useState(false);
   const getAppClientsForTenant = useDashboardCacheStore((s) => s.getAppClientsForTenant);
   const updateProjectInCache = useDashboardCacheStore((s) => s.updateProjectInCache);
+  const invalidateAndRefetch = useDashboardCacheStore((s) => s.invalidateAndRefetch);
 
   useEffect(() => {
     setCurrentProject(project);
@@ -325,8 +326,52 @@ export function ProjectConfigPanel({
 
   const routesSectionProject = useMemo(
     () => currentProject ? { project_id: currentProject.project_id, api_version: currentProject.api_version } : null,
-    [currentProject?.project_id, currentProject?.api_version]
+    [currentProject]
   );
+
+  // Derived auth state for empty vs non-empty tenant
+  const [derivedAuth, setDerivedAuth] = useState<{
+    effectiveTeamId?: string;
+    activeAuthTenant: string;
+    authMode: 'create-empty' | 'create-existing' | 'update-empty' | 'update-existing';
+    existingTenantAppClients: ReturnType<typeof getAppClientsForTenant>;
+  }>({
+    effectiveTeamId: currentProject?.team_id,
+    activeAuthTenant: 'api',
+    authMode: 'create-empty',
+    existingTenantAppClients: [],
+  });
+  useEffect(() => {
+    const baseTeamId =
+      currentProject?.team_id ??
+      (session?.user?.id ? `team_${(session.user as { id?: string }).id}` : undefined);
+    const activeAuthTenant = selectedAuthTenant || config.defaultTenant || 'api';
+    const existingTenantAppClients =
+      baseTeamId && activeAuthTenant
+        ? getAppClientsForTenant(baseTeamId, activeAuthTenant)
+        : [];
+    const isEmptyTenant = existingTenantAppClients.length === 0;
+    const authMode: 'create-empty' | 'create-existing' | 'update-empty' | 'update-existing' =
+      !currentProject
+        ? isEmptyTenant
+          ? 'create-empty'
+          : 'create-existing'
+        : isEmptyTenant
+          ? 'update-empty'
+          : 'update-existing';
+    setDerivedAuth({
+      effectiveTeamId: baseTeamId,
+      activeAuthTenant,
+      authMode,
+      existingTenantAppClients,
+    });
+  }, [
+    currentProject,
+    config.defaultTenant,
+    selectedAuthTenant,
+    session?.user,
+    getAppClientsForTenant,
+  ]);
 
   const isSourceConfigured = () => {
     if (!config.projectName) return false;
@@ -427,7 +472,11 @@ export function ProjectConfigPanel({
       const needsAuthConfig = config.enableSocialAuth || authType === 'oauth';
 
       if (needsAuthConfig) {
-        const hasExistingAuthConfig = config.useAuthConfig && config.authConfigId;
+        // Only use "existing" when the tenant actually has app clients; empty tenants need creation
+        const tenantAppClients =
+          teamId && config.authConfigId ? getAppClientsForTenant(teamId, config.authConfigId) : [];
+        const hasExistingAuthConfig =
+          config.useAuthConfig && config.authConfigId && tenantAppClients.length > 0;
         if (hasExistingAuthConfig) {
           const selectedTenantName = config.authConfigId!;
           if (!teamId) {
@@ -440,7 +489,7 @@ export function ProjectConfigPanel({
 
           let selectedAppClientId = config.appClientId || config.defaultAppClient;
           if (!selectedAppClientId && selectedTenantName) {
-            const clientsArray = getAppClientsForTenant(teamId, selectedTenantName);
+            const clientsArray = tenantAppClients;
             if (clientsArray.length === 0) {
               toast({
                 title: 'Configuration Error',
@@ -701,9 +750,148 @@ export function ProjectConfigPanel({
     if (!currentProject) return;
     setIsSavingConfig(true);
     try {
-      const projectNameVal = config.projectName || '';
+      const projectNameVal = config.projectName || currentProject.project_id || '';
       const apiVersionVal = config.apiVersion || '1.0.0';
-      const appClientIdVal = config.defaultAppClient || (currentProject.config as Record<string, unknown>)?.default_app_client_id as string || '';
+      let appClientIdVal = config.defaultAppClient || (currentProject.config as Record<string, unknown>)?.default_app_client_id as string || '';
+
+      // When selected tenant has no app clients and user configured bring-your-own OAuth, create app client + provider first
+      const teamIdForAuth = derivedAuth.effectiveTeamId;
+      const hasProviders = config.providers && config.providers.length > 0;
+      const hasLegacyProvider = !!(config.identityProviderClientId && config.identityProviderClientSecret);
+      const shouldCreateBringOwn =
+        config.enableSocialAuth &&
+        config.bringOwnProvider &&
+        (!derivedAuth.existingTenantAppClients || derivedAuth.existingTenantAppClients.length === 0) &&
+        teamIdForAuth &&
+        (hasProviders || hasLegacyProvider);
+
+      if (shouldCreateBringOwn) {
+        try {
+          const tenantName = derivedAuth.activeAuthTenant;
+          const tenantDisplayName = tenantName === 'api' ? 'Default' : tenantName;
+          const tenantsRes = await api.getTeamTenants(teamIdForAuth, true);
+          const tenantsList = Array.isArray((tenantsRes as { tenants?: unknown }).tenants)
+            ? (tenantsRes as { tenants: Array<{ tenant_name?: string } | string> }).tenants
+            : [];
+          const hasTenant = tenantsList.some(
+            (t: { tenant_name?: string } | string) => (typeof t === 'string' ? t === tenantName : t?.tenant_name === tenantName)
+          );
+          if (!hasTenant) {
+            await api.createTeamTenant(teamIdForAuth, { tenant_name: tenantName, display_name: tenantDisplayName });
+          }
+          const subdomain = (projectNameVal || currentProject.project_id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const defaultCallbackUrl = `https://${subdomain}-${tenantName}.portal.apiblaze.com/${apiVersionVal}`;
+          const callbackUrls = config.authorizedCallbackUrls?.length ? config.authorizedCallbackUrls : [defaultCallbackUrl];
+          const finalCallbackUrls = callbackUrls.includes(defaultCallbackUrl)
+            ? [defaultCallbackUrl, ...callbackUrls.filter((u) => u !== defaultCallbackUrl)]
+            : [defaultCallbackUrl, ...callbackUrls];
+          const appClient = await api.createAppClientForTenant(teamIdForAuth, tenantName, {
+            name: `${projectNameVal || currentProject.project_id}-appclient`,
+            projectName: projectNameVal || currentProject.project_id,
+            apiVersion: apiVersionVal,
+            tenant: tenantName,
+            scopes: config.scopes,
+            authorizedCallbackUrls: finalCallbackUrls,
+          });
+          const newAppClientId = (appClient as { id?: string }).id ?? (appClient as { clientId?: string }).clientId;
+          if (!newAppClientId) {
+            toast({ title: 'Error', description: 'App client was created but no client ID returned.', variant: 'destructive' });
+            setIsSavingConfig(false);
+            return;
+          }
+          const DEFAULT_SCOPES: Record<SocialProvider, string[]> = {
+            google: ['email', 'openid', 'profile'],
+            github: ['read:user', 'user:email'],
+            microsoft: ['email', 'openid', 'profile'],
+            facebook: ['email', 'public_profile'],
+            auth0: ['openid', 'profile', 'email'],
+            other: ['openid', 'profile'],
+          };
+          const providersToAdd = config.providers?.length
+            ? config.providers
+            : config.identityProviderClientId && config.identityProviderClientSecret
+              ? [
+                  {
+                    type: config.socialProvider,
+                    clientId: config.identityProviderClientId,
+                    clientSecret: config.identityProviderClientSecret,
+                    domain: config.identityProviderDomain || undefined,
+                    tokenType: config.tokenType || 'apiblaze',
+                    targetServerToken: config.targetServerToken || 'apiblaze',
+                    includeApiblazeAccessTokenHeader: config.includeApiblazeAccessTokenHeader ?? false,
+                    includeApiblazeIdTokenHeader: config.includeApiblazeIdTokenHeader ?? false,
+                    scopes: config.scopes?.length ? config.scopes : DEFAULT_SCOPES[config.socialProvider],
+                  },
+                ]
+              : [];
+          for (const provider of providersToAdd) {
+            const providerScopes = provider.scopes?.length ? provider.scopes : DEFAULT_SCOPES[provider.type];
+            await api.addProviderByTenant(teamIdForAuth, tenantName, newAppClientId, {
+              type: provider.type,
+              clientId: provider.clientId ?? '',
+              clientSecret: provider.clientSecret ?? '',
+              scopes: providerScopes,
+              domain: provider.domain || undefined,
+              tokenType: ((provider as { tokenType?: string }).tokenType || config.tokenType || 'apiblaze') as 'apiblaze' | 'thirdParty',
+              targetServerToken: ((provider as { targetServerToken?: string }).targetServerToken || config.targetServerToken || 'apiblaze') as
+                | 'apiblaze'
+                | 'third_party_access_token'
+                | 'third_party_id_token'
+                | 'none',
+              includeApiblazeAccessTokenHeader:
+                (provider as { includeApiblazeAccessTokenHeader?: boolean }).includeApiblazeAccessTokenHeader ??
+                config.includeApiblazeAccessTokenHeader ??
+                false,
+              includeApiblazeIdTokenHeader:
+                (provider as { includeApiblazeIdTokenHeader?: boolean }).includeApiblazeIdTokenHeader ??
+                config.includeApiblazeIdTokenHeader ??
+                false,
+            });
+          }
+          appClientIdVal = newAppClientId;
+          updateConfig({ defaultAppClient: newAppClientId });
+          await invalidateAndRefetch(teamIdForAuth);
+        } catch (createError) {
+          toast({
+            title: 'Failed to Create Login Page',
+            description: createError instanceof Error ? createError.message : 'Failed to create app client and provider.',
+            variant: 'destructive',
+          });
+          setIsSavingConfig(false);
+          return;
+        }
+      }
+
+      // When selected tenant has no app clients and user configured APIBlaze GitHub, create app client + provider first
+      const shouldCreateAppClient =
+        config.enableSocialAuth &&
+        !config.bringOwnProvider &&
+        (!derivedAuth.existingTenantAppClients || derivedAuth.existingTenantAppClients.length === 0) &&
+        teamIdForAuth;
+
+      if (shouldCreateAppClient) {
+        try {
+          const result = await api.createAuthConfigWithDefaultGitHub({
+            teamId: teamIdForAuth,
+            tenantName: derivedAuth.activeAuthTenant,
+            appClientName: `${projectNameVal || currentProject.project_id}-appclient`,
+            projectName: projectNameVal || currentProject.project_id,
+            apiVersion: apiVersionVal,
+            scopes: config.scopes?.length ? config.scopes : undefined,
+          });
+          appClientIdVal = result.appClientId;
+          updateConfig({ defaultAppClient: result.appClientId });
+          await invalidateAndRefetch(teamIdForAuth);
+        } catch (createError) {
+          toast({
+            title: 'Failed to Create Login Page',
+            description: createError instanceof Error ? createError.message : 'Default GitHub credentials may not be configured. Deploy to create the login page.',
+            variant: 'destructive',
+          });
+          setIsSavingConfig(false);
+          return;
+        }
+      }
       const substitutePlaceholders = (s: string) =>
         s.replace(/\{projectName\}/g, projectNameVal).replace(/\{apiVersion\}/g, apiVersionVal).replace(/\{appClientId\}/g, appClientIdVal);
 
@@ -745,11 +933,13 @@ export function ProjectConfigPanel({
 
       const payload: Record<string, unknown> = {
         tenant: selectedAuthTenant || 'api',
-        default_app_client_id: config.defaultAppClient || null,
+        default_app_client_id: appClientIdVal || null,
         requests_auth,
         authorization: { enforce_authorization: config.enforceAuthorization },
       };
-      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload);
+      await updateProjectConfig(currentProject.project_id, currentProject.api_version, payload, {
+        tenant: derivedAuth.activeAuthTenant,
+      });
 
       // Save route config if any routes are present
       const routesToSave = routesRef.current?.length ? routesRef.current : (config.routeConfig?.routes ?? []);
@@ -774,7 +964,7 @@ export function ProjectConfigPanel({
     } finally {
       setIsSavingConfig(false);
     }
-  }, [currentProject, config, onProjectUpdate, toast, updateProjectInCache]);
+  }, [currentProject, config, derivedAuth, onProjectUpdate, toast, updateProjectInCache, updateConfig, invalidateAndRefetch]);
 
   const handleDelete = useCallback(async () => {
     if (!currentProject) return;
@@ -852,9 +1042,11 @@ export function ProjectConfigPanel({
                 setCurrentProject(updated);
                 onProjectUpdate?.(updated);
               }}
-              teamId={currentProject?.team_id ?? teamId}
+              teamId={currentProject?.team_id ?? derivedAuth.effectiveTeamId}
               selectedAuthTenant={selectedAuthTenant}
               onAuthTenantChange={setSelectedAuthTenant}
+              authMode={derivedAuth.authMode}
+              existingTenantAppClients={derivedAuth.existingTenantAppClients as AppClientRaw[]}
             />
           )}
           <div className={activeTab === 'authorization' ? '' : 'hidden'}>
