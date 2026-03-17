@@ -20,8 +20,10 @@ const POLICIES_API_TIMEOUT_MS = 10_000;
 // Throws on non-empty strings that contain invalid JSON so callers can return 400.
 function mapToPoliciesFormat(entry: {
   require_authentication?: boolean;
+  rule_mode?: 'check-write' | 'list';
   pre_request_auth_template?: string;
   post_response_policy_template?: string;
+  list_objects_template?: string;
   cache_rules?: string;
   priority?: number;
   authorization_enabled?: boolean;
@@ -44,8 +46,10 @@ function mapToPoliciesFormat(entry: {
   }
 
   return {
+    rule_mode: entry.rule_mode ?? 'check-write',
     on_request_read: parseTemplate(entry.pre_request_auth_template, 'pre_request_auth_template'),
     post_response_write: parseTemplate(entry.post_response_policy_template, 'post_response_policy_template'),
+    list_objects_read: parseConfig(entry.list_objects_template, 'list_objects_template'),
     authentication_config: { require_authentication: entry.require_authentication ?? true },
     cache_config: parseConfig(entry.cache_rules, 'cache_rules'),
     priority: entry.priority,
@@ -69,22 +73,29 @@ function buildPoliciesUrl(projectName: string, apiVersion: string, method: strin
 // Uses checkProjectName (admin-api) to verify the session user's team owns
 // the project before allowing writes to policies-api.
 //
-// ALTERNATIVE: if this adds too much latency, move the check into policies-api
-// itself (e.g. validate a signed JWT passed as a header) so the round-trip to
-// admin-api is eliminated. For now the extra hop is acceptable since route-config
-// writes are infrequent (only on Save, not per-request).
+// Cached for 30s per user+project to avoid N round-trips when saving many routes
+// in a single Save Config operation (delete-all + re-add pattern).
+const _ownershipCache = new Map<string, { result: { error: string; status: number } | null; expiry: number }>();
+
 async function verifyOwnership(projectName: string, apiVersion: string): Promise<{ error: string; status: number } | null> {
   try {
     const userClaims = await getUserClaims();
+    const cacheKey = `${userClaims.sub ?? ''}:${projectName}:${apiVersion}`;
+    const cached = _ownershipCache.get(cacheKey);
+    if (cached && cached.expiry > Date.now()) return cached.result;
+
     const client = createAPIBlazeClient({
       apiKey: process.env.INTERNAL_API_KEY || '',
       jwtPrivateKey: process.env.JWT_PRIVATE_KEY,
     });
     const ownership = await client.checkProjectName(userClaims, projectName, apiVersion);
-    if (!ownership.project_id) return { error: 'Project not found', status: 404 };
+    let result: { error: string; status: number } | null = null;
+    if (!ownership.project_id) result = { error: 'Project not found', status: 404 };
     // api_version is null when another team owns this project name
-    if (!ownership.api_version) return { error: 'Forbidden', status: 403 };
-    return null;
+    else if (!ownership.api_version) result = { error: 'Forbidden', status: 403 };
+
+    _ownershipCache.set(cacheKey, { result, expiry: Date.now() + 30_000 });
+    return result;
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unauthorized';
     if (msg.includes('Unauthorized') || msg.includes('no session')) return { error: 'Unauthorized', status: 401 };

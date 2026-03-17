@@ -52,8 +52,10 @@ function extractOperationsFromSpec(spec: Record<string, unknown>): RouteEntry[] 
         description: (operation.summary ?? operation.description ?? '') as string,
         require_authentication: true,
         authorization_enabled: false,
+        rule_mode: 'check-write',
         pre_request_auth_template: '',
         post_response_policy_template: '',
+        list_objects_template: '',
         cache_rules: '',
       });
     }
@@ -210,7 +212,8 @@ export const RoutesTable = forwardRef<RoutesTableRef, RoutesTableProps>(
                   const isSelected = selectedKey === key;
                   const hasCheck = (entry.pre_request_auth_template?.trim() ?? '') !== '';
                   const hasWrite = (entry.post_response_policy_template?.trim() ?? '') !== '';
-                  const hasRules = hasCheck || hasWrite;
+                  const hasList = (entry.list_objects_template?.trim() ?? '') !== '';
+                  const hasRules = hasCheck || hasWrite || hasList;
                   const willDeny = enforceAuthorization && entry.authorization_enabled && !hasRules;
                   const methodBorderClass = isSelected ? {
                     GET: 'border-l-green-500 bg-green-500/10 hover:bg-green-500/15',
@@ -301,25 +304,64 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization, 
   const objectType = modelTypes?.[0] ?? 'resource';
   const [preReqError, setPreReqError] = useState(false);
   const [postRespError, setPostRespError] = useState(false);
+  const [listError, setListError] = useState(false);
   const [cacheError, setCacheError] = useState(false);
 
-  const [localPreReq, setLocalPreReq] = useState(entry.pre_request_auth_template);
+  const initialMode: 'check-write' | 'list' = entry.rule_mode ?? ((entry.list_objects_template ?? '').trim() ? 'list' : 'check-write');
+  const [ruleMode, setRuleMode] = useState<'check-write' | 'list'>(initialMode);
+  // Independent buffers per mode — switching modes doesn't wipe the other mode's data
+  const [localCheckWritePreReq, setLocalCheckWritePreReq] = useState(initialMode === 'check-write' ? entry.pre_request_auth_template : '');
+  const [localListPreReq, setLocalListPreReq] = useState(initialMode === 'list' ? entry.pre_request_auth_template : '');
   const [localPostResp, setLocalPostResp] = useState(entry.post_response_policy_template);
+  const [localList, setLocalList] = useState(entry.list_objects_template ?? '');
+  const [showListPreCheck, setShowListPreCheck] = useState((entry.pre_request_auth_template?.trim() ?? '') !== '');
   const [localCache, setLocalCache] = useState(entry.cache_rules);
   const [localAuth, setLocalAuth] = useState(entry.require_authentication);
   const [localAuthzEnabled, setLocalAuthzEnabled] = useState(entry.authorization_enabled);
   const [localPriority, setLocalPriority] = useState<number | undefined>(entry.priority ?? undefined);
 
   // Sync local state when entry data changes due to async loads (spec then routes).
-  // Safe: entry only changes from data loads, not from updateRouteInRef user edits.
   useEffect(() => {
-    setLocalPreReq(entry.pre_request_auth_template);
+    const newMode: 'check-write' | 'list' = entry.rule_mode ?? ((entry.list_objects_template ?? '').trim() ? 'list' : 'check-write');
+    setRuleMode(newMode);
+    if (newMode === 'list') {
+      setLocalListPreReq(entry.pre_request_auth_template);
+      setLocalCheckWritePreReq('');
+      setShowListPreCheck((entry.pre_request_auth_template?.trim() ?? '') !== '');
+    } else {
+      setLocalCheckWritePreReq(entry.pre_request_auth_template);
+      setLocalListPreReq('');
+      setShowListPreCheck(false);
+    }
     setLocalPostResp(entry.post_response_policy_template);
+    setLocalList(entry.list_objects_template ?? '');
     setLocalCache(entry.cache_rules);
     setLocalAuth(entry.require_authentication);
     setLocalAuthzEnabled(entry.authorization_enabled);
     setLocalPriority(entry.priority ?? undefined);
   }, [entry]);
+
+  const handleModeSwitch = (mode: 'check-write' | 'list') => {
+    setRuleMode(mode);
+    if (mode === 'list') {
+      setLocalPostResp('');
+      setShowListPreCheck(localListPreReq.trim() !== '');
+      updateRouteInRef(entry.path, entry.method, {
+        rule_mode: 'list',
+        post_response_policy_template: '',
+        pre_request_auth_template: localListPreReq,
+        list_objects_template: localList,
+      });
+    } else {
+      // Keep localList in memory so switching back restores the template
+      setShowListPreCheck(false);
+      updateRouteInRef(entry.path, entry.method, {
+        rule_mode: 'check-write',
+        list_objects_template: '',
+        pre_request_auth_template: localCheckWritePreReq,
+      });
+    }
+  };
 
   const handleJsonBlur = (
     value: string,
@@ -424,7 +466,7 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization, 
       </div>
 
       {/* Warning: Protected Route on but no check rule */}
-      {enforceAuthorization && localAuthzEnabled && !localPreReq.trim() && !localPostResp.trim() && !readOnly && (
+      {enforceAuthorization && localAuthzEnabled && !localCheckWritePreReq.trim() && !localPostResp.trim() && ruleMode === 'check-write' && !readOnly && (
         <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/30 px-3.5 py-2.5 text-sm text-amber-800 dark:text-amber-300">
           <TriangleAlert className="w-4 h-4 shrink-0 mt-0.5" />
           <span>
@@ -434,96 +476,228 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization, 
         </div>
       )}
 
-      {/* Policy templates side-by-side */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="w-1 h-4 rounded-full bg-blue-500 shrink-0" />
-            <Label className="text-sm font-medium">
-              Check Rule
-              <span className="ml-1.5 font-normal text-muted-foreground text-xs">runs before request — blocks if denied</span>
-            </Label>
-          </div>
-          {!readOnly && modelRelations && modelRelations.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-muted-foreground">Quick insert:</span>
-              {modelRelations.slice(0, 4).map((relation) => (
-                <button
-                  key={relation}
-                  type="button"
-                  onClick={() => {
-                    const tpl = JSON.stringify([{ user: 'user:{{JWT.sub}}', relation, object: `${objectType}:{{PATH.id}}` }], null, 2);
-                    setLocalPreReq(tpl);
-                    updateRouteInRef(entry.path, entry.method, { pre_request_auth_template: tpl });
-                  }}
-                  className="text-xs px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
-                >
-                  {relation}
-                </button>
-              ))}
-            </div>
-          )}
-          {readOnly ? (
-            <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[120px]">
-              {entry.pre_request_auth_template || '—'}
-            </pre>
-          ) : (
-            <Textarea
-              value={localPreReq}
-              onChange={(e) => setLocalPreReq(e.target.value)}
-              onBlur={(e) => handleJsonBlur(e.target.value, 'pre_request_auth_template', setPreReqError)}
-              className={cn('font-mono text-xs', preReqError && 'border-red-500')}
-              placeholder={'[\n  {\n    "user": "user:{{JWT.sub}}",\n    "relation": "viewer",\n    "object": "reservation:{{PATH.id}}"\n  }\n]'}
-              rows={8}
-            />
-          )}
-          {preReqError && <p className="text-xs text-red-500">Invalid JSON</p>}
+      {/* Mode switch: Check/Write vs List */}
+      {!readOnly && (
+        <div className="flex items-center gap-1 p-1 rounded-lg border bg-muted/30 w-fit">
+          <button
+            type="button"
+            onClick={() => handleModeSwitch('check-write')}
+            className={cn(
+              'px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+              ruleMode === 'check-write'
+                ? 'bg-background shadow-sm text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Check / Write
+          </button>
+          <button
+            type="button"
+            onClick={() => handleModeSwitch('list')}
+            className={cn(
+              'px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+              ruleMode === 'list'
+                ? 'bg-background shadow-sm text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            List Objects
+          </button>
         </div>
+      )}
 
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="w-1 h-4 rounded-full bg-violet-500 shrink-0" />
-            <Label className="text-sm font-medium">
-              Write Rule
-              <span className="ml-1.5 font-normal text-muted-foreground text-xs">runs after success — records who owns what</span>
-            </Label>
+      {/* Check / Write mode */}
+      {ruleMode === 'check-write' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-1 h-4 rounded-full bg-blue-500 shrink-0" />
+              <Label className="text-sm font-medium">
+                Check Rule
+                <span className="ml-1.5 font-normal text-muted-foreground text-xs">runs before request — blocks if denied</span>
+              </Label>
+            </div>
+            {!readOnly && modelRelations && modelRelations.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs text-muted-foreground">Quick insert:</span>
+                {modelRelations.slice(0, 4).map((relation) => (
+                  <button
+                    key={relation}
+                    type="button"
+                    onClick={() => {
+                      const tpl = JSON.stringify([{ user: 'user:{{JWT.sub}}', relation, object: `${objectType}:{{PATH.id}}` }], null, 2);
+                      setLocalCheckWritePreReq(tpl);
+                      updateRouteInRef(entry.path, entry.method, { pre_request_auth_template: tpl });
+                    }}
+                    className="text-xs px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                  >
+                    {relation}
+                  </button>
+                ))}
+              </div>
+            )}
+            {readOnly ? (
+              <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[120px]">
+                {entry.pre_request_auth_template || '—'}
+              </pre>
+            ) : (
+              <Textarea
+                value={localCheckWritePreReq}
+                onChange={(e) => { setLocalCheckWritePreReq(e.target.value); updateRouteInRef(entry.path, entry.method, { pre_request_auth_template: e.target.value }); }}
+                onBlur={(e) => {
+                  const valid = isValidJson(e.target.value);
+                  setPreReqError(!valid);
+                  if (valid) updateRouteInRef(entry.path, entry.method, { pre_request_auth_template: e.target.value });
+                }}
+                className={cn('font-mono text-xs', preReqError && 'border-red-500')}
+                placeholder={'[\n  {\n    "user": "user:{{JWT.sub}}",\n    "relation": "viewer",\n    "object": "reservation:{{PATH.id}}"\n  }\n]'}
+                rows={8}
+              />
+            )}
+            {preReqError && <p className="text-xs text-red-500">Invalid JSON</p>}
           </div>
-          {!readOnly && modelRelations && modelRelations.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-muted-foreground">Quick insert:</span>
-              {modelRelations.slice(0, 4).map((relation) => (
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-1 h-4 rounded-full bg-violet-500 shrink-0" />
+              <Label className="text-sm font-medium">
+                Write Rule
+                <span className="ml-1.5 font-normal text-muted-foreground text-xs">runs after success — records who owns what</span>
+              </Label>
+            </div>
+            {!readOnly && modelRelations && modelRelations.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs text-muted-foreground">Quick insert:</span>
+                {modelRelations.slice(0, 4).map((relation) => (
+                  <button
+                    key={relation}
+                    type="button"
+                    onClick={() => {
+                      const tpl = JSON.stringify([{ user: 'user:{{JWT.sub}}', relation, object: `${objectType}:{{RESPONSE.id}}` }], null, 2);
+                      setLocalPostResp(tpl);
+                      updateRouteInRef(entry.path, entry.method, { post_response_policy_template: tpl });
+                    }}
+                    className="text-xs px-2 py-0.5 rounded border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors"
+                  >
+                    {relation}
+                  </button>
+                ))}
+              </div>
+            )}
+            {readOnly ? (
+              <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[120px]">
+                {entry.post_response_policy_template || '—'}
+              </pre>
+            ) : (
+              <Textarea
+                value={localPostResp}
+                onChange={(e) => { setLocalPostResp(e.target.value); updateRouteInRef(entry.path, entry.method, { post_response_policy_template: e.target.value }); }}
+                onBlur={(e) => {
+                  const valid = isValidJson(e.target.value);
+                  setPostRespError(!valid);
+                  if (valid) updateRouteInRef(entry.path, entry.method, { post_response_policy_template: e.target.value });
+                }}
+                className={cn('font-mono text-xs', postRespError && 'border-red-500')}
+                placeholder={'[\n  {\n    "user": "user:{{JWT.sub}}",\n    "relation": "owner",\n    "object": "reservation:{{RESPONSE.id}}"\n  }\n]'}
+                rows={8}
+              />
+            )}
+            {postRespError && <p className="text-xs text-red-500">Invalid JSON</p>}
+          </div>
+        </div>
+      )}
+
+      {/* List Objects mode */}
+      {ruleMode === 'list' && (
+        <div className="space-y-4">
+          {/* Optional pre-check gate */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-1 h-4 rounded-full bg-blue-500 shrink-0" />
+                <Label className="text-sm font-medium">
+                  Pre-check Gate
+                  <span className="ml-1.5 font-normal text-muted-foreground text-xs">optional — blocks the list if denied</span>
+                </Label>
+              </div>
+              {!readOnly && (
                 <button
-                  key={relation}
                   type="button"
                   onClick={() => {
-                    const tpl = JSON.stringify([{ user: 'user:{{JWT.sub}}', relation, object: `${objectType}:{{RESPONSE.id}}` }], null, 2);
-                    setLocalPostResp(tpl);
-                    updateRouteInRef(entry.path, entry.method, { post_response_policy_template: tpl });
+                    const next = !showListPreCheck;
+                    setShowListPreCheck(next);
+                    if (!next) {
+                      setLocalListPreReq('');
+                      updateRouteInRef(entry.path, entry.method, { pre_request_auth_template: '' });
+                    }
                   }}
-                  className="text-xs px-2 py-0.5 rounded border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors"
+                  className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
                 >
-                  {relation}
+                  {showListPreCheck ? 'Remove' : 'Add'}
                 </button>
-              ))}
+              )}
             </div>
-          )}
-          {readOnly ? (
-            <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[120px]">
-              {entry.post_response_policy_template || '—'}
-            </pre>
-          ) : (
-            <Textarea
-              value={localPostResp}
-              onChange={(e) => setLocalPostResp(e.target.value)}
-              onBlur={(e) => handleJsonBlur(e.target.value, 'post_response_policy_template', setPostRespError)}
-              className={cn('font-mono text-xs', postRespError && 'border-red-500')}
-              placeholder={'[\n  {\n    "user": "user:{{JWT.sub}}",\n    "relation": "owner",\n    "object": "reservation:{{RESPONSE.id}}"\n  }\n]'}
-              rows={8}
-            />
-          )}
-          {postRespError && <p className="text-xs text-red-500">Invalid JSON</p>}
+            {showListPreCheck && (
+              <>
+                {readOnly ? (
+                  <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[80px]">
+                    {entry.pre_request_auth_template || '—'}
+                  </pre>
+                ) : (
+                  <Textarea
+                    value={localListPreReq}
+                    onChange={(e) => {
+                      setLocalListPreReq(e.target.value);
+                      updateRouteInRef(entry.path, entry.method, { pre_request_auth_template: e.target.value });
+                    }}
+                    onBlur={(e) => {
+                      const valid = isValidJson(e.target.value);
+                      setPreReqError(!valid);
+                    }}
+                    className={cn('font-mono text-xs', preReqError && 'border-red-500')}
+                    placeholder={'[\n  {\n    "user": "user:{{JWT.sub}}",\n    "relation": "viewer",\n    "object": "resource:{{PATH.id}}"\n  }\n]'}
+                    rows={8}
+                  />
+                )}
+                {preReqError && <p className="text-xs text-red-500">Invalid JSON</p>}
+              </>
+            )}
+          </div>
+
+          {/* List objects config */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-1 h-4 rounded-full bg-emerald-500 shrink-0" />
+              <Label className="text-sm font-medium">
+                List Objects Rule
+                <span className="ml-1.5 font-normal text-muted-foreground text-xs">returns all objects the user can access</span>
+              </Label>
+            </div>
+            {readOnly ? (
+              <pre className="font-mono text-xs whitespace-pre-wrap break-words p-3 rounded border bg-muted/30 min-h-[120px]">
+                {entry.list_objects_template || '—'}
+              </pre>
+            ) : (
+              <Textarea
+                value={localList}
+                onChange={(e) => {
+                  setLocalList(e.target.value);
+                  // Always keep ref in sync so save captures the latest value even without blur
+                  updateRouteInRef(entry.path, entry.method, { list_objects_template: e.target.value });
+                }}
+                onBlur={(e) => {
+                  const valid = isValidJson(e.target.value);
+                  setListError(!valid);
+                }}
+                className={cn('font-mono text-xs', listError && 'border-red-500')}
+                placeholder={'{\n  "user": "user:{{JWT.sub}}",\n  "relation": "viewer",\n  "type": "document"\n}'}
+                rows={8}
+              />
+            )}
+            {listError && <p className="text-xs text-red-500">Invalid JSON</p>}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Variable reference */}
       {!readOnly && (
@@ -559,7 +733,10 @@ function RouteDetail({ entry, updateRouteInRef, readOnly, enforceAuthorization, 
         ) : (
           <Textarea
             value={localCache}
-            onChange={(e) => setLocalCache(e.target.value)}
+            onChange={(e) => {
+              setLocalCache(e.target.value);
+              updateRouteInRef(entry.path, entry.method, { cache_rules: e.target.value });
+            }}
             onBlur={(e) => handleJsonBlur(e.target.value, 'cache_rules', setCacheError)}
             className={cn('font-mono text-xs', cacheError && 'border-red-500')}
             placeholder=""

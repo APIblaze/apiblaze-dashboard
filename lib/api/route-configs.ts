@@ -4,8 +4,10 @@ export interface RouteEntry {
   description: string;
   require_authentication: boolean;
   authorization_enabled: boolean;
+  rule_mode?: 'check-write' | 'list';
   pre_request_auth_template: string;
   post_response_policy_template: string;
+  list_objects_template: string;
   cache_rules: string;
   priority?: number;
 }
@@ -29,6 +31,8 @@ export function getRoutesWithConfig(routes: RouteEntry[]): RouteEntry[] {
       r.authorization_enabled === true ||
       (r.pre_request_auth_template?.trim() ?? '').length > 0 ||
       (r.post_response_policy_template?.trim() ?? '').length > 0 ||
+      (r.list_objects_template?.trim() ?? '').length > 0 ||
+      r.rule_mode === 'list' ||
       hasCacheConfig ||
       r.priority !== undefined
     );
@@ -61,12 +65,29 @@ export async function getRouteConfig(
   return data as RouteConfig;
 }
 
+function isValidJsonOrEmpty(s: string | undefined): boolean {
+  if (!s?.trim()) return true;
+  try { JSON.parse(s); return true; } catch { return false; }
+}
+
 export async function putRouteConfig(
   projectId: string,
   apiVersion: string,
   routes: RouteEntry[]
 ): Promise<RouteConfig> {
   const toSave = getRoutesWithConfig(routes);
+
+  // Validate all templates before making any API calls
+  for (const r of toSave) {
+    if (!isValidJsonOrEmpty(r.pre_request_auth_template))
+      throw new Error(`Invalid JSON in Check Rule for ${r.method} ${r.path}`);
+    if (!isValidJsonOrEmpty(r.post_response_policy_template))
+      throw new Error(`Invalid JSON in Write Rule for ${r.method} ${r.path}`);
+    if (!isValidJsonOrEmpty(r.list_objects_template))
+      throw new Error(`Invalid JSON in List Objects Rule for ${r.method} ${r.path}`);
+    if (!isValidJsonOrEmpty(r.cache_rules))
+      throw new Error(`Invalid JSON in Cache Rules for ${r.method} ${r.path}`);
+  }
   const toSaveKeys = new Set(toSave.map((r) => `${r.method}:${r.path}`));
 
   // Delete routes that were cleared (in the full list but have no config now)

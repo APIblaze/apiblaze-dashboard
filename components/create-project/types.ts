@@ -27,8 +27,10 @@ export interface RouteEntry {
   description: string;
   require_authentication: boolean;
   authorization_enabled: boolean;
+  rule_mode?: 'check-write' | 'list';
   pre_request_auth_template: string;
   post_response_policy_template: string;
+  list_objects_template: string;
   cache_rules: string;
   priority?: number;
 }

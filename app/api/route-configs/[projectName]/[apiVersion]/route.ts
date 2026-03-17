@@ -25,6 +25,7 @@ function mapFromPoliciesFormat(route: Record<string, unknown>) {
   const onRead = Array.isArray(route.on_request_read) ? route.on_request_read : [];
   const postWrite = Array.isArray(route.post_response_write) ? route.post_response_write : [];
   const authCfg = route.authentication_config as Record<string, unknown> | null | undefined;
+  const ruleMode: 'check-write' | 'list' = route.rule_mode === 'list' ? 'list' : 'check-write';
 
   return {
     path: route.resource as string,
@@ -34,8 +35,10 @@ function mapFromPoliciesFormat(route: Record<string, unknown>) {
       ? Boolean(authCfg.require_authentication)
       : true,
     authorization_enabled: route.authorization_enabled === true || route.authorization_enabled === 1,
-    pre_request_auth_template: onRead.length > 0 ? JSON.stringify(onRead[0]) : '',
-    post_response_policy_template: postWrite.length > 0 ? JSON.stringify(postWrite[0]) : '',
+    rule_mode: ruleMode,
+    pre_request_auth_template: onRead.length > 0 ? JSON.stringify(onRead, null, 2) : '',
+    post_response_policy_template: postWrite.length > 0 ? JSON.stringify(postWrite, null, 2) : '',
+    list_objects_template: route.list_objects_read ? JSON.stringify(route.list_objects_read, null, 2) : '',
     cache_rules: route.cache_config ? JSON.stringify(route.cache_config) : '',
     priority: typeof route.priority === 'number' ? route.priority : undefined,
   };
